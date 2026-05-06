@@ -1,0 +1,34 @@
+# Normaliza line endings: el repo siempre tiene LF (independiente de la
+# plataforma del developer). Git convierte a CRLF en checkout en Windows
+# si core.autocrlf=true, pero el repo mantiene LF — evita diffs ruidosos
+# entre developers en Windows / macOS / Linux.
+* text=auto eol=lf
+
+# Forzar LF en archivos donde tools sensibles (scripts, configs) lo
+# necesitan explícitamente.
+*.sh        text eol=lf
+*.svelte    text eol=lf
+*.ts        text eol=lf
+*.js        text eol=lf
+*.css       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+
+# Binarios — no tocar EOL ni hacer diff de texto.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.mp3       binary
+*.flac      binary
+*.wav       binary
+*.mp4       binary
+*.webm      binary
