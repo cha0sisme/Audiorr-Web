@@ -7,6 +7,7 @@
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
   import UserMenu from '$components/shell/UserMenu.svelte';
+  import BrandWord from '$components/shell/BrandWord.svelte';
 
   /** Categorías de navegación. Cada ruta cae en una; cada nav item declara
       la suya. Un solo highlight a la vez sin ambigüedad. */
@@ -163,6 +164,7 @@
     <a href="/" class="brand-icon" aria-label="Audiorr — Inicio">
       <Logo size={32} />
     </a>
+    <BrandWord />
   </div>
 
   <div class="search" class:active={page.url.pathname === '/search'}>
@@ -250,14 +252,20 @@
     scrollbar-width: thin;
   }
 
-  /* === Logo: solo icon, sin efectos de interacción.
-     Click target = el icono mismo (32×32). === */
+  /* === Logo + BrandWord: icono fijo a la izquierda; el word entra/sale
+     con animation. min-height locka la altura de la fila para que no
+     "salte" cuando BrandWord aparece/desaparece. === */
   .brand-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     padding: 0 var(--space-2);
+    min-height: 32px;
   }
   .brand-icon {
-    display: inline-block;
+    display: inline-flex;
     line-height: 0;
+    flex-shrink: 0;
   }
 
   /* === Search button (Raycast/Linear-style con kbd hint) === */
