@@ -1,0 +1,719 @@
+/* ============================================================================
+   AUDIORR WEB — DESIGN SYSTEM
+   File: primitives.css
+   Layer: 1 of 2 (Primitive Tokens)
+   ----------------------------------------------------------------------------
+   Estos son los tokens crudos del sistema. Escalas perceptualmente uniformes
+   en OKLCH con fallback hex y soporte para wide-gamut P3 displays.
+   
+   REGLA DE ORO: Los componentes NUNCA consumen estos tokens directamente.
+   Solo se referencian desde semantic.css, donde ganan significado funcional.
+   
+   Ejemplo CORRECTO en un componente:
+     background: var(--bg-surface);
+   
+   Ejemplo INCORRECTO en un componente:
+     background: var(--gray-2);
+   
+   ----------------------------------------------------------------------------
+   Estructura de las escalas (filosofía Radix):
+     1  → App background
+     2  → Subtle background
+     3  → UI element background
+     4  → Hovered UI element background
+     5  → Active / Selected UI element background
+     6  → Subtle borders, separators
+     7  → UI element border, focused
+     8  → Hovered UI element border
+     9  → Solid backgrounds (brand, indicator)
+     10 → Hovered solid backgrounds
+     11 → Low-contrast text
+     12 → High-contrast text
+   
+   Las variantes -aN son las mismas pero con alpha (para superponer sobre
+   contenido variable como album art).
+   ============================================================================ */
+
+
+/* ----------------------------------------------------------------------------
+   DARK THEME — Default
+   `:root` se incluye aquí para que dark sea el tema por defecto cuando NO
+   hay clase aplicada. El bloque `.light-theme` más abajo lo override por
+   ser declarado después (misma specificity, source order gana).
+   ---------------------------------------------------------------------------- */
+
+:root,
+.dark,
+.dark-theme {
+  /* Background base */
+  --color-background: #111;
+
+  /* === BLUE (Brand / Accent) === */
+  --blue-1: #08121c;
+  --blue-2: #0e1925;
+  --blue-3: #092945;
+  --blue-4: #003360;
+  --blue-5: #004072;
+  --blue-6: #0d4e83;
+  --blue-7: #1a5f9a;
+  --blue-8: #2073b9;
+  --blue-9: #0097fe;
+  --blue-10: #008af0;
+  --blue-11: #6ebaff;
+  --blue-12: #c7e4ff;
+
+  --blue-a1: #0027fb0c;
+  --blue-a2: #006ef916;
+  --blue-a3: #007ffe38;
+  --blue-a4: #0077ff55;
+  --blue-a5: #0085ff68;
+  --blue-a6: #0990fd7b;
+  --blue-a7: #2199ff93;
+  --blue-a8: #269cffb4;
+  --blue-a9: #0098fffe;
+  --blue-a10: #0092ffef;
+  --blue-a11: #6ebaff;
+  --blue-a12: #c7e4ff;
+
+  --blue-contrast: #fff;
+  --blue-surface: #0c213980;
+  --blue-indicator: #0097fe;
+  --blue-track: #0097fe;
+
+  /* === GRAY (Neutrals con tinte azul) === */
+  --gray-1: #0a121a;
+  --gray-2: #121a22;
+  --gray-3: #172430;
+  --gray-4: #1b2b3b;
+  --gray-5: #1f3245;
+  --gray-6: #243b53;
+  --gray-7: #2c4a67;
+  --gray-8: #446383;
+  --gray-9: #517191;
+  --gray-10: #5e7fa0;
+  --gray-11: #9ab7d5;
+  --gray-12: #e7eff8;
+
+  --gray-a1: #002bf70a;
+  --gray-a2: #1f8af613;
+  --gray-a3: #3ea0fa22;
+  --gray-a4: #4aa5ff2d;
+  --gray-a5: #51a8fe38;
+  --gray-a6: #56a8ff47;
+  --gray-a7: #5baefd5d;
+  --gray-a8: #7bbbfd7b;
+  --gray-a9: #87c2fe8a;
+  --gray-a10: #90c7fe9a;
+  --gray-a11: #b7dbffd2;
+  --gray-a12: #eef6fff8;
+
+  --gray-contrast: #ffffff;
+  --gray-surface: rgba(0, 0, 0, 0.05);
+  --gray-indicator: #517191;
+  --gray-track: #517191;
+
+  /* === GREEN (Success / Playback) === */
+  --green-1: #0e1512;
+  --green-2: #121b17;
+  --green-3: #132d21;
+  --green-4: #113b29;
+  --green-5: #174933;
+  --green-6: #20573e;
+  --green-7: #28684a;
+  --green-8: #2f7c57;
+  --green-9: #30a46c;
+  --green-10: #33b074;
+  --green-11: #3dd68c;
+  --green-12: #b1f1cb;
+  --green-contrast: #fff;
+
+  /* === RED (Danger) === */
+  --red-1: #191111;
+  --red-2: #201314;
+  --red-3: #3b1219;
+  --red-4: #500f1c;
+  --red-5: #611623;
+  --red-6: #72232d;
+  --red-7: #8c333a;
+  --red-8: #b54548;
+  --red-9: #e5484d;
+  --red-10: #ec5d5e;
+  --red-11: #ff9592;
+  --red-12: #ffd1d9;
+  --red-contrast: #fff;
+
+  /* === AMBER (Warning) === */
+  --amber-1: #16120c;
+  --amber-2: #1d180f;
+  --amber-3: #302008;
+  --amber-4: #3f2700;
+  --amber-5: #4d3000;
+  --amber-6: #5c3d05;
+  --amber-7: #714f19;
+  --amber-8: #8f6424;
+  --amber-9: #ffb224;
+  --amber-10: #ffcb47;
+  --amber-11: #f1a10d;
+  --amber-12: #fef3dd;
+  --amber-contrast: #16120c;
+
+  /* === SHADOW COLORS (dark theme) ===
+     En dark, las shadows son más opacas porque oscurecen sobre un
+     fondo ya oscuro y necesitan más "peso" para ser visibles.
+     El highlight del glass es blanco con alpha bajo. */
+  --shadow-color-xs: rgb(0 0 0 / 0.18);
+  --shadow-color-sm: rgb(0 0 0 / 0.24);
+  --shadow-color-md: rgb(0 0 0 / 0.32);
+  --shadow-color-lg: rgb(0 0 0 / 0.40);
+  --shadow-color-xl: rgb(0 0 0 / 0.50);
+  --shadow-color-2xl: rgb(0 0 0 / 0.60);
+
+  --shadow-highlight: rgb(255 255 255 / 0.12);
+  --shadow-highlight-strong: rgb(255 255 255 / 0.18);
+}
+
+
+/* P3 wide-gamut overrides — Dark */
+@supports (color: color(display-p3 1 1 1)) {
+  @media (color-gamut: p3) {
+    .dark,
+    .dark-theme {
+      /* Blue */
+      --blue-1: oklch(17.8% 0.0247 249.3);
+      --blue-2: oklch(21% 0.0282 249.3);
+      --blue-3: oklch(27.3% 0.0641 249.3);
+      --blue-4: oklch(31.6% 0.0959 249.3);
+      --blue-5: oklch(36.4% 0.1038 249.3);
+      --blue-6: oklch(41.6% 0.1078 249.3);
+      --blue-7: oklch(47.5% 0.1162 249.3);
+      --blue-8: oklch(54.2% 0.134 249.3);
+      --blue-9: oklch(66.4% 0.1845 249.3);
+      --blue-10: oklch(62.5% 0.1845 249.3);
+      --blue-11: oklch(76.9% 0.1304 249.3);
+      --blue-12: oklch(90.7% 0.0506 249.3);
+
+      --blue-a1: color(display-p3 0 0.1608 0.9804 / 0.043);
+      --blue-a2: color(display-p3 0.0196 0.4588 1 / 0.08);
+      --blue-a3: color(display-p3 0.0863 0.498 0.9961 / 0.211);
+      --blue-a4: color(display-p3 0.0784 0.4706 0.9961 / 0.32);
+      --blue-a5: color(display-p3 0.1373 0.5294 1 / 0.391);
+      --blue-a6: color(display-p3 0.2196 0.5765 1 / 0.463);
+      --blue-a7: color(display-p3 0.2784 0.6078 0.9961 / 0.555);
+      --blue-a8: color(display-p3 0.302 0.6196 1 / 0.685);
+      --blue-a9: color(display-p3 0.2667 0.6039 0.9961 / 0.963);
+      --blue-a10: color(display-p3 0.251 0.5804 0.9961 / 0.908);
+      --blue-a11: color(display-p3 0.5137 0.7412 1 / 0.975);
+      --blue-a12: color(display-p3 0.8118 0.902 1 / 0.988);
+
+      --blue-contrast: #fff;
+      --blue-surface: color(display-p3 0.0588 0.1255 0.2118 / 0.5);
+      --blue-indicator: oklch(66.4% 0.1845 249.3);
+      --blue-track: oklch(66.4% 0.1845 249.3);
+
+      /* Gray */
+      --gray-1: oklch(17.8% 0.0203 249.3);
+      --gray-2: oklch(21.3% 0.0208 249.3);
+      --gray-3: oklch(25.3% 0.0292 249.3);
+      --gray-4: oklch(28.3% 0.0374 249.3);
+      --gray-5: oklch(31.1% 0.0421 249.3);
+      --gray-6: oklch(34.6% 0.0507 249.3);
+      --gray-7: oklch(39.8% 0.0615 249.3);
+      --gray-8: oklch(49% 0.0631 249.3);
+      --gray-9: oklch(53.7% 0.0631 249.3);
+      --gray-10: oklch(58.3% 0.0631 249.3);
+      --gray-11: oklch(76.8% 0.0531 249.3);
+      --gray-12: oklch(94.9% 0.0143 249.3);
+
+      --gray-a1: color(display-p3 0 0.1843 0.9922 / 0.034);
+      --gray-a2: color(display-p3 0.2431 0.5882 0.9922 / 0.068);
+      --gray-a3: color(display-p3 0.3451 0.6549 0.9961 / 0.127);
+      --gray-a4: color(display-p3 0.3647 0.6588 0.9961 / 0.173);
+      --gray-a5: color(display-p3 0.4039 0.6627 0.9961 / 0.211);
+      --gray-a6: color(display-p3 0.4196 0.6667 1 / 0.269);
+      --gray-a7: color(display-p3 0.4471 0.6902 1 / 0.353);
+      --gray-a8: color(display-p3 0.5569 0.749 1 / 0.467);
+      --gray-a9: color(display-p3 0.5961 0.7765 1 / 0.526);
+      --gray-a10: color(display-p3 0.6275 0.7922 1 / 0.589);
+      --gray-a11: color(display-p3 0.7608 0.8667 1 / 0.811);
+      --gray-a12: color(display-p3 0.9373 0.9647 0.9961 / 0.967);
+
+      --gray-contrast: #ffffff;
+      --gray-surface: color(display-p3 0 0 0 / 5%);
+      --gray-indicator: oklch(53.7% 0.0631 249.3);
+      --gray-track: oklch(53.7% 0.0631 249.3);
+    }
+  }
+}
+
+
+/* ----------------------------------------------------------------------------
+   LIGHT THEME — Solo cuando se aplica `.light` o `.light-theme` en <html>.
+   Override del default dark por source order (ambos comparten specificity).
+   ---------------------------------------------------------------------------- */
+
+.light,
+.light-theme {
+  /* Background base */
+  --color-background: #ffffff;
+
+  /* === BLUE (Brand / Accent) === */
+  --blue-1: #fbfdff;
+  --blue-2: #f4faff;
+  --blue-3: #e8f3ff;
+  --blue-4: #d8edff;
+  --blue-5: #c6e3ff;
+  --blue-6: #b1d6fd;
+  --blue-7: #95c6f6;
+  --blue-8: #6baef0;
+  --blue-9: #0097fe;
+  --blue-10: #008beb;
+  --blue-11: #0075d7;
+  --blue-12: #003560;
+
+  --blue-a1: #0080ff04;
+  --blue-a2: #008cff0b;
+  --blue-a3: #007aff17;
+  --blue-a4: #008aff27;
+  --blue-a5: #0082ff39;
+  --blue-a6: #0079f94e;
+  --blue-a7: #0176ea6a;
+  --blue-a8: #0074e694;
+  --blue-a9: #0097fe;
+  --blue-a10: #008beb;
+  --blue-a11: #0075d7;
+  --blue-a12: #003560;
+
+  --blue-contrast: #fff;
+  --blue-surface: #f1f9ffcc;
+  --blue-indicator: #0097fe;
+  --blue-track: #0097fe;
+
+  /* === GRAY (Neutrals con tinte azul) === */
+  --gray-1: #fafdff;
+  --gray-2: #f4faff;
+  --gray-3: #e7f2fd;
+  --gray-4: #dceaf9;
+  --gray-5: #d2e3f6;
+  --gray-6: #c8dcf1;
+  --gray-7: #b9d2ec;
+  --gray-8: #9ec0e2;
+  --gray-9: #7191b2;
+  --gray-10: #6887a5;
+  --gray-11: #4e6781;
+  --gray-12: #0f2234;
+
+  --gray-a1: #0099ff05;
+  --gray-a2: #008cff0b;
+  --gray-a3: #0075ea18;
+  --gray-a4: #0066d423;
+  --gray-a5: #0061cc2d;
+  --gray-a6: #005dbf37;
+  --gray-a7: #005cba46;
+  --gray-a8: #005ab361;
+  --gray-a9: #003a758e;
+  --gray-a10: #00356797;
+  --gray-a11: #00244ab1;
+  --gray-a12: #001427f0;
+
+  --gray-contrast: #ffffff;
+  --gray-surface: #ffffffcc;
+  --gray-indicator: #7191b2;
+  --gray-track: #7191b2;
+
+  /* === GREEN (Success / Playback) === */
+  --green-1: #fbfefc;
+  --green-2: #f2fcf5;
+  --green-3: #e9f9ee;
+  --green-4: #ddf3e4;
+  --green-5: #ccebd7;
+  --green-6: #b4dfc4;
+  --green-7: #92ceac;
+  --green-8: #5bb98b;
+  --green-9: #30a46c;
+  --green-10: #299764;
+  --green-11: #18794e;
+  --green-12: #153226;
+  --green-contrast: #fff;
+
+  /* === RED (Danger) === */
+  --red-1: #fffcfc;
+  --red-2: #fff7f7;
+  --red-3: #ffe5e5;
+  --red-4: #fdd8d8;
+  --red-5: #f9c6c6;
+  --red-6: #f3aeaf;
+  --red-7: #eb9091;
+  --red-8: #e5484d;
+  --red-9: #e5484d;
+  --red-10: #dc3d43;
+  --red-11: #cd2b31;
+  --red-12: #381316;
+  --red-contrast: #fff;
+
+  /* === AMBER (Warning) === */
+  --amber-1: #fefdfb;
+  --amber-2: #fff9ed;
+  --amber-3: #fff1d7;
+  --amber-4: #ffe7c2;
+  --amber-5: #ffd9a8;
+  --amber-6: #f3ca94;
+  --amber-7: #ecbc77;
+  --amber-8: #ee9d2b;
+  --amber-9: #ffb224;
+  --amber-10: #ffa01c;
+  --amber-11: #ad5700;
+  --amber-12: #4e2009;
+  --amber-contrast: #4e2009;
+
+  /* === SHADOW COLORS (light theme) ===
+     En light, las shadows son más sutiles — un negro con poco alpha
+     es suficiente para crear elevation sobre un fondo claro.
+     El highlight del glass también es blanco pero más fuerte aquí
+     porque el efecto visual es más sutil sobre fondos claros. */
+  --shadow-color-xs: rgb(15 35 80 / 0.04);
+  --shadow-color-sm: rgb(15 35 80 / 0.06);
+  --shadow-color-md: rgb(15 35 80 / 0.08);
+  --shadow-color-lg: rgb(15 35 80 / 0.10);
+  --shadow-color-xl: rgb(15 35 80 / 0.14);
+  --shadow-color-2xl: rgb(15 35 80 / 0.18);
+
+  --shadow-highlight: rgb(255 255 255 / 0.6);
+  --shadow-highlight-strong: rgb(255 255 255 / 0.8);
+}
+
+
+/* P3 wide-gamut overrides — Light */
+@supports (color: color(display-p3 1 1 1)) {
+  @media (color-gamut: p3) {
+    :root,
+    .light,
+    .light-theme {
+      /* Blue */
+      --blue-1: oklch(99.3% 0.0033 249.3);
+      --blue-2: oklch(98.1% 0.0093 249.3);
+      --blue-3: oklch(96% 0.0198 249.3);
+      --blue-4: oklch(93.7% 0.0365 249.3);
+      --blue-5: oklch(90.6% 0.0522 249.3);
+      --blue-6: oklch(86.4% 0.0669 249.3);
+      --blue-7: oklch(80.9% 0.0861 249.3);
+      --blue-8: oklch(73.4% 0.1179 249.3);
+      --blue-9: oklch(66.4% 0.1845 249.3);
+      --blue-10: oklch(62.5% 0.1755 249.3);
+      --blue-11: oklch(55.6% 0.1813 249.3);
+      --blue-12: oklch(32.4% 0.0914 249.3);
+
+      --blue-a1: color(display-p3 0.0235 0.5137 1 / 0.016);
+      --blue-a2: color(display-p3 0.0235 0.5137 0.9059 / 0.04);
+      --blue-a3: color(display-p3 0.0078 0.4353 0.9529 / 0.083);
+      --blue-a4: color(display-p3 0.0078 0.4627 0.9451 / 0.138);
+      --blue-a5: color(display-p3 0 0.4314 0.9412 / 0.2);
+      --blue-a6: color(display-p3 0.0039 0.4118 0.9176 / 0.279);
+      --blue-a7: color(display-p3 0.0039 0.4 0.8667 / 0.377);
+      --blue-a8: color(display-p3 0 0.3765 0.8431 / 0.522);
+      --blue-a9: color(display-p3 0 0.4392 0.9529 / 0.742);
+      --blue-a10: color(display-p3 0 0.3961 0.8627 / 0.765);
+      --blue-a11: color(display-p3 0 0.3176 0.7725 / 0.804);
+      --blue-a12: color(display-p3 0 0.1412 0.3137 / 0.926);
+
+      --blue-contrast: #fff;
+      --blue-surface: color(display-p3 0.9529 0.9725 0.9961 / 0.8);
+      --blue-indicator: oklch(66.4% 0.1845 249.3);
+      --blue-track: oklch(66.4% 0.1845 249.3);
+
+      /* Gray */
+      --gray-1: oklch(99.2% 0.0057 249.3);
+      --gray-2: oklch(98.3% 0.0103 249.3);
+      --gray-3: oklch(95.6% 0.0186 249.3);
+      --gray-4: oklch(93.2% 0.0245 249.3);
+      --gray-5: oklch(90.9% 0.0317 249.3);
+      --gray-6: oklch(88.6% 0.0364 249.3);
+      --gray-7: oklch(85.4% 0.0448 249.3);
+      --gray-8: oklch(79.4% 0.0607 249.3);
+      --gray-9: oklch(64.6% 0.0612 249.3);
+      --gray-10: oklch(61.1% 0.0581 249.3);
+      --gray-11: oklch(50.5% 0.0503 249.3);
+      --gray-12: oklch(24.5% 0.0421 249.3);
+
+      --gray-a1: color(display-p3 0.0235 0.5137 1 / 0.016);
+      --gray-a2: color(display-p3 0.0235 0.5137 0.9059 / 0.04);
+      --gray-a3: color(display-p3 0.0118 0.4157 0.8667 / 0.087);
+      --gray-a4: color(display-p3 0.0078 0.349 0.7529 / 0.126);
+      --gray-a5: color(display-p3 0.0039 0.3137 0.7412 / 0.165);
+      --gray-a6: color(display-p3 0 0.2941 0.6863 / 0.2);
+      --gray-a7: color(display-p3 0.0039 0.2941 0.6627 / 0.255);
+      --gray-a8: color(display-p3 0.0039 0.2902 0.6471 / 0.353);
+      --gray-a9: color(display-p3 0 0.1843 0.4118 / 0.534);
+      --gray-a10: color(display-p3 0 0.1686 0.3608 / 0.569);
+      --gray-a11: color(display-p3 0 0.1098 0.2549 / 0.675);
+      --gray-a12: color(display-p3 0 0.0588 0.1333 / 0.922);
+
+      --gray-contrast: #ffffff;
+      --gray-surface: color(display-p3 1 1 1 / 80%);
+      --gray-indicator: oklch(64.6% 0.0612 249.3);
+      --gray-track: oklch(64.6% 0.0612 249.3);
+    }
+  }
+}
+
+
+/* ============================================================================
+   PRIMITIVOS NO-COLOR
+   Espaciado, radios, tipografía, motion, shadows, z-index, breakpoints.
+   Estos son universales (no cambian entre light/dark) y viven a nivel root.
+   ============================================================================ */
+
+:root {
+  /* === SPACING ===
+     Base 4px. Coincide con la grid de iOS y con el sistema Apple-style.
+     Usar siempre múltiplos de --space-1, nunca números mágicos. */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  /* === RADIUS ===
+     Inspirado en iOS 26: redondeado pero no extremo.
+     Continuous corners (squircle) se simulan con border-radius normales
+     en web — el navegador no soporta corner-shape: squircle aún. */
+  --radius-none: 0;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 32px;
+  --radius-full: 9999px;
+
+  /* === TYPOGRAPHY === */
+
+  /* Font stack. Söhne (Klim) como primary — la grotesk moderna que usan
+     OpenAI/Lyft/Linear. Caemos a SF Pro en Apple, Inter en el resto.
+     ───────────────────────────────────────────────────────────────────
+     CONVENCIÓN DE PESOS PARA AUDIORR:
+       400 Buch              body, párrafos, captions
+       500 Kraftig           UI labels (botones, tabs, nav)
+       600 Halbfett          subtítulos, small-caps, énfasis
+       700 Dreiviertelfett   títulos de sección (h2)
+       700-800 Fett          hero displays (h1 album, login)
+
+     EVITAR:
+       200/300 (Extraleicht/Leicht): ilegibles bajo 18px
+       900 (Extrafett): shouty, 700-800 ya es suficiente impacto
+       Söhne Breit: solo wordmark/HUGE display — compite con cover art
+       Söhne Schmal: solo UI cramped — no es nuestro caso
+   */
+  --font-sans:
+    'Söhne', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'Inter Variable', 'Inter', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono:
+    'Söhne Mono', ui-monospace, 'SF Mono', 'JetBrains Mono', 'Menlo', 'Monaco',
+    'Cascadia Mono', Consolas, monospace;
+
+  /* Type scale fluida con clamp(min, preferred, max).
+     Crece suavemente entre 320px y 1280px de viewport.
+     Generada con utopia.fyi philosophy. */
+  --text-xs:    clamp(0.75rem,  0.71rem + 0.18vw, 0.8125rem);   /* 12 → 13 */
+  --text-sm:    clamp(0.875rem, 0.83rem + 0.22vw, 0.9375rem);   /* 14 → 15 */
+  --text-base:  clamp(1rem,     0.94rem + 0.31vw, 1.0625rem);   /* 16 → 17 */
+  --text-lg:    clamp(1.125rem, 1.05rem + 0.38vw, 1.25rem);     /* 18 → 20 */
+  --text-xl:    clamp(1.375rem, 1.27rem + 0.53vw, 1.5rem);      /* 22 → 24 */
+  --text-2xl:   clamp(1.75rem,  1.58rem + 0.85vw, 2rem);        /* 28 → 32 */
+  --text-3xl:   clamp(2.25rem,  1.97rem + 1.41vw, 2.75rem);     /* 36 → 44 */
+  --text-4xl:   clamp(3rem,     2.55rem + 2.27vw, 3.75rem);     /* 48 → 60 */
+
+  /* Line heights. Cuanto más grande el texto, más tight el line-height
+     (regla tipográfica clásica de Apple). */
+  --leading-none:    1;
+  --leading-tight:   1.15;
+  --leading-snug:    1.3;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  /* Letter spacing — afinado para Söhne (Klim).
+     Söhne está dibujada DENSA: body se lee correcto a tracking 0 (no le
+     metas negativo, lo aprietas y pierde legibilidad). En display
+     aguanta sin compresión agresiva — esta escala respeta su densidad
+     nativa. Con Inter (fallback en sistemas sin Söhne) los valores
+     siguen siendo razonables, solo un punto más sueltos.
+     - Body NO se trackeas (0).
+     - Display: leve negativo proporcional al tamaño.
+     - UPPERCASE labels: positivo MODERADO (Söhne pide menos aire que Inter). */
+  --tracking-tighter: -0.02em;  /* Hero ≥40px (display-lg) */
+  --tracking-tight:   -0.01em;  /* Display 22-32px */
+  --tracking-normal:   0;        /* Body — default */
+  --tracking-wide:     0.02em;  /* Mixed-case labels sutiles */
+  --tracking-wider:    0.04em;  /* UPPERCASE labels estándar */
+  --tracking-widest:   0.06em;  /* UPPERCASE eyebrows fuertes (raro) */
+
+  /* Font weights. SF Pro tiene todos los pesos disponibles. */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-heavy:    800;
+
+  /* === MOTION ===
+     Curvas inspiradas en iOS. Las "spring" emulan el feel de SwiftUI
+     spring() animations, aunque sin la física real. Para springs reales
+     usar svelte/motion (spring store) o Motion One. */
+  --ease-linear:        linear;
+  --ease-out-quart:     cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo:      cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-quart:  cubic-bezier(0.76, 0, 0.24, 1);
+  --ease-spring-soft:   cubic-bezier(0.5, 1.25, 0.5, 1);
+  --ease-spring-bouncy: cubic-bezier(0.5, 1.6, 0.5, 1);
+  --ease-ios-default:   cubic-bezier(0.32, 0.72, 0, 1); /* iOS 26 default */
+
+  --duration-instant: 80ms;
+  --duration-fast:    150ms;
+  --duration-normal:  250ms;
+  --duration-slow:    400ms;
+  --duration-slower:  600ms;
+  --duration-slowest: 900ms;
+
+  /* === STAGGER & REVEAL ===
+     Para listas que aparecen en cascada al primer paint (tracklists,
+     carruseles). Tight (30ms) para tracklists muchas filas — total ≤300ms.
+     Loose (60ms) para carruseles pocas cards — total ≤500ms. */
+  --stagger-step-tight: 30ms;
+  --stagger-step-loose: 60ms;
+
+  /* Distancias de entry animation. translateY(distance → 0) + opacity 0→1.
+     Mantener pequeño: una entry de 16px++ se siente lenta y exagerada. */
+  --reveal-distance-xs:  4px;
+  --reveal-distance-sm:  8px;
+  --reveal-distance-md: 16px;
+
+  /* === MARQUEE ===
+     Para credits / record-label scroll horizontal cuando overflow.
+     24s = velocidad lectura cómoda en banda de ~600px. Linear, sin ease. */
+  --duration-marquee: 24s;
+
+  /* === SHADOWS ===
+     Soft shadows para cards, glass shadows con inset highlight para
+     simular el "edge light" del Liquid Glass.
+     
+     Las shadows usan --shadow-color que se redefine por tema:
+     - dark: negro casi puro (las shadows oscurecen sobre fondo oscuro)
+     - light: negro con alpha bajo (shadows sutiles sobre blanco)
+     
+     El inset highlight (top edge) usa --shadow-highlight, que también
+     varía por tema. */
+  --shadow-xs:
+    0 1px 2px var(--shadow-color-sm);
+  --shadow-sm:
+    0 2px 4px var(--shadow-color-sm),
+    0 1px 2px var(--shadow-color-xs);
+  --shadow-md:
+    0 4px 8px var(--shadow-color-md),
+    0 2px 4px var(--shadow-color-sm);
+  --shadow-lg:
+    0 8px 16px var(--shadow-color-lg),
+    0 4px 8px var(--shadow-color-md);
+  --shadow-xl:
+    0 16px 32px var(--shadow-color-xl),
+    0 8px 16px var(--shadow-color-lg);
+  --shadow-2xl:
+    0 24px 48px var(--shadow-color-2xl),
+    0 12px 24px var(--shadow-color-xl);
+
+  /* Glass-specific: drop shadow + inner top highlight (simula el borde
+     superior iluminado del Liquid Glass). */
+  --shadow-glass-sm:
+    0 4px 16px var(--shadow-color-md),
+    inset 0 1px 0 var(--shadow-highlight);
+  --shadow-glass-md:
+    0 8px 32px var(--shadow-color-lg),
+    inset 0 1px 0 var(--shadow-highlight);
+  --shadow-glass-lg:
+    0 16px 48px var(--shadow-color-xl),
+    inset 0 1px 0 var(--shadow-highlight-strong);
+
+  /* Floating glass — el shadow stack que usan el mini player, los toasts y
+     cualquier control que flota sobre contenido. UN SOLO token, un solo look,
+     theme-aware vía las variables que referencia. Sin gradiente de adorno —
+     la "luz" del cristal viene únicamente del inset top highlight. */
+  --shadow-glass-floating:
+    0 12px 32px var(--shadow-color-lg),
+    0 2px 6px var(--shadow-color-md),
+    inset 0 1px 0 var(--shadow-highlight-strong),
+    inset 0 -1px 0 var(--shadow-color-sm),
+    inset 0 0 0 0.5px var(--gray-a6);
+
+  /* === BLUR ===
+     Para backdrop-filter. iOS Liquid Glass usa lensing real (refracción)
+     que el navegador no puede replicar; estos valores son lo más cercano
+     visualmente con blur + saturate. */
+  --blur-sm: blur(8px) saturate(140%);
+  --blur-md: blur(20px) saturate(160%);
+  --blur-lg: blur(40px) saturate(180%);
+  --blur-xl: blur(64px) saturate(200%);
+
+  /* === Z-INDEX ===
+     Escala explícita para evitar la guerra de z-index: 9999. */
+  --z-base:        0;
+  --z-dropdown:    1000;
+  --z-sticky:      1100;
+  --z-overlay:     1200;
+  --z-modal:       1300;
+  --z-popover:     1400;
+  --z-toast:      1500;
+  --z-tooltip:    1600;
+
+  /* === BREAKPOINTS ===
+     Como variables solo para JS / container queries.
+     Las @media queries no aceptan custom properties aún. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  /* === LAYOUT ===
+     Constantes globales de la app. */
+  --layout-sidebar-width: 280px;
+  --layout-mini-player-height: 80px;
+  --layout-tab-bar-height: 64px;
+  --layout-content-max-width: 1440px;
+  --layout-safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --layout-safe-area-inset-top: env(safe-area-inset-top, 0px);
+}
+
+
+/* ----------------------------------------------------------------------------
+   REDUCED MOTION
+   Respetar la preferencia del usuario es obligatorio. Cuando el usuario
+   tiene "Reduce Motion" activado, neutralizamos todas las duraciones.
+   ---------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast:    0ms;
+    --duration-normal:  0ms;
+    --duration-slow:    0ms;
+    --duration-slower:  0ms;
+    --duration-slowest: 0ms;
+    --stagger-step-tight: 0ms;
+    --stagger-step-loose: 0ms;
+    --reveal-distance-xs: 0px;
+    --reveal-distance-sm: 0px;
+    --reveal-distance-md: 0px;
+  }
+}

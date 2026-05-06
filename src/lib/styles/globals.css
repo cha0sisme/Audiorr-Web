@@ -1,0 +1,65 @@
+/* ============================================================================
+   AUDIORR WEB — globals.css
+   ----------------------------------------------------------------------------
+   Punto de entrada único del CSS. Importado una sola vez en +layout.svelte.
+   El orden importa: primitives → semantic → reset.
+   ============================================================================ */
+
+/* Fuente cross-platform. Apple usa SF Pro vía -apple-system,
+   el resto cae a Inter Variable (lo más cercano a SF). */
+@import '@fontsource-variable/inter';
+
+/* Söhne (Klim) — TEST/trial. Disponible vía font-family: 'Söhne' / 'Söhne Mono'.
+   No reemplaza al stack default todavía (--font-sans sigue Inter). Para usar:
+   `font-family: 'Söhne', var(--font-sans)` o la utility class .font-sohne. */
+@import './fonts/sohne.css';
+
+/* Si en el futuro querés self-host SF Pro, agregar los WOFF2
+   en /static/fonts/ y descomentar @font-face en este archivo. */
+
+@import './tokens/primitives.css';
+@import './tokens/semantic.css';
+@import './reset.css';
+
+
+/* ----------------------------------------------------------------------------
+   Aplicación de tokens base al body. El tema (.dark / .light-theme) se setea
+   en <html> antes de hidratar (ver app.html) para evitar FOUC.
+   ---------------------------------------------------------------------------- */
+
+html {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-height: 100dvh;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+/* ============================================================================
+   VIEW TRANSITIONS API — shared-element transitions iOS-style.
+   `root` = el resto del page (cross-fade rápido).
+   `*` (groups) = elementos con view-transition-name matching → morph entre
+   posición/tamaño old y new. Curva = ease-ios-default por consistencia.
+   ============================================================================ */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: var(--ease-ios-default);
+}
+
+::view-transition-group(*) {
+  animation-duration: 420ms;
+  animation-timing-function: var(--ease-ios-default);
+}
+

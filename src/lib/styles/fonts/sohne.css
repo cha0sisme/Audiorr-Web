@@ -1,0 +1,108 @@
+/* ============================================================================
+   SÖHNE — Klim Type Foundry (TEST/trial license)
+   ----------------------------------------------------------------------------
+   Cargado desde /public/sohne/ — solo archivos .otf TEST (Befonts trial).
+   NO usar en producción sin licencia comprada (https://klim.co.nz/buy/sohne/).
+
+   Mapeo pesos alemanes → CSS weight:
+     Extraleicht 200 · Leicht 300 · Buch 400 · Kraftig 500
+     Halbfett 600 · Dreiviertelfett 700 · Fett 800 · Extrafett 900
+   ============================================================================ */
+
+/* Söhne (regular) — los 8 pesos + italics más usados en UI */
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Extraleicht-BF663d89cd3f5c5.otf') format('opentype');
+  font-weight: 200; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-ExtraleichtKursiv-BF663d89cd3f0d1.otf') format('opentype');
+  font-weight: 200; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Leicht-BF663d89cd4952e.otf') format('opentype');
+  font-weight: 300; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-LeichtKursiv-BF663d89cd9a361.otf') format('opentype');
+  font-weight: 300; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Buch-BF663d89cd32e6a.otf') format('opentype');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-BuchKursiv-BF663d89cd3e887.otf') format('opentype');
+  font-weight: 400; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Kraftig-BF663d89cd37e26.otf') format('opentype');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-KraftigKursiv-BF663d89cd2bd4b.otf') format('opentype');
+  font-weight: 500; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Halbfett-BF663d89cd2d67b.otf') format('opentype');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-HalbfettKursiv-BF663d89cd41624.otf') format('opentype');
+  font-weight: 600; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Dreiviertelfett-BF663d89ccc5f66.otf') format('opentype');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-DreiviertelfettKursiv-BF663d89cd2f687.otf') format('opentype');
+  font-weight: 700; font-style: italic; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Fett-BF663d89cca89ff.otf') format('opentype');
+  font-weight: 800; font-style: normal; font-display: swap;
+}
+
+@font-face {
+  font-family: 'Söhne';
+  src: url('/sohne/TestSohne-Extrafett-BF663d89cc9f2c0.otf') format('opentype');
+  font-weight: 900; font-style: normal; font-display: swap;
+}
+
+/* Söhne Mono — para code, kbd, tabular numerals */
+
+@font-face {
+  font-family: 'Söhne Mono';
+  src: url('/sohne/TestSohneMono-Buch-BF663d89cbcec64.otf') format('opentype');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne Mono';
+  src: url('/sohne/TestSohneMono-BuchKursiv-BF663d89cc8d4c3.otf') format('opentype');
+  font-weight: 400; font-style: italic; font-display: swap;
+}
+@font-face {
+  font-family: 'Söhne Mono';
+  src: url('/sohne/TestSohneMono-Halbfett-BF663d89cc69f9d.otf') format('opentype');
+  font-weight: 600; font-style: normal; font-display: swap;
+}

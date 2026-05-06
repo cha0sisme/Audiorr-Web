@@ -1,0 +1,398 @@
+/* ============================================================================
+   AUDIORR WEB — DESIGN SYSTEM
+   File: reset.css
+   ----------------------------------------------------------------------------
+   Reset moderno inspirado en Andy Bell's "modern CSS reset" + ajustes
+   para apps SPA con feel iOS-style.
+   
+   Diferencias respecto a un reset genérico:
+   - Optimizado para SPA full-height (no scroll en body, scroll en panels).
+   - Tipografía system-ui por defecto (delegando a font-sans del DS).
+   - Smooth scroll y momentum táctil tipo iOS.
+   - Focus rings consistentes que respetan keyboard vs pointer.
+   - Selection con el accent color del brand.
+   - Imágenes y media bloqueando pero responsive por defecto.
+   ============================================================================ */
+
+
+/* ----------------------------------------------------------------------------
+   BOX SIZING
+   Border-box global. Estándar de la industria desde 2012.
+   ---------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+
+/* ----------------------------------------------------------------------------
+   MARGIN / PADDING RESET
+   Eliminamos defaults para empezar desde cero. El espaciado se maneja
+   explícitamente con --space-* en cada componente.
+   ---------------------------------------------------------------------------- */
+
+* {
+  margin: 0;
+  padding: 0;
+}
+
+
+/* ----------------------------------------------------------------------------
+   ROOT — html
+   Smooth scroll, font sizing base, prevenir overflow horizontal.
+   ---------------------------------------------------------------------------- */
+
+html {
+  /* Establecer base: 16px = 1rem. No tocar — toda la escala depende de esto. */
+  font-size: 100%;
+
+  /* Smooth scroll para anchor links. Respetamos prefers-reduced-motion. */
+  scroll-behavior: smooth;
+
+  /* Mejora el rendering de fuentes en webkit. */
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+
+  /* Tab a 4 spaces para <pre>. */
+  tab-size: 4;
+
+  /* Evitar overflow horizontal accidental. */
+  overflow-x: hidden;
+
+  /* Hint al browser para optimizar transiciones de tema. */
+  color-scheme: light dark;
+
+  /* En dispositivos con safe areas (iPhone con notch en PWA). */
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+
+/* ----------------------------------------------------------------------------
+   BODY
+   Layout base de la app: full-height, no scroll. El scroll sucede dentro
+   de los paneles/rutas, no en body. Esto es crítico para apps tipo iOS
+   donde el mini player y tab bar quedan fijos.
+   ---------------------------------------------------------------------------- */
+
+body {
+  min-height: 100%;
+  /* Usar dvh para que respete el viewport real en mobile (no incluye barras). */
+  min-height: 100dvh;
+
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-normal);
+
+  background-color: var(--color-background);
+  color: var(--text-primary);
+
+  /* Evitar bounce horizontal pero permitir vertical (overscroll en iOS). */
+  overscroll-behavior-x: none;
+
+  /* Texto no seleccionable por defecto en UI controls. Lo activamos
+     explícitamente en contenido (lyrics, track titles, descripciones). */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+
+/* ----------------------------------------------------------------------------
+   TEXT SELECTION
+   Permitir selección en contenido textual significativo.
+   ---------------------------------------------------------------------------- */
+
+p, h1, h2, h3, h4, h5, h6,
+li, td, th,
+[data-selectable],
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Color de selección con el brand. */
+::selection {
+  background-color: var(--blue-a7);
+  color: var(--text-primary);
+}
+
+
+/* ----------------------------------------------------------------------------
+   TYPOGRAPHY
+   Reset de heading sizes (los componentes definirán sus propios tamaños).
+   ---------------------------------------------------------------------------- */
+
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-wrap: balance; /* Mejor wrap en titulares cortos. */
+}
+
+p {
+  text-wrap: pretty; /* Evita líneas huérfanas en párrafos largos. */
+  max-width: 65ch;   /* Default cómodo de lectura. Override cuando haga falta. */
+}
+
+/* Por si se usa <small>, <strong>, etc. */
+small {
+  font-size: var(--text-sm);
+}
+
+strong, b {
+  font-weight: var(--weight-semibold);
+}
+
+
+/* ----------------------------------------------------------------------------
+   LINKS
+   Sin underline por defecto (estilo iOS app). El componente Link decide.
+   ---------------------------------------------------------------------------- */
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+
+/* ----------------------------------------------------------------------------
+   LISTS
+   Sin bullets ni numeración por defecto. Los componentes deciden.
+   ---------------------------------------------------------------------------- */
+
+ul, ol {
+  list-style: none;
+}
+
+
+/* ----------------------------------------------------------------------------
+   MEDIA (img, picture, video, canvas, svg)
+   Responsive y block por defecto. Evita el espacio fantasma debajo de img.
+   ---------------------------------------------------------------------------- */
+
+img, picture, video, canvas, svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Imágenes que NO deben ser drag-and-drop (album arts, thumbnails). */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+
+/* ----------------------------------------------------------------------------
+   FORM ELEMENTS
+   Heredan tipografía y color. Quitamos los defaults feos del browser.
+   ---------------------------------------------------------------------------- */
+
+input, button, textarea, select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+textarea {
+  resize: vertical;
+}
+
+/* Quitar el outline naranja default de Chrome y reemplazarlo con
+   nuestro focus ring consistente. */
+:focus {
+  outline: none;
+}
+
+/* Solo mostramos focus ring cuando navegan por teclado, no por click. */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+
+/* ----------------------------------------------------------------------------
+   INPUTS — placeholder y autofill
+   ---------------------------------------------------------------------------- */
+
+::placeholder {
+  color: var(--text-placeholder);
+  opacity: 1; /* Firefox aplica opacity al placeholder por default. */
+}
+
+/* Eliminar el background amarillo feo del autofill en Chrome. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text-primary);
+  -webkit-box-shadow: 0 0 0 1000px var(--bg-input) inset;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: var(--text-primary);
+}
+
+
+/* ----------------------------------------------------------------------------
+   TABLES
+   ---------------------------------------------------------------------------- */
+
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+  width: 100%;
+}
+
+
+/* ----------------------------------------------------------------------------
+   HR
+   Separador horizontal usando nuestros tokens.
+   ---------------------------------------------------------------------------- */
+
+hr {
+  border: none;
+  height: 1px;
+  background-color: var(--separator-default);
+  margin: var(--space-4) 0;
+}
+
+
+/* ----------------------------------------------------------------------------
+   ROOT TARGETS (#app, #root, #__app)
+   Para que SvelteKit / Solid roots ocupen toda la altura.
+   ---------------------------------------------------------------------------- */
+
+#app,
+#root,
+#svelte,
+[data-app-root] {
+  isolation: isolate; /* Crea stacking context — útil para z-index modales. */
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* ----------------------------------------------------------------------------
+   SCROLLBARS
+   Webkit scrollbars discretas tipo macOS. Firefox tiene su propio
+   sistema (scrollbar-width / scrollbar-color).
+   ---------------------------------------------------------------------------- */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--gray-a6) transparent;
+}
+
+/* Chromium / Safari */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--gray-a5);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color var(--duration-fast) var(--ease-out-quart);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--gray-a7);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Para áreas con scroll horizontal (carousels), scrollbar más fina. */
+[data-scroll-x] {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+}
+
+[data-scroll-x]::-webkit-scrollbar {
+  display: none; /* Webkit */
+}
+
+
+/* ----------------------------------------------------------------------------
+   IMPROVED DEFAULTS PARA APPS TIPO iOS
+   Comportamientos que dan ese feel de app nativa.
+   ---------------------------------------------------------------------------- */
+
+/* Smooth scroll con momentum en iOS Safari. */
+[data-scrollable] {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* Evita propagar scroll a parents. */
+}
+
+/* Imágenes lazy por default. Override con loading="eager" en LCP. */
+img:not([loading]) {
+  loading: lazy;
+}
+
+
+/* ----------------------------------------------------------------------------
+   ACCESSIBILITY HELPERS
+   Visually hidden para screen readers (labels invisibles, etc).
+   ---------------------------------------------------------------------------- */
+
+[data-visually-hidden],
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+/* ----------------------------------------------------------------------------
+   PRINT
+   Cuando alguien imprima la app (?), al menos que se vea decente.
+   ---------------------------------------------------------------------------- */
+
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+}

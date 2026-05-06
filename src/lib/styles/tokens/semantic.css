@@ -1,0 +1,524 @@
+/* ============================================================================
+   AUDIORR WEB — DESIGN SYSTEM
+   File: semantic.css
+   Layer: 2 of 2 (Semantic Tokens)
+   ----------------------------------------------------------------------------
+   Esta es la capa que los componentes consumen. Conecta los tokens
+   primitivos (escalas crudas) con significados funcionales.
+   
+   REGLA: Los componentes SOLO consumen tokens de este archivo.
+   NUNCA referencies --gray-N o --blue-N directamente desde un componente.
+   
+   FILOSOFÍA:
+   - Backgrounds van de menos a más elevación (canvas → surface → elevated).
+   - Texto va de menos a más jerarquía (tertiary → secondary → primary).
+   - Bordes van de menos a más visibilidad (subtle → default → strong).
+   - Acentos para acción (idle → hover → active).
+   - Glass como capa especial para controles flotantes (NUNCA contenido).
+   
+   Los tokens semánticos cambian de valor entre light y dark, pero su
+   SIGNIFICADO es el mismo. Por eso este archivo no necesita duplicarse
+   por tema — apunta a primitivos que ya cambian solos.
+   ============================================================================ */
+
+
+:root {
+  /* ==========================================================================
+     BACKGROUNDS
+     De menos a más elevación. La regla iOS: cuanto más "cerca" del usuario
+     en la jerarquía Z, más claro (en dark) o más oscuro (en light).
+     ========================================================================== */
+
+  /* Capa base — el "fondo del mundo". Detrás de todo. */
+  --bg-canvas: var(--gray-1);
+
+  /* Capa de superficie — cards, paneles, secciones. */
+  --bg-surface: var(--gray-2);
+
+  /* Surface elevada — modales, popovers, dropdowns sólidos. */
+  --bg-surface-elevated: var(--gray-3);
+
+  /* Surface presionada / activa (hover, selected). */
+  --bg-surface-hover: var(--gray-3);
+  --bg-surface-active: var(--gray-4);
+  --bg-surface-selected: var(--gray-4);
+
+  /* Inputs y campos editables. */
+  --bg-input: var(--gray-2);
+  --bg-input-hover: var(--gray-3);
+  --bg-input-focus: var(--gray-3);
+
+  /* Backgrounds tinted con el brand color (badges, highlights). */
+  --bg-accent-subtle: var(--blue-3);
+  --bg-accent-soft: var(--blue-4);
+  --bg-accent: var(--blue-9);
+  --bg-accent-hover: var(--blue-10);
+  --bg-accent-active: var(--blue-8);
+
+
+  /* ==========================================================================
+     GLASS LAYER
+     iOS 26 Liquid Glass-inspired. RESERVADO para controles flotantes:
+     tab bar, mini player, sheets, popovers, search bars.
+     NUNCA usar glass detrás de contenido textual largo (lyrics, listas, etc).
+     ========================================================================== */
+
+  /* Glass sutil — overlays casi transparentes (tooltips, hints). */
+  --bg-glass-thin: var(--gray-a3);
+
+  /* Glass estándar — la capa por defecto para controles flotantes. */
+  --bg-glass: var(--gray-a6);
+
+  /* Glass denso — sheets que necesitan más legibilidad. */
+  --bg-glass-thick: var(--gray-a8);
+
+  /* Glass casi-sólido — para chrome flotante con texto importante (mini
+     player, Now Playing widget). Theme-aware: usa gray-2 (que cambia con
+     el tema) al 82% de opacidad. NO usamos gray-aN porque los alpha grays
+     funcionan invertidos por tema (light alpha en dark, dark alpha en light)
+     — eso baja el contraste en light mode. Con color-mix sobre gray-2
+     conseguimos frosted-dark en dark, frosted-light en light, ambos con
+     buen contraste contra el text-primary del tema correspondiente. */
+  --bg-glass-solid: color-mix(in srgb, var(--gray-2) 82%, transparent);
+
+  /* Glass tinted — variantes con tinte del brand para CTAs glass. */
+  --bg-glass-accent: var(--blue-a6);
+  --bg-glass-accent-strong: var(--blue-a8);
+
+  /* Backdrop blur amount para cada nivel de glass. */
+  --backdrop-glass-thin: var(--blur-sm);
+  --backdrop-glass: var(--blur-md);
+  --backdrop-glass-thick: var(--blur-lg);
+
+
+  /* ==========================================================================
+     TEXT
+     Jerarquía clara. Primary para títulos, secondary para body,
+     tertiary para metadata, quaternary para hints muy sutiles.
+     ========================================================================== */
+
+  --text-primary: var(--gray-12);
+  --text-secondary: var(--gray-11);
+  --text-tertiary: var(--gray-10);
+  --text-quaternary: var(--gray-9);
+
+  /* Texto sobre fondos sólidos del brand (botón primario, etc). */
+  --text-on-accent: var(--blue-contrast);
+
+  /* Texto del brand para énfasis (links, "Now Playing" indicator). */
+  --text-accent: var(--blue-11);
+  --text-accent-strong: var(--blue-12);
+
+  /* Texto desactivado / placeholder. */
+  --text-disabled: var(--gray-8);
+  --text-placeholder: var(--gray-9);
+
+
+  /* ==========================================================================
+     LETTER SPACING (intent-based)
+     Aplica por uso, no por número. Söhne está dibujada densa — body
+     siempre 0; display con negativo leve y proporcional al tamaño;
+     UPPERCASE moderado (Söhne pide MUCHO menos aire que Inter o SF).
+     Regla: si dudas, body = --tracking-body (0). El reset.css ya lo
+     aplica al <body>, así que no hace falta repetirlo en cada componente
+     con texto cuerpo (cards, rows, etc).
+     ========================================================================== */
+
+  /** Body, párrafos, cards, listas. Söhne default. */
+  --tracking-body:       var(--tracking-normal);    /* 0 */
+
+  /** Subtítulos pequeños, títulos de bloque ≤20px. Toque sutil. */
+  --tracking-snug:       var(--tracking-normal);    /* 0 — Söhne no necesita */
+
+  /** Section titles 22-32px (h2 horizontal-scroll, library page, etc). */
+  --tracking-display:    var(--tracking-tight);     /* -0.01em */
+
+  /** Hero titles ≥36px (album/artist/playlist hero, settings, login). */
+  --tracking-display-lg: var(--tracking-tighter);   /* -0.02em */
+
+  /** UPPERCASE labels: kickers ("Álbum"), section labels ("Próximas"),
+      column headers ("Título"), sidebar nav. */
+  --tracking-label:      var(--tracking-wider);     /* 0.04em */
+
+  /** UPPERCASE muy fuerte. Reservado para casos donde queremos énfasis
+      tipo eyebrow heavy. Default es --tracking-label. */
+  --tracking-label-strong: var(--tracking-widest);  /* 0.06em */
+
+
+  /* ==========================================================================
+     BORDERS
+     De menos a más visibilidad. Los bordes en iOS son SUTILES — apenas
+     perceptibles. Ojo con valores demasiado fuertes que se sienten "web 2010".
+     ========================================================================== */
+
+  /* Borde casi invisible — separa cards de fondos similares. */
+  --border-subtle: var(--gray-a3);
+
+  /* Borde por defecto — inputs en estado idle, divisores. */
+  --border-default: var(--gray-a5);
+
+  /* Borde fuerte — inputs hover, focus secundario. */
+  --border-strong: var(--gray-a7);
+
+  /* Borde de focus — siempre el accent color para keyboard navigation. */
+  --border-focus: var(--blue-8);
+  --border-focus-ring: var(--blue-a7);
+
+  /* Borde para glass — sutil highlight del cristal. */
+  --border-glass: var(--gray-a5);
+  --border-glass-strong: var(--gray-a7);
+
+
+  /* ==========================================================================
+     SEPARATORS / DIVIDERS
+     Líneas finas entre filas de listas, secciones.
+     ========================================================================== */
+
+  --separator-subtle: var(--gray-a3);
+  --separator-default: var(--gray-a4);
+
+
+  /* ==========================================================================
+     ACCENT (Brand interactions)
+     Para uso en componentes que llevan el color de marca: progress bar,
+     toggles activos, indicador de "Now Playing", botones primarios.
+     ========================================================================== */
+
+  --accent: var(--blue-9);
+  --accent-hover: var(--blue-10);
+  --accent-active: var(--blue-8);
+  --accent-muted: var(--blue-a6);
+  --accent-track: var(--blue-track);
+
+
+  /* ==========================================================================
+     SEMANTIC COLORS (Status)
+     Por ahora solo uso el accent como informativo. Si añades danger / success /
+     warning en el futuro, genera escalas Radix red / green / amber con el mismo
+     proceso y mapéalas aquí.
+     
+     Placeholder usando el brand para que no se rompa nada si los referencias.
+     ========================================================================== */
+
+  --status-info: var(--blue-9);
+  --status-info-bg: var(--blue-3);
+  --status-info-text: var(--blue-11);
+  --status-info-border: var(--blue-7);
+  --status-info-contrast: var(--blue-contrast);
+
+  --status-success: var(--green-9);
+  --status-success-bg: var(--green-3);
+  --status-success-text: var(--green-11);
+  --status-success-border: var(--green-7);
+  --status-success-contrast: var(--green-contrast);
+
+  --status-warning: var(--amber-9);
+  --status-warning-bg: var(--amber-3);
+  --status-warning-text: var(--amber-11);
+  --status-warning-border: var(--amber-7);
+  --status-warning-contrast: var(--amber-contrast);
+
+  --status-danger: var(--red-9);
+  --status-danger-bg: var(--red-3);
+  --status-danger-text: var(--red-11);
+  --status-danger-border: var(--red-7);
+  --status-danger-contrast: var(--red-contrast);
+
+
+  /* ==========================================================================
+     COMPONENT-SPECIFIC SEMANTICS
+     Aquí entran tokens que son lo suficientemente específicos para nombrarlos
+     pero no tan únicos como para crear un archivo de component tokens.
+     ========================================================================== */
+
+  /* INTERACTIVE CONTROLS — sliders, switches y demás controles cuando
+     están en estado activo (on/filled). Verde es la convención iOS y audio
+     (system green, peak meters, waveforms). UN solo token raíz, todos los
+     componentes lo consumen vía aliases por rol. Cambiás esto y cambia
+     en sliders, switches, segmented controls, todo. */
+  --control-on: var(--green-9);
+  --control-on-strong: var(--green-10);
+
+  /* Slider (volumen, scrubber del Now Playing expandido). */
+  --slider-fill: var(--control-on);
+  --slider-fill-strong: var(--control-on-strong);
+  --slider-track: var(--gray-a4);
+  --slider-thumb: #fff;
+
+  /* Switch (Toggle). On = control-on. Off = mid-gray theme-aware
+     (Apple usa un mid-gray específico, no derivado de las surfaces). */
+  --switch-track-on: var(--control-on);
+  --switch-track-off: var(--gray-6);
+  --switch-thumb: var(--slider-thumb);
+
+  /* MINI PLAYER PROGRESS — pasivo, solo lectura. Neutral (text-primary)
+     porque no es un control y no compite por atención. Se nota pero no grita. */
+  --player-progress-bg: var(--gray-a4);
+  --player-progress-fill: var(--text-primary);
+  --player-progress-buffer: var(--gray-a7);
+
+  /* Now playing indicator — el dot/bars que aparecen al lado de la canción
+     que está sonando, en listas y mini player. Accent (brand) por convención. */
+  --player-now-playing-indicator: var(--accent);
+
+  /* AutoMix text — wave shimmer del CrossfadeEngine. En light usa accent
+     (continuidad visual con los demás indicadores de "modo activo"). En dark
+     queremos blanco para que el wave shimmer sea más limpio sobre el glass
+     denso del player. Override en .dark/.dark-theme abajo. */
+  --automix-text: var(--accent);
+
+  /* Toast / Notification — superficie SÓLIDA, NO glass. Es contenido
+     transitorio que demanda atención y debe ser legible al instante. Glass
+     se reserva para chrome persistente (mini player, sheets, popovers).
+     Defino tokens propios para que el rol quede explícito. */
+  --toast-bg: var(--bg-surface-elevated);
+  --toast-border: var(--border-subtle);
+  --toast-shadow: var(--shadow-xl);
+
+  /* ==========================================================================
+     PLAY BUTTONS — CONVENCIÓN DEL SISTEMA
+     ----------------------------------------------------------------------
+     Tres reglas claras según contexto:
+
+     1. Primary (sobre surface — cards, listas, QuickAccess):
+        Brand color, theme-agnostic. Es la "acción principal" del sistema.
+        Tokens: `--play-bg`, `--play-fg`, etc.
+
+     2. Sobre album art / video / fondo variable:
+        White-on-content, theme-agnostic. Necesita contraste universal
+        contra cualquier color de cover/video.
+        Tokens: `--overlay-on-art-bg/-fg/-shadow`.
+
+     3. MiniPlayer hero play/pause:
+        Excepción. El componente lo maneja con `--text-primary` sobre glass.
+        NO consume `--play-*` ni `--overlay-on-art-*`. Es chrome único.
+     ========================================================================== */
+
+  /* (1) Primary play button — brand, theme-agnostic. */
+  --play-bg: var(--bg-accent);
+  --play-bg-hover: var(--bg-accent-hover);
+  --play-fg: var(--text-on-accent);
+  --play-shadow: var(--shadow-md);
+
+  /* (2) Botones (play, favorite, etc.) que se montan sobre imagen variable
+     (album art, video). Blanco semitransparente con icono oscuro para
+     contraste universal contra cualquier color de fondo. Theme-agnostic. */
+  --overlay-on-art-bg: rgb(255 255 255 / 0.95);
+  --overlay-on-art-bg-hover: rgb(255 255 255 / 1);
+  --overlay-on-art-fg: #000;
+  --overlay-on-art-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
+
+  /* Scrim sobre album art para indicar "esto está sonando". Oscuro suficiente
+     para que el equalizer blanco se lea sobre cualquier color de cover.
+     Theme-agnostic (siempre dark over art). Mismo valor que iOS (0.45). */
+  --scrim-on-art: rgb(0 0 0 / 0.45);
+
+  /* Text sobre hero con bg color-extracted (oklch dark-tinted). Theme-agnostic
+     porque el bg del hero siempre es dark-ish (L≤0.4) → blanco siempre lee. */
+  --hero-text-primary: #fff;
+  --hero-text-secondary: rgb(255 255 255 / 0.85);
+  --hero-text-tertiary: rgb(255 255 255 / 0.75);
+
+  /* Drag handle bar — la "pildora" arriba de los sheets que indica que se
+     pueden arrastrar (iOS pattern, también usado por Vaul). */
+  --handle-bar: var(--gray-7);
+
+  /* Skeleton — placeholder mientras carga una imagen / contenido. Patrón
+     Linear/Apple: shimmer lineal (no opacity pulse). El bg base es muy
+     sutil; el shimmer es el highlight que pasa por encima cada ~1.4s.
+     Theme-aware vía gray-N que ya escala entre dark y light. */
+  --skeleton-bg: var(--gray-3);
+  --skeleton-shimmer: var(--gray-5);
+
+  /* Explicit badge ("E") — Apple Music style. Cuadrado sutil + E pintada
+     del color del texto encima (la E es un SVG separado del background).
+     El bg derivado de text-secondary con color-mix mantiene un gris
+     translúcido legible en ambos temas sin competir con el texto. */
+  --explicit-badge-bg: color-mix(in srgb, var(--text-secondary) 22%, transparent);
+  --explicit-badge-fg: var(--text-secondary);
+  /* Variante "on-art" — para cuando el badge va sobre arte/cover en hero,
+     scrim o gradient color-extracted. Blanco translúcido + E blanca,
+     theme-agnostic (el contexto siempre es dark-ish). */
+  --explicit-badge-bg-on-art: rgb(255 255 255 / 0.22);
+  --explicit-badge-fg-on-art: rgb(255 255 255 / 0.92);
+
+  /* Form field con floating label — patrón iOS 26 / Material 3.
+     Inputs sin border, solo bg sutil + focus ring. Label flota dentro del
+     input cuando vacío, sube al top cuando focus o filled. */
+  --field-bg: var(--bg-surface-elevated);
+  --field-bg-focus: var(--bg-surface-active);
+  --field-text: var(--text-primary);
+  --field-label: var(--text-tertiary);
+  --field-label-floating: var(--text-secondary);
+  --field-label-error: var(--status-danger-text);
+  --field-ring-focus: 0 0 0 2px var(--accent);
+  --field-ring-error: 0 0 0 2px var(--status-danger);
+
+  /* Segmented control — patrón iOS Music/Settings con sliding pill indicator.
+     Container subtle, indicator "lifted" (más claro que el container en AMBOS
+     temas — necesita override en .light porque los grays Radix no escalan
+     monotonicamente entre temas). */
+  --segment-bg: var(--gray-3);
+  --segment-indicator-bg: var(--gray-6);
+  --segment-text: var(--text-secondary);
+  --segment-text-active: var(--text-primary);
+  --segment-count: var(--text-tertiary);
+  --segment-count-active: var(--text-secondary);
+  --segment-indicator-shadow: var(--shadow-xs);
+
+  /* Scroll arrows (Spotify-style hover nav en horizontal rows). Inverso del
+     overlay-on-art: aquí dark-on-content para destacar sobre cards de
+     cualquier tinte. Theme-agnostic intencional. */
+  --scroll-arrow-bg: rgb(0 0 0 / 0.7);
+  --scroll-arrow-bg-hover: rgb(0 0 0 / 0.85);
+  --scroll-arrow-fg: #fff;
+  --scroll-arrow-shadow: 0 2px 8px rgb(0 0 0 / 0.4);
+
+  /* Album / Playlist art placeholders */
+  --artwork-placeholder-bg: var(--gray-3);
+  --artwork-placeholder-fg: var(--gray-8);
+
+  /* Lyrics */
+  --lyrics-active: var(--text-primary);
+  --lyrics-inactive: var(--text-tertiary);
+  --lyrics-passed: var(--text-quaternary);
+
+  /* Now Playing background (cuando se aplica el color extraído del album art) */
+  --now-playing-tint-fallback: var(--gray-3);
+
+  /* Queue / Lists */
+  --row-hover: var(--gray-a3);
+  --row-active: var(--gray-a4);
+  --row-playing: var(--blue-a4);
+
+
+  /* ==========================================================================
+     INTERACTION STATES
+     Tokens reutilizables para hover/active/focus rings.
+     ========================================================================== */
+
+  --hover-overlay: var(--gray-a3);
+  --active-overlay: var(--gray-a4);
+  --focus-ring: 0 0 0 3px var(--border-focus-ring);
+  --focus-ring-offset: 0 0 0 2px var(--bg-canvas), 0 0 0 5px var(--border-focus-ring);
+
+
+  /* ==========================================================================
+     SCRIM / OVERLAY
+     Para fondos de modales y sheets que cubren contenido.
+     ========================================================================== */
+
+  --scrim: rgb(0 0 0 / 0.5);
+  --scrim-strong: rgb(0 0 0 / 0.7);
+  --scrim-light: rgb(0 0 0 / 0.3);
+
+
+  /* ==========================================================================
+     GRADIENTS
+     Gradientes reutilizables. Útiles para Now Playing (color del album art)
+     y headers de albums/artistas.
+     ========================================================================== */
+
+  /* Gradiente vertical sutil para fades en bordes de scroll. */
+  --gradient-fade-bottom: linear-gradient(
+    to bottom,
+    transparent 0%,
+    var(--bg-canvas) 100%
+  );
+  --gradient-fade-top: linear-gradient(
+    to top,
+    transparent 0%,
+    var(--bg-canvas) 100%
+  );
+
+  /* Vignette radial para hero sections de albums/artistas. */
+  --gradient-hero-vignette: radial-gradient(
+    ellipse at top,
+    transparent 0%,
+    var(--bg-canvas) 70%
+  );
+}
+
+
+/* ============================================================================
+   MOTION (intent-based)
+   ============================================================================
+   Aplicar por intención, no por número. Cada bloque define los parámetros
+   de UN tipo de animación reusable a través de la app. Si un nuevo
+   componente quiere un tipo no contemplado acá, primero se añade el token
+   con justificación, después se consume.
+   ============================================================================ */
+
+  /** Entry de filas en listas tipo tracklist (SongList).
+      Linear ease para una sensación calmada — los tracks no son cards
+      "vivas", son entries de información. Stagger tight (30ms) porque hay
+      muchas filas y queremos terminar rápido (≤300ms total para 10 filas). */
+  --row-entry-duration: var(--duration-fast);
+  --row-entry-stagger:  var(--stagger-step-tight);
+  --row-entry-distance: var(--reveal-distance-sm);
+  --row-entry-ease:     var(--ease-out-quart);
+
+  /** Entry de cards en carruseles horizontales (Discografía, Popular,
+      Fans también escuchan). iOS-default ease — la curva oficial de iOS
+      26, da el sutil "asentamiento" sin overshoot. Stagger loose (60ms)
+      porque hay pocas cards y cada una merece su pequeño momento. */
+  --card-entry-duration: var(--duration-normal);
+  --card-entry-stagger:  var(--stagger-step-loose);
+  --card-entry-distance: var(--reveal-distance-md);
+  --card-entry-ease:     var(--ease-ios-default);
+
+  /** Mask para fade-out de bordes en carruseles horizontales (Progressive
+      Blur estilo iOS). Lo aplicamos como mask-image al overflow container.
+      Pure compositor work, cero CPU/runtime. La asimetría (24px izq, 48px
+      der) refleja la dirección natural de scroll: más fade hacia donde
+      "hay más contenido". */
+  --mask-edge-fade-x: linear-gradient(
+    to right,
+    transparent 0,
+    black 24px,
+    black calc(100% - 48px),
+    transparent 100%
+  );
+
+  /** Marquee continuo para texto que excede su contenedor (record-label
+      footer cuando los nombres son largos). Linear porque es lectura
+      continua — cualquier ease se sentiría como "tropezones". */
+  --marquee-duration: var(--duration-marquee);
+  --marquee-ease:     var(--ease-linear);
+
+
+/* ============================================================================
+   DARK THEME OVERRIDES
+   La mayoría de tokens semánticos no necesitan cambio porque ya apuntan
+   a primitivos que cambian solos. Pero algunos sí necesitan ajuste fino
+   (ej: scrim más oscuro en dark mode, row-playing más visible).
+   ============================================================================ */
+
+.dark,
+.dark-theme {
+  /* En dark, el scrim puede ser más oscuro porque ya hay fondo oscuro. */
+  --scrim: rgb(0 0 0 / 0.6);
+  --scrim-strong: rgb(0 0 0 / 0.85);
+  --scrim-light: rgb(0 0 0 / 0.4);
+
+  /* Row playing un poco más vibrante en dark. */
+  --row-playing: var(--blue-a5);
+
+  /* AutoMix: blanco en dark — el accent azul se pierde sobre el glass denso
+     oscuro, el blanco hace que el wave shimmer respire mejor. */
+  --automix-text: var(--text-primary);
+}
+
+
+/* ============================================================================
+   LIGHT THEME OVERRIDES
+   Para tokens cuya intención visual no se invierte automáticamente vía las
+   primitives Radix (que cambian step direction entre temas).
+   ============================================================================ */
+
+.light,
+.light-theme {
+  /* Segmented indicator: en light queremos blanco-ish (más claro que gray-3
+     container). gray-1 = #fafdff es lo más cercano a "white card" sin hardcode. */
+  --segment-indicator-bg: var(--gray-1);
+}
