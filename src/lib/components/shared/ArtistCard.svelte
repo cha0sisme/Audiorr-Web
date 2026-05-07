@@ -12,9 +12,13 @@
     albumCount?: number | undefined;
     coverUrl?: string | undefined;
     href?: string | undefined;
+    /** Pre-fetch del hero del avatar on hover/focus. Para artistImageUrl
+        (Last.fm) el "hero" es la misma URL → el browser cachea y al
+        click es instantáneo. */
+    prefetchHero?: () => void;
   };
 
-  let { id, name, albumCount, coverUrl, href = '#', ...rest }: Props = $props();
+  let { id, name, albumCount, coverUrl, href = '#', prefetchHero, ...rest }: Props = $props();
 
   const isCurrent = $derived(player.isPlayingFrom('artist', id));
 
@@ -30,7 +34,14 @@
   );
 </script>
 
-<a class="card" {href} onclick={handleClick} {...rest}>
+<a
+  class="card"
+  {href}
+  onclick={handleClick}
+  onmouseenter={prefetchHero}
+  onfocus={prefetchHero}
+  {...rest}
+>
   <div bind:this={coverEl} class="cover">
     <CoverImage src={coverUrl} alt="" shape="circle">
       {#snippet fallback()}

@@ -45,12 +45,12 @@
       queries: {
         // Música cambia poco — 5 min staleTime. Override por query si hace falta.
         staleTime: 5 * 60 * 1000,
-        // gcTime corto — RAM hygiene. Cuando el usuario sale de una ruta,
-        // su data se descarta tras 60s en vez de 5min. Para pantallas que se
-        // quieren retener (library lists, palette), override individual con
-        // gcTime: Infinity. Detail pages (album/playlist/artist) se purgan
-        // rápido — el usuario rara vez vuelve al mismo álbum en <1min.
-        gcTime: 60 * 1000,
+        // gcTime de 10 min — los detail pages (album/playlist/artist) se
+        // mantienen en cache mientras el usuario navega y vuelve dentro de
+        // ese intervalo. JSON pesa nada (2-5 KB cada uno) frente al beneficio
+        // de no refetchear al hacer back. Listas pesadas (library albums/
+        // artists) y palette overridean a gcTime: Infinity individualmente.
+        gcTime: 10 * 60 * 1000,
         retry: 1,
         refetchOnWindowFocus: false,
         enabled: browser

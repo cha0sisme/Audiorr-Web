@@ -14,16 +14,23 @@
    *   - errored: el browser disparó onerror (404, network fail). Skeleton
    *              estático con fallback icon.
    *
-   * Cache-hit recovery: si el browser dispara onload SINCRÓNICAMENTE para
-   * imágenes ya cacheadas (puede ocurrir antes de que corra el $effect
-   * que resetea loaded=false), un queueMicrotask después del reset chequea
+   * Cache-hit fast path: para URLs ya cargadas en otra parte de la sesión
+   * (set global `cover-cache.ts`), arrancamos directamente en loaded=true
+   * sin esperar al microtask. Sin esto, navegar atrás a una página con
+   * cards ya vistas dispara shimmer→fade brevemente aunque el bitmap
+   * esté en el cache HTTP del browser.
+   *
+   * Cache-hit recovery (fallback): si el browser dispara onload SINCRÓNICAMENTE
+   * para imágenes cacheadas en el HTTP cache pero no en nuestro Set (e.g.
+   * primer paint tras refresh), un queueMicrotask después del reset chequea
    * `imgEl.complete` y restaura loaded=true.
    *
-   * Disposal: al desmontar, src='' libera el bitmap del image-cache y
-   * cancela cualquier fetch in-flight.
+   * Disposal: NO reseteamos src en unmount. En grids virtualizados, el
+   * unmount es frecuente y abortar el GET fuerza retries cuando la card
+   * vuelve a entrar al viewport. El browser ya gestiona su image-cache LRU.
    */
   import type { Snippet } from 'svelte';
-  import { onDestroy } from 'svelte';
+  import { isCoverLoaded, markCoverLoaded } from '$utils/cover-cache';
 
   type Props = {
     src?: string | undefined;
@@ -53,18 +60,24 @@
   let errored = $state(false);
   let imgEl: HTMLImageElement | undefined = $state();
 
-  /** Reset al cambiar src + cache-hit recovery. */
+  /** Reset al cambiar src + cache-hit fast path + recovery. */
   $effect(() => {
     const currentSrc = src;
-
-    loaded = false;
     errored = false;
 
+    // Fast path: la URL ya completó alguna vez en esta sesión → no hay
+    // shimmer, arrancamos en loaded=true directamente.
+    if (isCoverLoaded(currentSrc)) {
+      loaded = true;
+      return;
+    }
+
+    loaded = false;
     if (!currentSrc) return;
 
-    // Para imágenes ya cacheadas en el browser, onload puede haber disparado
-    // sincrónicamente antes que este effect. queueMicrotask checa después
-    // del reset si la img ya está completa con el src esperado.
+    // Fallback: si el browser dispara onload sincrónicamente porque la imagen
+    // ya está en su cache HTTP (sin pasar por nuestro Set — e.g. primer paint
+    // tras refresh), queueMicrotask checa post-reset si imgEl.complete.
     queueMicrotask(() => {
       if (
         imgEl &&
@@ -73,26 +86,19 @@
         (imgEl.src.endsWith(currentSrc) || imgEl.src === currentSrc)
       ) {
         loaded = true;
+        markCoverLoaded(currentSrc);
       }
     });
   });
 
   function handleLoad() {
     loaded = true;
+    markCoverLoaded(src);
   }
 
   function handleError() {
     errored = true;
   }
-
-  onDestroy(() => {
-    // Cancelar src libera el bitmap del image-cache (loaded) o aborta el
-    // fetch in-flight (loading). Crítico en escenarios con muchos covers
-    // para que cards desmontadas no ocupen connections de la pool.
-    if (imgEl?.isConnected) {
-      imgEl.src = '';
-    }
-  });
 
   const showImage = $derived(!!src && !errored);
   const showSkeleton = $derived(!loaded || errored || !src);

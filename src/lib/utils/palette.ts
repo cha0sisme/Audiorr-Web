@@ -11,12 +11,12 @@
  *   - No hay swatches detectables
  *
  * En esos casos el caller cae al fallback (hue por hash del nombre).
+ *
+ * IMPLEMENTACIÓN: Vibrant + culori se importan dinámicamente para sacarlos
+ * del bundle inicial (~135 KB minified gzipped entre los dos). Solo se
+ * cargan cuando el usuario navega a un detail page (album/artist/playlist),
+ * que es donde extractPalette se llama.
  */
-
-import { Vibrant } from 'node-vibrant/browser';
-import { converter } from 'culori';
-
-const toOklch = converter('oklch');
 
 export type CoverPalette = {
   /** Hue en grados (0-360). */
@@ -30,6 +30,11 @@ const CHROMA_MAX = 0.18;
 
 export async function extractPalette(coverUrl: string): Promise<CoverPalette | null> {
   try {
+    const [{ Vibrant }, { converter }] = await Promise.all([
+      import('node-vibrant/browser'),
+      import('culori')
+    ]);
+    const toOklch = converter('oklch');
     const palette = await Vibrant.from(coverUrl).getPalette();
 
     // Preferir Vibrant; caer a DarkVibrant, LightVibrant, Muted en orden.

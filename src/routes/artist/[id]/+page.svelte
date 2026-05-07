@@ -60,11 +60,14 @@
     staleTime: 1000 * 60 * 30
   }));
 
+  // 600: hero size mayor que las cards (300). El prefetch on hover de las
+  // cards calienta el cache HTTP. Si artistImageUrl (Last.fm scrape) está
+  // presente, es URL fija sin parámetro de tamaño — ya es la "hero version".
   const coverUrl = $derived(
     artist?.artistImageUrl && artist.artistImageUrl.length > 0
       ? artist.artistImageUrl
       : artist?.coverArt
-        ? getCoverArtUrl(artist.coverArt, 500)
+        ? getCoverArtUrl(artist.coverArt, 600)
         : undefined
   );
 
@@ -332,8 +335,9 @@
               coverUrl={sa.artistImageUrl && sa.artistImageUrl.length > 0
                 ? sa.artistImageUrl
                 : sa.coverArt
-                  ? getCoverArtUrl(sa.coverArt, 500)
+                  ? getCoverArtUrl(sa.coverArt, 300)
                   : undefined}
+              prefetchHero={() => {}}
               href={sa.id ? `/artist/${sa.id}` : '#'}
             />
           {/snippet}

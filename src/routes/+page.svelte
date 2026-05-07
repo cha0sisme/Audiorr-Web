@@ -48,16 +48,23 @@
     enabled: credentials.isConfigured
   }));
 
+  // playlists y artists rara vez cambian durante una sesión y `getArtists`
+  // es pesado (devuelve TODOS los artistas indexados — 100-200 KB JSON gzip
+  // en bibliotecas grandes). Los retenemos durante toda la sesión.
   const playlistsQ = createQuery(() => ({
     queryKey: ['playlists'],
     queryFn: () => nav.getPlaylists(),
-    enabled: credentials.isConfigured
+    enabled: credentials.isConfigured,
+    staleTime: Infinity,
+    gcTime: Infinity
   }));
 
   const artistsQ = createQuery(() => ({
     queryKey: ['artists'],
     queryFn: () => nav.getArtists(),
-    enabled: credentials.isConfigured
+    enabled: credentials.isConfigured,
+    staleTime: Infinity,
+    gcTime: Infinity
   }));
 
   // Quick access usa los albums más recientes (top 8)
@@ -86,6 +93,7 @@
         title={props.title}
         coverUrl={props.coverUrl}
         href={props.href}
+        prefetchHero={props.prefetchHero}
       />
     {/each}
   </section>

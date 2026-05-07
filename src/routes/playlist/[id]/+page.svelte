@@ -35,9 +35,10 @@
   const playlist = $derived(playlistQ.data);
   const songs = $derived(playlist?.entry ?? []);
 
-  // Mismo size (500) que playlistToCardProps → cache hit perfecto al venir
-  // de una card (la imagen aparece instantánea, sin re-descargar).
-  const coverUrl = $derived(playlist?.coverArt ? getCoverArtUrl(playlist.coverArt, 500) : undefined);
+  // 600: hero size mayor que las cards (300). El prefetch on hover de las
+  // cards calienta el cache HTTP de esta URL antes del click — la View
+  // Transition card→detail no parpadea. Sin hover previo, skeleton ~200 ms.
+  const coverUrl = $derived(playlist?.coverArt ? getCoverArtUrl(playlist.coverArt, 600) : undefined);
 
   const fallbackHue = $derived(
     playlist

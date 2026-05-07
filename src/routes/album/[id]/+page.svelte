@@ -49,7 +49,11 @@
   const album = $derived(albumQ.data);
   const songs = $derived(album?.song ?? []);
 
-  const coverUrl = $derived(album?.coverArt ? getCoverArtUrl(album.coverArt, 500) : undefined);
+  // 600: hero size mayor que las cards (300). El prefetch on hover de las
+  // cards calienta el cache HTTP de esta URL antes del click → la View
+  // Transition card→detail no parpadea. Si llega aquí sin hover (e.g.
+  // teclado, navegación directa), CoverImage muestra skeleton ~200 ms.
+  const coverUrl = $derived(album?.coverArt ? getCoverArtUrl(album.coverArt, 600) : undefined);
 
   const fallbackHue = $derived(
     album

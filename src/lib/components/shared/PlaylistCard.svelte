@@ -15,9 +15,11 @@
     owner?: string | undefined;
     coverUrl?: string | undefined;
     href?: string | undefined;
+    /** Pre-fetch del hero del cover (600 vs 300 de la card) on hover/focus. */
+    prefetchHero?: () => void;
   };
 
-  let { id, name, songCount, owner, coverUrl, href = '#', ...rest }: Props = $props();
+  let { id, name, songCount, owner, coverUrl, href = '#', prefetchHero, ...rest }: Props = $props();
 
   const isCurrent = $derived(player.isPlayingFrom('playlist', id));
 
@@ -53,7 +55,14 @@
   );
 </script>
 
-<a class="card" {href} onclick={handleClick} {...rest}>
+<a
+  class="card"
+  {href}
+  onclick={handleClick}
+  onmouseenter={prefetchHero}
+  onfocus={prefetchHero}
+  {...rest}
+>
   <div class="cover-wrap">
     <div bind:this={coverEl} class="cover">
       <CoverImage src={coverUrl} alt="">

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import CoverImage from './CoverImage.svelte';
+
   type Size = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   type Status = 'online' | 'offline' | 'away';
 
@@ -47,7 +49,9 @@
   title={name}
 >
   {#if src}
-    <img {src} alt="" loading="lazy" decoding="async" />
+    <span class="img-slot">
+      <CoverImage {src} alt={name} shape="circle" />
+    </span>
   {:else}
     <span class="initials">{initials || '?'}</span>
   {/if}
@@ -71,12 +75,11 @@
     box-shadow: 0 0 0 1px var(--border-subtle) inset;
   }
 
-  .avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
+  .img-slot {
+    position: absolute;
+    inset: 0;
     border-radius: var(--radius-full);
-    display: block;
+    overflow: hidden;
   }
 
   .initials {

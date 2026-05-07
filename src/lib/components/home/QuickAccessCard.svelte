@@ -13,6 +13,8 @@
     title: string;
     coverUrl?: string | undefined;
     href?: string | undefined;
+    /** Pre-fetch del hero del cover on hover/focus. */
+    prefetchHero?: () => void;
   };
 
   let {
@@ -21,6 +23,7 @@
     title,
     coverUrl,
     href = '#',
+    prefetchHero,
     ...rest
   }: Props = $props();
 
@@ -35,7 +38,14 @@
   }
 </script>
 
-<a class="card" {href} onclick={handleClick} {...rest}>
+<a
+  class="card"
+  {href}
+  onclick={handleClick}
+  onmouseenter={prefetchHero}
+  onfocus={prefetchHero}
+  {...rest}
+>
   <div bind:this={coverEl} class="cover">
     <CoverImage src={coverUrl} alt="">
       {#snippet fallback()}

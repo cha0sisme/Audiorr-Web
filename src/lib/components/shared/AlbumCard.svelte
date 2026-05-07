@@ -23,6 +23,11 @@
         artista. 'year' → año (modo Discografía en ArtistDetail, donde el
         artist es redundante). */
     subtitleMode?: 'artist' | 'year';
+    /** Pre-fetch del hero del cover (size mayor) on hover/focus. El detalle
+        renderiza el mismo coverArt a tamaño hero (600 vs 300 de la card)
+        — con prefetch, al click el cache HTTP del browser ya tiene la
+        imagen y la View Transition card→detail no parpadea. */
+    prefetchHero?: () => void;
   };
 
   let {
@@ -34,6 +39,7 @@
     explicit = false,
     year,
     subtitleMode = 'artist',
+    prefetchHero,
     ...rest
   }: Props = $props();
 
@@ -83,7 +89,14 @@
   }
 </script>
 
-<a class="card" {href} onclick={handleClick} {...rest}>
+<a
+  class="card"
+  {href}
+  onclick={handleClick}
+  onmouseenter={prefetchHero}
+  onfocus={prefetchHero}
+  {...rest}
+>
   <div class="cover-wrap">
     <div bind:this={coverEl} class="cover">
       <CoverImage src={coverUrl} alt="">
