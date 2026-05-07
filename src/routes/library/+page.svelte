@@ -9,7 +9,7 @@
   import VirtualGrid from '$components/shared/VirtualGrid.svelte';
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
   import * as nav from '$services/NavidromeService';
-  import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
+  import { getDailyMixes } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
   import {
     getHomepageLayout,
@@ -20,12 +20,14 @@
     playlistToCardProps,
     artistToCardProps
   } from '$utils/navidrome-mappers';
+  import {
+    dailyMixToProps,
+    smartPlaylistToProps,
+    filterMyPlaylists,
+    isSmartPlaylistName
+  } from '$utils/playlist-section-mappers';
   import { credentials } from '$stores/credentials.svelte';
-  import type {
-    DailyMix,
-    SmartPlaylist,
-    PlaylistSection
-  } from '$types/backend';
+  import type { PlaylistSection } from '$types/backend';
   import type { NavidromePlaylist } from '$types/navidrome';
 
   type Tab = 'albums' | 'playlists' | 'artists';
@@ -126,74 +128,17 @@
   const allPlaylists = $derived<NavidromePlaylist[]>(allPlaylistsQ.data ?? []);
 
   /** Map id → playlist Navidrome. Usado para resolver IDs explícitos de
-      `dynamic` sections y para el filtro de fixed_user. */
+      `dynamic` sections. */
   const playlistMap = $derived.by(() => {
     const map = new Map<string, NavidromePlaylist>();
     for (const p of allPlaylists) map.set(p.id, p);
     return map;
   });
 
-  /** Filtros de categorización — replican legacy PlaylistsPage:239-267.
-      Las playlists del usuario (fixed_user) excluyen las generadas
-      automáticamente (daily/smart) y las que tienen tag de editorial o
-      Spotify. */
-  function isSpotifySynced(p: NavidromePlaylist): boolean {
-    const name = (p.name ?? '').trim().toLowerCase();
-    if (name.startsWith('[spotify] ')) return true;
-    return (p.comment ?? '').includes('Spotify Synced');
-  }
-
-  function isSmartPlaylistName(p: NavidromePlaylist): boolean {
-    const name = (p.name ?? '').trim().toLowerCase();
-    if ((p.comment ?? '').includes('Smart Playlist')) return true;
-    return ['en bucle', 'tiempo atras', 'radar de novedades'].includes(name);
-  }
-
-  function isDailyMixName(p: NavidromePlaylist): boolean {
-    return (p.name ?? '').trim().toLowerCase().startsWith('mix diario');
-  }
-
-  function isEditorial(p: NavidromePlaylist): boolean {
-    return (p.comment ?? '').includes('[Editorial]');
-  }
-
-  /** Playlists del usuario para `fixed_user`. */
-  const myPlaylists = $derived.by<NavidromePlaylist[]>(() => {
-    const username = credentials.current?.username;
-    if (!username) return [];
-    return allPlaylists.filter(
-      (p) =>
-        !isDailyMixName(p) &&
-        !isSmartPlaylistName(p) &&
-        p.owner === username &&
-        !isEditorial(p) &&
-        !isSpotifySynced(p)
-    );
-  });
-
-  /** Mappers DailyMix/SmartPlaylist → props de PlaylistCard. Cover siempre
-      del backend; el store playlistCovers ya tiene el hash post-fetch. */
-  function dailyMixToProps(mix: DailyMix) {
-    return {
-      id: mix.navidromeId ?? `mix-${mix.mixNumber}`,
-      name: mix.name,
-      songCount: mix.trackCount,
-      coverUrl: mix.navidromeId ? getPlaylistCoverUrl(mix.navidromeId) : undefined,
-      href: mix.navidromeId ? `/playlist/${mix.navidromeId}` : '#',
-      prefetchHero: () => {}
-    };
-  }
-
-  function smartPlaylistToProps(sp: SmartPlaylist) {
-    return {
-      id: sp.navidromeId ?? `smart-${sp.playlistKey}`,
-      name: sp.name,
-      songCount: sp.trackCount,
-      coverUrl: sp.navidromeId ? getPlaylistCoverUrl(sp.navidromeId) : undefined,
-      href: sp.navidromeId ? `/playlist/${sp.navidromeId}` : '#',
-      prefetchHero: () => {}
-    };
-  }
+  /** Playlists del usuario para `fixed_user` (filtros legacy). */
+  const myPlaylists = $derived(
+    filterMyPlaylists(allPlaylists, credentials.current?.username)
+  );
 
   /** Resuelve los items concretos para una sección dynamic — IDs → playlists
       Navidrome (filtra los que ya no existen y, por seguridad, las que el
@@ -202,6 +147,22 @@
     return (section.playlists ?? [])
       .map((id) => playlistMap.get(id))
       .filter((p): p is NavidromePlaylist => !!p && !isSmartPlaylistName(p));
+  }
+
+  /** Href del SeeAllGrid de una sección. fixed_* van a rutas dedicadas;
+      dynamic comparte la ruta /library/section/<id> (recibe el id y
+      resuelve la sección desde el layout). */
+  function seeAllHrefFor(section: PlaylistSection): string {
+    switch (section.type) {
+      case 'fixed_daily':
+        return '/library/daily-mixes';
+      case 'fixed_smart':
+        return '/library/smart-playlists';
+      case 'fixed_user':
+        return '/library/my-playlists';
+      case 'dynamic':
+        return `/library/section/${encodeURIComponent(section.id)}`;
+    }
   }
 
   // ==========================================================================
@@ -306,48 +267,58 @@
           {#each Array(12) as _}<div class="card-sk"></div>{/each}
         </div>
       {:else}
+        <!-- Todas las secciones son carruseles HorizontalScrollSection con
+             seeAllHref. Si los items caben, no aparece SeeAllCard; si no,
+             aparece "+N Ver todo" al final → /library/<route> que renderiza
+             un SeeAllGrid con todos los items. -->
         <div class="playlist-sections">
           {#each layout as section (section.id)}
             {#if section.type === 'fixed_daily' && (dailyMixesQ.data ?? []).length > 0}
-              <HorizontalScrollSection title={section.title} items={dailyMixesQ.data ?? []}>
+              <HorizontalScrollSection
+                title={section.title}
+                items={dailyMixesQ.data ?? []}
+                seeAllHref={seeAllHrefFor(section)}
+              >
                 {#snippet item(mix)}
                   {@const props = dailyMixToProps(mix)}
                   <PlaylistCard {...props} />
                 {/snippet}
               </HorizontalScrollSection>
             {:else if section.type === 'fixed_smart' && (smartPlaylistsQ.data ?? []).length > 0}
-              <HorizontalScrollSection title={section.title} items={smartPlaylistsQ.data ?? []}>
+              <HorizontalScrollSection
+                title={section.title}
+                items={smartPlaylistsQ.data ?? []}
+                seeAllHref={seeAllHrefFor(section)}
+              >
                 {#snippet item(sp)}
                   {@const props = smartPlaylistToProps(sp)}
                   <PlaylistCard {...props} />
                 {/snippet}
               </HorizontalScrollSection>
             {:else if section.type === 'fixed_user' && myPlaylists.length > 0}
-              <section class="grid-section">
-                <header class="grid-head">
-                  <h2>{section.title}</h2>
-                </header>
-                <div class="card-grid">
-                  {#each myPlaylists as p (p.id)}
-                    {@const props = playlistToCardProps(p)}
-                    <PlaylistCard {...props} />
-                  {/each}
-                </div>
-              </section>
+              <HorizontalScrollSection
+                title={section.title}
+                items={myPlaylists}
+                seeAllHref={seeAllHrefFor(section)}
+              >
+                {#snippet item(p)}
+                  {@const props = playlistToCardProps(p)}
+                  <PlaylistCard {...props} />
+                {/snippet}
+              </HorizontalScrollSection>
             {:else if section.type === 'dynamic'}
               {@const items = dynamicSectionItems(section)}
               {#if items.length > 0}
-                <section class="grid-section">
-                  <header class="grid-head">
-                    <h2>{section.title}</h2>
-                  </header>
-                  <div class="card-grid">
-                    {#each items as p (p.id)}
-                      {@const props = playlistToCardProps(p)}
-                      <PlaylistCard {...props} />
-                    {/each}
-                  </div>
-                </section>
+                <HorizontalScrollSection
+                  title={section.title}
+                  {items}
+                  seeAllHref={seeAllHrefFor(section)}
+                >
+                  {#snippet item(p)}
+                    {@const props = playlistToCardProps(p)}
+                    <PlaylistCard {...props} />
+                  {/snippet}
+                </HorizontalScrollSection>
               {/if}
             {/if}
           {/each}
@@ -418,39 +389,12 @@
   }
 
   /* Layout del tab playlists: stack vertical de las secciones del layout
-     configurado por admin (daily, smart, user, dynamic). */
+     configurado por admin (daily, smart, user, dynamic). Cada sección es
+     un carrusel HorizontalScrollSection con seeAllHref. */
   .playlist-sections {
     display: flex;
     flex-direction: column;
     gap: var(--space-7);
-    min-width: 0;
-  }
-
-  /* Sección con grid responsive (fixed_user, dynamic). Los carruseles
-     fixed_daily / fixed_smart usan HorizontalScrollSection que provee su
-     propio padding y header. */
-  .grid-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    min-width: 0;
-  }
-  .grid-head {
-    padding: 0 var(--space-6);
-  }
-  .grid-head h2 {
-    margin: 0;
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display);
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
-    gap: var(--space-5);
-    padding: 0 var(--space-6);
     min-width: 0;
   }
 
@@ -488,17 +432,6 @@
     }
     .header h1 {
       font-size: var(--text-2xl);
-    }
-    .grid-head {
-      padding: 0 var(--space-4);
-    }
-    .grid-head h2 {
-      font-size: var(--text-xl);
-    }
-    .card-grid {
-      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-      gap: var(--space-4);
-      padding: 0 var(--space-4);
     }
     .grid-skeleton {
       grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));

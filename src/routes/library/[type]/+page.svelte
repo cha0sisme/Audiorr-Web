@@ -7,22 +7,43 @@
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import * as nav from '$services/NavidromeService';
+  import { getDailyMixes } from '$services/dailyMixes';
+  import { getSmartPlaylists } from '$services/smartPlaylists';
   import {
     albumToCardProps,
     playlistToCardProps,
     artistToCardProps
   } from '$utils/navidrome-mappers';
+  import {
+    dailyMixToProps,
+    smartPlaylistToProps,
+    filterMyPlaylists
+  } from '$utils/playlist-section-mappers';
   import { credentials } from '$stores/credentials.svelte';
 
-  type LibraryType = 'recent' | 'most-played' | 'random' | 'newest' | 'playlists' | 'artists';
+  type LibraryType =
+    | 'recent'
+    | 'most-played'
+    | 'random'
+    | 'newest'
+    | 'playlists'
+    | 'artists'
+    | 'daily-mixes'
+    | 'smart-playlists'
+    | 'my-playlists';
 
-  const ROUTES: Record<LibraryType, { title: string; kind: 'album' | 'playlist' | 'artist' }> = {
-    'recent':       { title: 'Recientemente añadido', kind: 'album' },
-    'most-played':  { title: 'Más escuchado',         kind: 'album' },
-    'random':       { title: 'Aleatorio',             kind: 'album' },
-    'newest':       { title: 'Nuevos lanzamientos',   kind: 'album' },
-    'playlists':    { title: 'Tus playlists',         kind: 'playlist' },
-    'artists':      { title: 'Artistas',              kind: 'artist' }
+  type Kind = 'album' | 'playlist' | 'artist';
+
+  const ROUTES: Record<LibraryType, { title: string; kind: Kind }> = {
+    'recent':           { title: 'Recientemente añadido',     kind: 'album' },
+    'most-played':      { title: 'Más escuchado',             kind: 'album' },
+    'random':           { title: 'Aleatorio',                 kind: 'album' },
+    'newest':           { title: 'Nuevos lanzamientos',       kind: 'album' },
+    'playlists':        { title: 'Tus playlists',             kind: 'playlist' },
+    'artists':          { title: 'Artistas',                  kind: 'artist' },
+    'daily-mixes':      { title: 'Tus mixes diarios',         kind: 'playlist' },
+    'smart-playlists':  { title: 'Hecho especialmente para ti', kind: 'playlist' },
+    'my-playlists':     { title: 'Mis playlists',             kind: 'playlist' }
   };
 
   const type = $derived(page.params.type as LibraryType);
@@ -46,18 +67,56 @@
     : 'random'
   );
 
+  // ============================================================================
+  // Albums (recent / most-played / random / newest)
+  // ============================================================================
   const albumsQ = createQuery(() => ({
     queryKey: ['library-grid', 'albums', albumListType],
     queryFn: () => nav.getAlbumList2(albumListType, 100),
     enabled: credentials.isConfigured && kind === 'album'
   }));
 
-  const playlistsQ = createQuery(() => ({
+  // ============================================================================
+  // Playlists — múltiples sub-tipos.
+  // ============================================================================
+
+  /** "playlists" legacy: lista raw de Navidrome (todas). Mantenemos por
+      backward-compat con `seeAllHref` que aún usa /library/playlists desde
+      la home. Las nuevas vistas dedicadas (daily-mixes, etc) tienen su
+      propio query. */
+  const allPlaylistsQ = createQuery(() => ({
     queryKey: ['library-grid', 'playlists'],
     queryFn: () => nav.getPlaylists(),
-    enabled: credentials.isConfigured && kind === 'playlist'
+    enabled:
+      credentials.isConfigured && (type === 'playlists' || type === 'my-playlists')
   }));
 
+  const dailyMixesQ = createQuery(() => ({
+    queryKey: ['dailyMixes', credentials.current?.username ?? ''],
+    queryFn: () => getDailyMixes(credentials.current!.username),
+    enabled: credentials.isConfigured && type === 'daily-mixes',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const smartPlaylistsQ = createQuery(() => ({
+    queryKey: ['smartPlaylists', credentials.current?.username ?? ''],
+    queryFn: () => getSmartPlaylists(credentials.current!.username),
+    enabled: credentials.isConfigured && type === 'smart-playlists',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  /** my-playlists usa el mismo filter que el tab playlists del library. */
+  const myPlaylists = $derived(
+    type === 'my-playlists'
+      ? filterMyPlaylists(allPlaylistsQ.data ?? [], credentials.current?.username)
+      : []
+  );
+
+  // ============================================================================
+  // Artists
+  // ============================================================================
   const artistsQ = createQuery(() => ({
     queryKey: ['library-grid', 'artists'],
     queryFn: () => nav.getArtists(),
@@ -77,9 +136,28 @@
         <AlbumCard {...props} />
       {/each}
     {/if}
-  {:else if kind === 'playlist'}
-    {#if playlistsQ.data}
-      {#each playlistsQ.data as p (p.id)}
+  {:else if type === 'daily-mixes'}
+    {#if dailyMixesQ.data}
+      {#each dailyMixesQ.data as mix (mix.navidromeId ?? mix.mixNumber)}
+        {@const props = dailyMixToProps(mix)}
+        <PlaylistCard {...props} />
+      {/each}
+    {/if}
+  {:else if type === 'smart-playlists'}
+    {#if smartPlaylistsQ.data}
+      {#each smartPlaylistsQ.data as sp (sp.navidromeId ?? sp.playlistKey)}
+        {@const props = smartPlaylistToProps(sp)}
+        <PlaylistCard {...props} />
+      {/each}
+    {/if}
+  {:else if type === 'my-playlists'}
+    {#each myPlaylists as p (p.id)}
+      {@const props = playlistToCardProps(p)}
+      <PlaylistCard {...props} />
+    {/each}
+  {:else if type === 'playlists'}
+    {#if allPlaylistsQ.data}
+      {#each allPlaylistsQ.data as p (p.id)}
         {@const props = playlistToCardProps(p)}
         <PlaylistCard {...props} />
       {/each}
