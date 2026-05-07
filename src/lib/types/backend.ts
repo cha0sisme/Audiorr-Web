@@ -108,6 +108,45 @@ export const SmartPlaylistsResponseSchema = z.object({
 });
 
 // ============================================================================
+// Playlist Sections — `homepage_layout` global setting
+// ============================================================================
+
+/**
+ * Layout configurable de la página /library?tab=playlists. El admin lo edita
+ * desde la página /admin del backend; se persiste en `global_settings` con
+ * key `homepage_layout` y se sirve via /api/settings/homepage_layout.
+ *
+ * Tipos:
+ * - fixed_daily : "Tus mixes diarios" — leídos de /api/daily-mixes.
+ * - fixed_smart : "Hecho especialmente para ti" — leídos de /api/smart-playlists.
+ * - fixed_user  : "Mis playlists" — playlists owner=username, no editorial,
+ *                 no spotify-synced, no smart, no daily-mix.
+ * - dynamic     : sección custom configurable por el admin. `playlists`
+ *                 contiene IDs Subsonic específicos (e.g. editoriales,
+ *                 spotify-synced, agrupaciones temáticas como "Fiesta Latina").
+ */
+export const PlaylistSectionTypeSchema = z.enum([
+  'fixed_daily',
+  'fixed_user',
+  'fixed_smart',
+  'dynamic'
+]);
+export const PlaylistSectionSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  type: PlaylistSectionTypeSchema,
+  playlists: z.array(z.string()).optional()
+});
+export type PlaylistSection = z.infer<typeof PlaylistSectionSchema>;
+export const PlaylistSectionsArraySchema = z.array(PlaylistSectionSchema);
+
+/** Wrapper del endpoint /api/settings/:key. */
+export const GlobalSettingResponseSchema = z.object({
+  key: z.string(),
+  value: z.unknown()
+});
+
+// ============================================================================
 // User Stats (Wrapped-lite) — /api/stats/user-stats?username=&period=week|month
 // ============================================================================
 

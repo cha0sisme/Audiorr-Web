@@ -5,11 +5,12 @@
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import QuickAccessCard from '$components/home/QuickAccessCard.svelte';
-  import RecentContextCard from '$components/home/RecentContextCard.svelte';
   import * as nav from '$services/NavidromeService';
   import * as stats from '$services/stats';
-  import { getDailyMixes } from '$services/dailyMixes';
+  import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
+  import { getCoverArtUrl } from '$services/NavidromeService';
+  import { prefetchCover } from '$utils/cover-cache';
   import {
     albumToCardProps,
     playlistToCardProps,
@@ -138,16 +139,49 @@
   </section>
 
   {#if recentContexts.length > 0}
-    <section class="jump-back-in">
-      <header class="section-head">
-        <h2>Volver a escuchar</h2>
-      </header>
-      <div class="jump-grid">
-        {#each recentContexts as ctx (ctx.contextUri)}
-          <RecentContextCard item={ctx} />
-        {/each}
-      </div>
-    </section>
+    <!-- Jump Back In ("Volver a escuchar"): carrusel reutilizando los cards
+         estándar de la app (AlbumCard / PlaylistCard / ArtistCard) según el
+         tipo del contexto. Esto garantiza coherencia visual con el resto
+         de carruseles de la home (mismo itemMinWidth=180, mismas medidas
+         tipográficas, mismas animaciones).
+
+         Cover por tipo:
+           album    → Navidrome (Subsonic) por coverArtId.
+           playlist | smartmix → backend personalizado por id.
+           artist   → fallback a iniciales (ArtistCard).
+
+         `other` se filtra (sin cover representativo).
+         Para artist, ctx.id es el NOMBRE en el shape del backend, así que
+         href cae a /search?q=<name>. -->
+    <HorizontalScrollSection title="Volver a escuchar" items={recentContexts}>
+      {#snippet item(ctx)}
+        {#if ctx.type === 'album'}
+          <AlbumCard
+            id={ctx.id}
+            title={ctx.title}
+            artist={ctx.artist}
+            coverUrl={ctx.coverArtId ? getCoverArtUrl(ctx.coverArtId, 300) : undefined}
+            href={`/album/${ctx.id}`}
+            prefetchHero={() => prefetchCover(ctx.coverArtId ?? undefined, 600)}
+          />
+        {:else if ctx.type === 'playlist' || ctx.type === 'smartmix'}
+          <PlaylistCard
+            id={ctx.id}
+            name={ctx.title}
+            coverUrl={getPlaylistCoverUrl(ctx.id)}
+            href={`/playlist/${ctx.id}`}
+            prefetchHero={() => {}}
+          />
+        {:else if ctx.type === 'artist'}
+          <ArtistCard
+            id={ctx.id}
+            name={ctx.title}
+            href={`/search?q=${encodeURIComponent(ctx.title)}`}
+            prefetchHero={() => {}}
+          />
+        {/if}
+      {/snippet}
+    </HorizontalScrollSection>
   {/if}
 
   <HorizontalScrollSection
@@ -281,27 +315,6 @@
     padding: 0 var(--space-6);
   }
 
-  /* Jump Back In — grid de tiles cuadradas. Cap a 8 columnas para que
-     en monitores 4K no se vuelva ridículo. minmax(160px, 1fr) hace que
-     en móvil entren 2 (con padding lateral); en desktop, 4-6. */
-  .jump-back-in {
-    display: grid;
-    gap: var(--space-3);
-    padding: 0 var(--space-6);
-  }
-  .section-head h2 {
-    margin: 0;
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display);
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .jump-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
-    gap: var(--space-5);
-  }
 
   @media (max-width: 640px) {
     .home {
@@ -313,16 +326,6 @@
     .quick-access {
       padding: 0 var(--space-4);
       grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
-    }
-    .jump-back-in {
-      padding: 0 var(--space-4);
-    }
-    .jump-grid {
-      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
-      gap: var(--space-4);
-    }
-    .section-head h2 {
-      font-size: var(--text-xl);
     }
     h1 {
       font-size: var(--text-2xl);

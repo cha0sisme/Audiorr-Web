@@ -8,6 +8,7 @@
  */
 
 import { getCoverArtUrl } from '$services/NavidromeService';
+import { getPlaylistCoverUrl } from '$services/dailyMixes';
 import { prefetchCover, prefetchUrl } from '$utils/cover-cache';
 import type {
   NavidromeAlbum,
@@ -71,14 +72,19 @@ export type PlaylistCardProps = {
 };
 
 export function playlistToCardProps(p: NavidromePlaylist): PlaylistCardProps {
+  // Cover SIEMPRE del backend personalizado (`/api/playlists/<id>/cover.png`)
+  // — nunca cover original de Navidrome (decisión de producto: el backend
+  // re-renderiza con estilo Audiorr y cachea con TTL/contentHash).
   return {
     id: p.id,
     name: p.name,
     songCount: p.songCount,
     owner: p.owner,
-    coverUrl: p.coverArt ? getCoverArtUrl(p.coverArt, CARD_SIZE) : undefined,
+    coverUrl: getPlaylistCoverUrl(p.id),
     href: `/playlist/${p.id}`,
-    prefetchHero: () => prefetchCover(p.coverArt, HERO_SIZE)
+    // Hero usa la misma URL que el card (es el mismo cover del backend).
+    // El browser ya lo tiene cacheado al hacer click — no-op.
+    prefetchHero: () => {}
   };
 }
 

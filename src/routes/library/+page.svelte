@@ -12,11 +12,21 @@
   import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
   import {
+    getHomepageLayout,
+    DEFAULT_HOMEPAGE_LAYOUT
+  } from '$services/globalSettings';
+  import {
     albumToCardProps,
+    playlistToCardProps,
     artistToCardProps
   } from '$utils/navidrome-mappers';
   import { credentials } from '$stores/credentials.svelte';
-  import type { DailyMix, SmartPlaylist } from '$types/backend';
+  import type {
+    DailyMix,
+    SmartPlaylist,
+    PlaylistSection
+  } from '$types/backend';
+  import type { NavidromePlaylist } from '$types/navidrome';
 
   type Tab = 'albums' | 'playlists' | 'artists';
 
@@ -40,10 +50,9 @@
     goto(url, { replaceState: true, keepFocus: true, noScroll: true });
   }
 
-  // Una sola query por tab activa — solo la del tab actual fetchea.
-  // gcTime: 30min — la library es la "home" del usuario, vuelve constantemente.
-  // Override del default (60s) para evitar refetch al volver tras navegar a un
-  // detail. La data en sí es chica (lista de IDs+metadata, ~100KB), no satura.
+  // ==========================================================================
+  // Albums + Artists — sin cambios.
+  // ==========================================================================
   const albumsQ = createQuery(() => ({
     queryKey: ['library', 'albums'],
     queryFn: () => nav.getAlbumList2('alphabeticalByName', 500),
@@ -51,10 +60,44 @@
     gcTime: 30 * 60 * 1000
   }));
 
-  // Daily Mixes y Smart Playlists del backend Audiorr — el cron las regenera
-  // periódicamente. staleTime largo: dentro de la sesión no van a cambiar.
-  // Side effect de los services: registran coverContentHash en el store
-  // playlistCovers, así getPlaylistCoverUrl sirve URLs con ?v= immutable.
+  const artistsQ = createQuery(() => ({
+    queryKey: ['library', 'artists'],
+    queryFn: () => nav.getArtists(),
+    enabled: credentials.isConfigured && currentTab === 'artists',
+    gcTime: 30 * 60 * 1000
+  }));
+
+  // ==========================================================================
+  // Playlists tab — replica el layout completo del legacy PlaylistsPage:
+  //
+  //   1. Cargamos `homepage_layout` del backend (admin-configurable). Si no
+  //      existe, usamos DEFAULT_HOMEPAGE_LAYOUT (daily + smart + user).
+  //   2. Cargamos en paralelo: daily mixes, smart playlists, todas las
+  //      playlists de Navidrome.
+  //   3. Renderizamos las secciones EN ORDEN según el layout. Cada `type` se
+  //      resuelve a su data source:
+  //        fixed_daily  → dailyMixesQ.data
+  //        fixed_smart  → smartPlaylistsQ.data
+  //        fixed_user   → playlists Navidrome filtradas (owner=username y
+  //                       no editorial/spotify/smart/daily-mix)
+  //        dynamic      → playlists con IDs explícitos de section.playlists
+  //                       (editoriales, spotify-synced, agrupaciones temáticas
+  //                       como "Fiesta Latina" curadas por el admin).
+  //
+  // Cover de cada PlaylistCard SIEMPRE viene del backend personalizado
+  // (`/api/playlists/<id>/cover.png`) — nunca cover original de Navidrome.
+  // El store `playlistCovers` se hidrata como side effect de getDailyMixes
+  // y getSmartPlaylists para que las URLs lleven `?v=<contentHash>` y el
+  // backend responda con `Cache-Control: immutable` 1 año.
+  // ==========================================================================
+
+  const allPlaylistsQ = createQuery(() => ({
+    queryKey: ['library', 'playlists'],
+    queryFn: () => nav.getPlaylists(),
+    enabled: credentials.isConfigured && currentTab === 'playlists',
+    gcTime: 30 * 60 * 1000
+  }));
+
   const dailyMixesQ = createQuery(() => ({
     queryKey: ['dailyMixes', credentials.current?.username ?? ''],
     queryFn: () => getDailyMixes(credentials.current!.username),
@@ -71,13 +114,65 @@
     gcTime: 30 * 60 * 1000
   }));
 
-  /**
-   * Mappers DailyMix/SmartPlaylist → props de PlaylistCard.
-   *
-   * Cover SIEMPRE del backend personalizado (`/api/playlists/<id>/cover.png`).
-   * Las playlists nunca cargan con cover original de Navidrome — es decisión
-   * de producto (covers Audiorr-style con TTL+cache).
-   */
+  const layoutQ = createQuery(() => ({
+    queryKey: ['homepageLayout'],
+    queryFn: () => getHomepageLayout(),
+    enabled: credentials.isConfigured && currentTab === 'playlists',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const layout = $derived<PlaylistSection[]>(layoutQ.data ?? DEFAULT_HOMEPAGE_LAYOUT);
+  const allPlaylists = $derived<NavidromePlaylist[]>(allPlaylistsQ.data ?? []);
+
+  /** Map id → playlist Navidrome. Usado para resolver IDs explícitos de
+      `dynamic` sections y para el filtro de fixed_user. */
+  const playlistMap = $derived.by(() => {
+    const map = new Map<string, NavidromePlaylist>();
+    for (const p of allPlaylists) map.set(p.id, p);
+    return map;
+  });
+
+  /** Filtros de categorización — replican legacy PlaylistsPage:239-267.
+      Las playlists del usuario (fixed_user) excluyen las generadas
+      automáticamente (daily/smart) y las que tienen tag de editorial o
+      Spotify. */
+  function isSpotifySynced(p: NavidromePlaylist): boolean {
+    const name = (p.name ?? '').trim().toLowerCase();
+    if (name.startsWith('[spotify] ')) return true;
+    return (p.comment ?? '').includes('Spotify Synced');
+  }
+
+  function isSmartPlaylistName(p: NavidromePlaylist): boolean {
+    const name = (p.name ?? '').trim().toLowerCase();
+    if ((p.comment ?? '').includes('Smart Playlist')) return true;
+    return ['en bucle', 'tiempo atras', 'radar de novedades'].includes(name);
+  }
+
+  function isDailyMixName(p: NavidromePlaylist): boolean {
+    return (p.name ?? '').trim().toLowerCase().startsWith('mix diario');
+  }
+
+  function isEditorial(p: NavidromePlaylist): boolean {
+    return (p.comment ?? '').includes('[Editorial]');
+  }
+
+  /** Playlists del usuario para `fixed_user`. */
+  const myPlaylists = $derived.by<NavidromePlaylist[]>(() => {
+    const username = credentials.current?.username;
+    if (!username) return [];
+    return allPlaylists.filter(
+      (p) =>
+        !isDailyMixName(p) &&
+        !isSmartPlaylistName(p) &&
+        p.owner === username &&
+        !isEditorial(p) &&
+        !isSpotifySynced(p)
+    );
+  });
+
+  /** Mappers DailyMix/SmartPlaylist → props de PlaylistCard. Cover siempre
+      del backend; el store playlistCovers ya tiene el hash post-fetch. */
   function dailyMixToProps(mix: DailyMix) {
     return {
       id: mix.navidromeId ?? `mix-${mix.mixNumber}`,
@@ -100,12 +195,39 @@
     };
   }
 
-  const artistsQ = createQuery(() => ({
-    queryKey: ['library', 'artists'],
-    queryFn: () => nav.getArtists(),
-    enabled: credentials.isConfigured && currentTab === 'artists',
-    gcTime: 30 * 60 * 1000
-  }));
+  /** Resuelve los items concretos para una sección dynamic — IDs → playlists
+      Navidrome (filtra los que ya no existen y, por seguridad, las que el
+      admin no debería estar mezclando aquí: smart playlists). */
+  function dynamicSectionItems(section: PlaylistSection): NavidromePlaylist[] {
+    return (section.playlists ?? [])
+      .map((id) => playlistMap.get(id))
+      .filter((p): p is NavidromePlaylist => !!p && !isSmartPlaylistName(p));
+  }
+
+  // ==========================================================================
+  // Subtitle / pending — sumamos los conteos de todas las secciones que se
+  // van a renderizar para reflejar el total real visible.
+  // ==========================================================================
+  const playlistsTotal = $derived.by(() => {
+    let n = 0;
+    for (const section of layout) {
+      switch (section.type) {
+        case 'fixed_daily':
+          n += dailyMixesQ.data?.length ?? 0;
+          break;
+        case 'fixed_smart':
+          n += smartPlaylistsQ.data?.length ?? 0;
+          break;
+        case 'fixed_user':
+          n += myPlaylists.length;
+          break;
+        case 'dynamic':
+          n += dynamicSectionItems(section).length;
+          break;
+      }
+    }
+    return n;
+  });
 
   const subtitle = $derived.by(() => {
     if (currentTab === 'albums') {
@@ -113,17 +235,24 @@
       return `${n} ${n === 1 ? 'álbum' : 'álbumes'}`;
     }
     if (currentTab === 'playlists') {
-      const n = (dailyMixesQ.data?.length ?? 0) + (smartPlaylistsQ.data?.length ?? 0);
-      return `${n} ${n === 1 ? 'playlist' : 'playlists'}`;
+      return `${playlistsTotal} ${playlistsTotal === 1 ? 'playlist' : 'playlists'}`;
     }
     const n = artistsQ.data?.length ?? 0;
     return `${n} ${n === 1 ? 'artista' : 'artistas'}`;
   });
 
+  /** Pending del tab playlists: hasta que las 3 fuentes principales (daily,
+      smart, allPlaylists) tengan respuesta o error, mostramos skeleton. */
+  const playlistsPending = $derived(
+    dailyMixesQ.isPending || smartPlaylistsQ.isPending || allPlaylistsQ.isPending
+  );
+
   const isPending = $derived(
-    currentTab === 'albums' ? albumsQ.isPending :
-    currentTab === 'playlists' ? (dailyMixesQ.isPending && smartPlaylistsQ.isPending) :
-    artistsQ.isPending
+    currentTab === 'albums'
+      ? albumsQ.isPending
+      : currentTab === 'playlists'
+        ? playlistsPending
+        : artistsQ.isPending
   );
 </script>
 
@@ -172,39 +301,59 @@
         </VirtualGrid>
       {/if}
     {:else if currentTab === 'playlists'}
-      {#if dailyMixesQ.isPending && smartPlaylistsQ.isPending}
+      {#if playlistsPending}
         <div class="grid-skeleton">
-          {#each Array(8) as _}<div class="card-sk"></div>{/each}
+          {#each Array(12) as _}<div class="card-sk"></div>{/each}
         </div>
       {:else}
-        <!-- Layout de 2 secciones replicando iOS HomeView + legacy
-             PlaylistsPage (sin "Mis playlists" — las playlists del usuario
-             se gestionan desde sus respectivos detalles, no en este tab).
-             Cover de cada PlaylistCard SIEMPRE viene del backend
-             personalizado (`/api/playlists/<id>/cover.png`). -->
         <div class="playlist-sections">
-          {#if (dailyMixesQ.data ?? []).length > 0}
-            <HorizontalScrollSection
-              title="Tus mixes diarios"
-              items={dailyMixesQ.data ?? []}
-            >
-              {#snippet item(mix)}
-                {@const props = dailyMixToProps(mix)}
-                <PlaylistCard {...props} />
-              {/snippet}
-            </HorizontalScrollSection>
-          {/if}
+          {#each layout as section (section.id)}
+            {#if section.type === 'fixed_daily' && (dailyMixesQ.data ?? []).length > 0}
+              <HorizontalScrollSection title={section.title} items={dailyMixesQ.data ?? []}>
+                {#snippet item(mix)}
+                  {@const props = dailyMixToProps(mix)}
+                  <PlaylistCard {...props} />
+                {/snippet}
+              </HorizontalScrollSection>
+            {:else if section.type === 'fixed_smart' && (smartPlaylistsQ.data ?? []).length > 0}
+              <HorizontalScrollSection title={section.title} items={smartPlaylistsQ.data ?? []}>
+                {#snippet item(sp)}
+                  {@const props = smartPlaylistToProps(sp)}
+                  <PlaylistCard {...props} />
+                {/snippet}
+              </HorizontalScrollSection>
+            {:else if section.type === 'fixed_user' && myPlaylists.length > 0}
+              <section class="grid-section">
+                <header class="grid-head">
+                  <h2>{section.title}</h2>
+                </header>
+                <div class="card-grid">
+                  {#each myPlaylists as p (p.id)}
+                    {@const props = playlistToCardProps(p)}
+                    <PlaylistCard {...props} />
+                  {/each}
+                </div>
+              </section>
+            {:else if section.type === 'dynamic'}
+              {@const items = dynamicSectionItems(section)}
+              {#if items.length > 0}
+                <section class="grid-section">
+                  <header class="grid-head">
+                    <h2>{section.title}</h2>
+                  </header>
+                  <div class="card-grid">
+                    {#each items as p (p.id)}
+                      {@const props = playlistToCardProps(p)}
+                      <PlaylistCard {...props} />
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+            {/if}
+          {/each}
 
-          {#if (smartPlaylistsQ.data ?? []).length > 0}
-            <HorizontalScrollSection
-              title="Hecho especialmente para ti"
-              items={smartPlaylistsQ.data ?? []}
-            >
-              {#snippet item(sp)}
-                {@const props = smartPlaylistToProps(sp)}
-                <PlaylistCard {...props} />
-              {/snippet}
-            </HorizontalScrollSection>
+          {#if playlistsTotal === 0}
+            <p class="empty">No hay playlists que mostrar.</p>
           {/if}
         </div>
       {/if}
@@ -268,12 +417,47 @@
     min-width: 0;
   }
 
-  /* Layout del tab playlists: stack vertical con espacio entre carruseles. */
+  /* Layout del tab playlists: stack vertical de las secciones del layout
+     configurado por admin (daily, smart, user, dynamic). */
   .playlist-sections {
     display: flex;
     flex-direction: column;
     gap: var(--space-7);
     min-width: 0;
+  }
+
+  /* Sección con grid responsive (fixed_user, dynamic). Los carruseles
+     fixed_daily / fixed_smart usan HorizontalScrollSection que provee su
+     propio padding y header. */
+  .grid-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+  .grid-head {
+    padding: 0 var(--space-6);
+  }
+  .grid-head h2 {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+    gap: var(--space-5);
+    padding: 0 var(--space-6);
+    min-width: 0;
+  }
+
+  .empty {
+    padding: var(--space-8);
+    text-align: center;
+    color: var(--text-tertiary);
   }
 
   /* Skeleton estado: usamos CSS grid normal porque no hay datos aún. */
@@ -304,6 +488,17 @@
     }
     .header h1 {
       font-size: var(--text-2xl);
+    }
+    .grid-head {
+      padding: 0 var(--space-4);
+    }
+    .grid-head h2 {
+      font-size: var(--text-xl);
+    }
+    .card-grid {
+      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+      gap: var(--space-4);
+      padding: 0 var(--space-4);
     }
     .grid-skeleton {
       grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));

@@ -10,7 +10,7 @@
   import CoverImage from '$components/shared/CoverImage.svelte';
   import * as nav from '$services/NavidromeService';
   import { songToListItem } from '$utils/navidrome-mappers';
-  import { getCoverArtUrl } from '$services/NavidromeService';
+  import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
@@ -35,10 +35,12 @@
   const playlist = $derived(playlistQ.data);
   const songs = $derived(playlist?.entry ?? []);
 
-  // 600: hero size mayor que las cards (300). El prefetch on hover de las
-  // cards calienta el cache HTTP de esta URL antes del click — la View
-  // Transition card→detail no parpadea. Sin hover previo, skeleton ~200 ms.
-  const coverUrl = $derived(playlist?.coverArt ? getCoverArtUrl(playlist.coverArt, 600) : undefined);
+  // Cover SIEMPRE del backend personalizado (`/api/playlists/<id>/cover.png`).
+  // Nunca usamos el coverArt original de Navidrome — el backend re-renderiza
+  // con estilo Audiorr y aplica TTL/contentHash. La misma URL se usó en la
+  // card del listado (cards y hero comparten URL → cache HTTP del browser
+  // los reutiliza), por eso la View Transition card→detail no parpadea.
+  const coverUrl = $derived(playlistId ? getPlaylistCoverUrl(playlistId) : undefined);
 
   const fallbackHue = $derived(
     playlist
