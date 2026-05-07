@@ -4,7 +4,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import {
     House, MagnifyingGlass, MusicNotes, Heart,
-    ListPlus, Star, X, PushPin
+    ListPlus, Star, X
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
@@ -249,10 +249,7 @@
 
   {#if pinnedPlaylists.length > 0}
     <div class="section pinned-section">
-      <p class="section-label">
-        <PushPin size={11} weight="fill" />
-        <span>Ancladas</span>
-      </p>
+      <p class="section-label">Ancladas</p>
       <nav class="pinned-list" aria-label="Playlists ancladas">
         {#each pinnedPlaylists as p (p.id)}
           <a
@@ -436,9 +433,6 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
     color: var(--text-tertiary);
-    display: flex;
-    align-items: center;
-    gap: 6px;
   }
 
   /* === Pinned Playlists === */
@@ -453,8 +447,15 @@
     flex-direction: column;
     gap: 1px;
   }
+  /* Grid 28px + 1fr — el grid template-column auto-shrink garantiza que
+     el .pinned-name (segunda columna) se trunque por ellipsis cuando el
+     nombre supera el ancho disponible. Con flex+gap esto fallaba: los
+     flex items con texto tienen min-width:auto (= min-content) y el
+     ellipsis no se aplica si la palabra del nombre cabe entera (los
+     nombres de playlist a menudo son una sola palabra larga). */
   .pinned-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
     align-items: center;
     gap: var(--space-2);
     padding: 6px var(--space-3);

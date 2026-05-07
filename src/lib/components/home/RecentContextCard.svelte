@@ -24,6 +24,7 @@
   import { Play, MusicNote, Queue, User } from 'phosphor-svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
+  import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import type { RecentContextItem } from '$types/backend';
 
   type Props = {
@@ -42,11 +43,24 @@
     return `/playlist/${item.id}`;
   });
 
-  /** Cover URL — prefiere coverArtId Subsonic. Para artist queda undefined
-      (mostramos fallback redondo con icono User). */
-  const coverUrl = $derived(
-    !isArtist && item.coverArtId ? getCoverArtUrl(item.coverArtId, 300) : undefined
-  );
+  /** Cover URL por tipo:
+      - album    → cover de Navidrome (Subsonic) por `coverArtId`.
+      - playlist | smartmix → cover personalizado del backend Audiorr por `id`.
+                              IMPORTANTE: NO usar `coverArtId`, que es la
+                              portada de una canción aleatoria escuchada
+                              dentro de la playlist (incorrecto para
+                              representar la playlist).
+      - artist   → undefined; fallback con icono User.
+      - other    → undefined; fallback genérico. */
+  const coverUrl = $derived.by(() => {
+    if (item.type === 'album' && item.coverArtId) {
+      return getCoverArtUrl(item.coverArtId, 300);
+    }
+    if (item.type === 'playlist' || item.type === 'smartmix') {
+      return getPlaylistCoverUrl(item.id);
+    }
+    return undefined;
+  });
 
   /** Subtítulo: artist para álbumes, "Playlist"/"Mix" para playlists, vacío
       para artistas (el nombre ya es el título). */

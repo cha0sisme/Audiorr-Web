@@ -11,10 +11,19 @@
 
 import { backendService } from './BackendService.svelte';
 import { SmartPlaylistsResponseSchema, type SmartPlaylist } from '$types/backend';
+import { playlistCovers } from '$stores/playlist-covers.svelte';
 
+/**
+ * Lista de smart playlists. Side effect: registra `coverContentHash` en el
+ * store global `playlistCovers` (igual que getDailyMixes).
+ */
 export async function getSmartPlaylists(username: string): Promise<SmartPlaylist[]> {
   const data = await backendService.get('/api/smart-playlists', SmartPlaylistsResponseSchema, {
     'x-navidrome-user': username
   });
-  return data?.playlists ?? [];
+  const playlists = data?.playlists ?? [];
+  playlistCovers.setMany(
+    playlists.map((p) => ({ id: p.navidromeId, hash: p.coverContentHash }))
+  );
+  return playlists;
 }

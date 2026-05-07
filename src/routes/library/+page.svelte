@@ -13,7 +13,6 @@
   import { getSmartPlaylists } from '$services/smartPlaylists';
   import {
     albumToCardProps,
-    playlistToCardProps,
     artistToCardProps
   } from '$utils/navidrome-mappers';
   import { credentials } from '$stores/credentials.svelte';
@@ -52,15 +51,10 @@
     gcTime: 30 * 60 * 1000
   }));
 
-  const playlistsQ = createQuery(() => ({
-    queryKey: ['library', 'playlists'],
-    queryFn: () => nav.getPlaylists(),
-    enabled: credentials.isConfigured && currentTab === 'playlists',
-    gcTime: 30 * 60 * 1000
-  }));
-
   // Daily Mixes y Smart Playlists del backend Audiorr — el cron las regenera
   // periódicamente. staleTime largo: dentro de la sesión no van a cambiar.
+  // Side effect de los services: registran coverContentHash en el store
+  // playlistCovers, así getPlaylistCoverUrl sirve URLs con ?v= immutable.
   const dailyMixesQ = createQuery(() => ({
     queryKey: ['dailyMixes', credentials.current?.username ?? ''],
     queryFn: () => getDailyMixes(credentials.current!.username),
@@ -77,45 +71,34 @@
     gcTime: 30 * 60 * 1000
   }));
 
-  /** Mappers DailyMix/SmartPlaylist → props de PlaylistCard. */
+  /**
+   * Mappers DailyMix/SmartPlaylist → props de PlaylistCard.
+   *
+   * Cover SIEMPRE del backend personalizado (`/api/playlists/<id>/cover.png`).
+   * Las playlists nunca cargan con cover original de Navidrome — es decisión
+   * de producto (covers Audiorr-style con TTL+cache).
+   */
   function dailyMixToProps(mix: DailyMix) {
-    const buster = mix.coverContentHash ?? mix.coverVersion ?? null;
     return {
       id: mix.navidromeId ?? `mix-${mix.mixNumber}`,
       name: mix.name,
       songCount: mix.trackCount,
-      coverUrl: mix.navidromeId ? getPlaylistCoverUrl(mix.navidromeId, buster) : undefined,
+      coverUrl: mix.navidromeId ? getPlaylistCoverUrl(mix.navidromeId) : undefined,
       href: mix.navidromeId ? `/playlist/${mix.navidromeId}` : '#',
       prefetchHero: () => {}
     };
   }
 
   function smartPlaylistToProps(sp: SmartPlaylist) {
-    const buster = sp.coverContentHash ?? sp.coverVersion ?? null;
     return {
       id: sp.navidromeId ?? `smart-${sp.playlistKey}`,
       name: sp.name,
       songCount: sp.trackCount,
-      coverUrl: sp.navidromeId ? getPlaylistCoverUrl(sp.navidromeId, buster) : undefined,
+      coverUrl: sp.navidromeId ? getPlaylistCoverUrl(sp.navidromeId) : undefined,
       href: sp.navidromeId ? `/playlist/${sp.navidromeId}` : '#',
       prefetchHero: () => {}
     };
   }
-
-  /** IDs de Navidrome ya usados por daily mixes / smart playlists — para
-      filtrarlos del listado "Mis playlists" y no duplicar UI. */
-  const generatedIds = $derived.by(() => {
-    const set = new Set<string>();
-    for (const m of dailyMixesQ.data ?? []) {
-      if (m.navidromeId) set.add(m.navidromeId);
-    }
-    for (const s of smartPlaylistsQ.data ?? []) {
-      if (s.navidromeId) set.add(s.navidromeId);
-    }
-    return set;
-  });
-
-  const myPlaylists = $derived((playlistsQ.data ?? []).filter((p) => !generatedIds.has(p.id)));
 
   const artistsQ = createQuery(() => ({
     queryKey: ['library', 'artists'],
@@ -130,11 +113,7 @@
       return `${n} ${n === 1 ? 'álbum' : 'álbumes'}`;
     }
     if (currentTab === 'playlists') {
-      // Suma daily mixes + smart playlists + mis playlists (post-filtro).
-      const n =
-        (dailyMixesQ.data?.length ?? 0) +
-        (smartPlaylistsQ.data?.length ?? 0) +
-        myPlaylists.length;
+      const n = (dailyMixesQ.data?.length ?? 0) + (smartPlaylistsQ.data?.length ?? 0);
       return `${n} ${n === 1 ? 'playlist' : 'playlists'}`;
     }
     const n = artistsQ.data?.length ?? 0;
@@ -143,7 +122,7 @@
 
   const isPending = $derived(
     currentTab === 'albums' ? albumsQ.isPending :
-    currentTab === 'playlists' ? playlistsQ.isPending :
+    currentTab === 'playlists' ? (dailyMixesQ.isPending && smartPlaylistsQ.isPending) :
     artistsQ.isPending
   );
 </script>
@@ -193,15 +172,16 @@
         </VirtualGrid>
       {/if}
     {:else if currentTab === 'playlists'}
-      {#if playlistsQ.isPending}
+      {#if dailyMixesQ.isPending && smartPlaylistsQ.isPending}
         <div class="grid-skeleton">
           {#each Array(8) as _}<div class="card-sk"></div>{/each}
         </div>
-      {:else if playlistsQ.data}
-        <!-- 3 secciones siguiendo el layout de iOS HomeView + legacy
-             PlaylistsPage: Daily Mixes → Smart Playlists → Mis playlists.
-             Las dos primeras son carruseles horizontales (pocos items, fijo);
-             "Mis playlists" es VirtualGrid (puede haber cientos). -->
+      {:else}
+        <!-- Layout de 2 secciones replicando iOS HomeView + legacy
+             PlaylistsPage (sin "Mis playlists" — las playlists del usuario
+             se gestionan desde sus respectivos detalles, no en este tab).
+             Cover de cada PlaylistCard SIEMPRE viene del backend
+             personalizado (`/api/playlists/<id>/cover.png`). -->
         <div class="playlist-sections">
           {#if (dailyMixesQ.data ?? []).length > 0}
             <HorizontalScrollSection
@@ -225,25 +205,6 @@
                 <PlaylistCard {...props} />
               {/snippet}
             </HorizontalScrollSection>
-          {/if}
-
-          {#if myPlaylists.length > 0}
-            <section class="my-playlists-section">
-              <header class="my-playlists-head">
-                <h2>Mis playlists</h2>
-              </header>
-              <VirtualGrid
-                items={myPlaylists}
-                minItemWidth={180}
-                estimateRowHeight={250}
-                getKey={(p) => p.id}
-              >
-                {#snippet item(p)}
-                  {@const props = playlistToCardProps(p)}
-                  <PlaylistCard {...props} />
-                {/snippet}
-              </VirtualGrid>
-            </section>
           {/if}
         </div>
       {/if}
@@ -307,27 +268,12 @@
     min-width: 0;
   }
 
-  /* Layout de 3 secciones del tab playlists: stack vertical con espacio
-     entre carruseles y el grid final. */
+  /* Layout del tab playlists: stack vertical con espacio entre carruseles. */
   .playlist-sections {
     display: flex;
     flex-direction: column;
     gap: var(--space-7);
     min-width: 0;
-  }
-  .my-playlists-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    min-width: 0;
-  }
-  .my-playlists-head h2 {
-    margin: 0;
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display);
-    color: var(--text-primary);
-    line-height: 1.2;
   }
 
   /* Skeleton estado: usamos CSS grid normal porque no hay datos aún. */

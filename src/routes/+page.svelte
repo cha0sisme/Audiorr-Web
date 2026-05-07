@@ -8,6 +8,8 @@
   import RecentContextCard from '$components/home/RecentContextCard.svelte';
   import * as nav from '$services/NavidromeService';
   import * as stats from '$services/stats';
+  import { getDailyMixes } from '$services/dailyMixes';
+  import { getSmartPlaylists } from '$services/smartPlaylists';
   import {
     albumToCardProps,
     playlistToCardProps,
@@ -85,6 +87,27 @@
     staleTime: 60 * 1000
   }));
   const recentContexts = $derived(recentContextsQ.data ?? []);
+
+  // Side effect: pre-cargar los `coverContentHash` de daily mixes + smart
+  // playlists en el store global `playlistCovers`. Mirrors
+  // `api.refreshPlaylistCoverHashes()` de iOS HomeView.
+  // Sin esto, los covers de playlists en Jump Back In se servirían sin
+  // `?v=` y caducarían al cabo de 30 min (vs 1 año con el hash).
+  // No renderizamos los datos aquí — es solo para hidratar el cache.
+  createQuery(() => ({
+    queryKey: ['dailyMixes', credentials.current?.username ?? ''],
+    queryFn: () => getDailyMixes(credentials.current!.username),
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+  createQuery(() => ({
+    queryKey: ['smartPlaylists', credentials.current?.username ?? ''],
+    queryFn: () => getSmartPlaylists(credentials.current!.username),
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
 </script>
 
 <div class="home">

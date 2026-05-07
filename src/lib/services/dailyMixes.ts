@@ -12,30 +12,39 @@
 
 import { backendService } from './BackendService.svelte';
 import { DailyMixesResponseSchema, type DailyMix } from '$types/backend';
+import { playlistCovers } from '$stores/playlist-covers.svelte';
 
 /**
  * Lista de daily mixes para el usuario dado. Devuelve [] si el cron aún no
  * los generó (instalación nueva o usuario sin scrobbles suficientes).
+ *
+ * Side effect: registra `coverContentHash` de cada mix en el store global
+ * `playlistCovers` para que `getPlaylistCoverUrl` pueda servir URLs con
+ * `?v=<hash>` (cache HTTP `immutable` 1 año).
  */
 export async function getDailyMixes(username: string): Promise<DailyMix[]> {
   const data = await backendService.get('/api/daily-mixes', DailyMixesResponseSchema, {
     'x-navidrome-user': username
   });
-  return data?.mixes ?? [];
+  const mixes = data?.mixes ?? [];
+  playlistCovers.setMany(mixes.map((m) => ({ id: m.navidromeId, hash: m.coverContentHash })));
+  return mixes;
 }
 
 /**
- * URL del cover generado por el backend para esta playlist (mix o smart).
- * El backend la cachea y firma con `coverContentHash` o `coverVersion` —
- * el `?v=` rompe el cache del browser cuando el cover cambia.
+ * URL del cover personalizado del backend para una playlist.
  *
- * Si no hay versión (el cover aún no se ha generado), pedimos sin `?v=` —
- * el backend devuelve un placeholder.
+ * SIEMPRE se sirve desde el backend (nunca Navidrome directo) — incluso
+ * para playlists creadas por el usuario, el backend las re-renderiza con
+ * estilo Audiorr. El backend cachea agresivamente (30 min TTL, hasta 1 año
+ * con cache buster `?v=<hash>`) y regenera por cron cuando cambian.
+ *
+ * Si tenemos `coverContentHash` registrado en el store global, lo usamos
+ * como `?v=<hash>` → respuesta `immutable` 1 año, cero revalidaciones.
+ * Si no, URL sin buster → 30 min TTL del backend, suficiente.
  */
-export function getPlaylistCoverUrl(
-  navidromeId: string,
-  cacheBuster?: string | number | null
-): string {
+export function getPlaylistCoverUrl(navidromeId: string): string {
   const base = backendService.fileUrl(`/api/playlists/${encodeURIComponent(navidromeId)}/cover.png`);
-  return cacheBuster != null ? `${base}?v=${encodeURIComponent(String(cacheBuster))}` : base;
+  const hash = playlistCovers.get(navidromeId);
+  return hash ? `${base}?v=${encodeURIComponent(hash)}` : base;
 }
