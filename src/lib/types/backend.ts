@@ -43,3 +43,66 @@ export const RecentContextItemSchema = z.object({
 });
 export type RecentContextItem = z.infer<typeof RecentContextItemSchema>;
 export const RecentContextsSchema = z.array(RecentContextItemSchema);
+
+// ============================================================================
+// Daily Mixes — /api/daily-mixes
+// ============================================================================
+
+/**
+ * Daily Mix generado por el cron del backend (3 AM).
+ *
+ * `navidromeId` es null cuando el mix existe en wrapped.db pero aún no se
+ * sincronizó como playlist en Navidrome (transitorio entre runs del cron).
+ * En ese caso el cliente no puede navegar al detalle.
+ *
+ * `coverContentHash` y `coverVersion` son cache-busters para la URL de la
+ * cover del backend (`/api/playlists/<navidromeId>/cover.png?v=<hash>`).
+ */
+export const DailyMixSchema = z.object({
+  mixNumber: z.number(),
+  username: z.string(),
+  navidromeId: z.string().nullable(),
+  name: z.string(),
+  clusterSeed: z.string().nullable(),
+  trackCount: z.number(),
+  lastGenerated: z.string().nullable(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  coverContentHash: z.string().nullable().optional(),
+  coverVersion: z.number().nullable().optional()
+});
+export type DailyMix = z.infer<typeof DailyMixSchema>;
+export const DailyMixesResponseSchema = z.object({
+  mixes: z.array(DailyMixSchema)
+});
+
+// ============================================================================
+// Smart Playlists — /api/smart-playlists
+// ============================================================================
+
+/**
+ * Smart Playlist generada por el cron del backend.
+ *
+ * Keys conocidas: 'en_bucle' (daily), 'tiempo_atras' (semanal domingo),
+ * 'radar_novedades' (semanal viernes).
+ */
+export const SmartPlaylistSchema = z.object({
+  playlistKey: z.string(),
+  username: z.string(),
+  navidromeId: z.string().nullable(),
+  name: z.string(),
+  coverVariant: z.string(),
+  homePosition: z.number().nullable(),
+  trackCount: z.number(),
+  lastGenerated: z.string().nullable(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  coverContentHash: z.string().nullable().optional(),
+  coverVersion: z.number().nullable().optional()
+});
+export type SmartPlaylist = z.infer<typeof SmartPlaylistSchema>;
+export const SmartPlaylistsResponseSchema = z.object({
+  playlists: z.array(SmartPlaylistSchema)
+});

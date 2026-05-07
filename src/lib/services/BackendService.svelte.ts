@@ -41,9 +41,17 @@ class BackendServiceImpl {
   /**
    * GET tipado. 404 → null (recurso no encontrado, caso normal para Canvas);
    * 5xx u otros errores tiran `BackendError`.
+   *
+   * `headers` permite enviar `x-navidrome-user` (algunos endpoints como
+   * /api/daily-mixes y /api/smart-playlists exigen el username vía header
+   * cuando difiere del configurado en el server).
    */
-  async get<T>(path: string, schema: z.ZodSchema<T>): Promise<T | null> {
-    const res = await this.rawFetch(path);
+  async get<T>(
+    path: string,
+    schema: z.ZodSchema<T>,
+    headers?: Record<string, string>
+  ): Promise<T | null> {
+    const res = await this.rawFetch(path, headers);
     if (res.status === 404) return null;
     if (!res.ok) {
       throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
@@ -58,9 +66,9 @@ class BackendServiceImpl {
     return `${this.baseUrl}${clean}`;
   }
 
-  private async rawFetch(path: string): Promise<Response> {
+  private async rawFetch(path: string, headers?: Record<string, string>): Promise<Response> {
     const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
-    return fetch(url, { credentials: 'omit' });
+    return fetch(url, { credentials: 'omit', ...(headers ? { headers } : {}) });
   }
 }
 
