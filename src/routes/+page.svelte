@@ -5,7 +5,9 @@
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import QuickAccessCard from '$components/home/QuickAccessCard.svelte';
+  import RecentContextCard from '$components/home/RecentContextCard.svelte';
   import * as nav from '$services/NavidromeService';
+  import * as stats from '$services/stats';
   import {
     albumToCardProps,
     playlistToCardProps,
@@ -69,6 +71,20 @@
 
   // Quick access usa los albums más recientes (top 8)
   const quickAccess = $derived(recentAlbums.data?.slice(0, 8) ?? []);
+
+  // Jump Back In — feed personal del backend Audiorr (últimos contextos
+  // únicos escuchados: álbumes, playlists, smart mixes, artistas).
+  // Si el wrapped.db está vacío (instalación nueva sin scrobbles), el
+  // backend devuelve [] y la sección se omite del DOM.
+  const recentContextsQ = createQuery(() => ({
+    queryKey: ['recentContexts', credentials.current?.username ?? ''],
+    queryFn: () => stats.getRecentContexts(credentials.current!.username),
+    enabled: credentials.isConfigured,
+    // 1 min staleTime: el feed actualiza cada vez que el usuario reproduce
+    // algo nuevo, pero no tan frecuente como para refetch agresivo.
+    staleTime: 60 * 1000
+  }));
+  const recentContexts = $derived(recentContextsQ.data ?? []);
 </script>
 
 <div class="home">
@@ -97,6 +113,19 @@
       />
     {/each}
   </section>
+
+  {#if recentContexts.length > 0}
+    <section class="jump-back-in">
+      <header class="section-head">
+        <h2>Volver a escuchar</h2>
+      </header>
+      <div class="jump-grid">
+        {#each recentContexts as ctx (ctx.contextUri)}
+          <RecentContextCard item={ctx} />
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <HorizontalScrollSection
     title="Recientemente añadido"
@@ -229,6 +258,28 @@
     padding: 0 var(--space-6);
   }
 
+  /* Jump Back In — grid de tiles cuadradas. Cap a 8 columnas para que
+     en monitores 4K no se vuelva ridículo. minmax(160px, 1fr) hace que
+     en móvil entren 2 (con padding lateral); en desktop, 4-6. */
+  .jump-back-in {
+    display: grid;
+    gap: var(--space-3);
+    padding: 0 var(--space-6);
+  }
+  .section-head h2 {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .jump-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+    gap: var(--space-5);
+  }
+
   @media (max-width: 640px) {
     .home {
       gap: var(--space-8);
@@ -239,6 +290,16 @@
     .quick-access {
       padding: 0 var(--space-4);
       grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    }
+    .jump-back-in {
+      padding: 0 var(--space-4);
+    }
+    .jump-grid {
+      grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
+      gap: var(--space-4);
+    }
+    .section-head h2 {
+      font-size: var(--text-xl);
     }
     h1 {
       font-size: var(--text-2xl);
