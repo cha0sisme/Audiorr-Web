@@ -209,4 +209,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Acknowledgments
 
-Key & BPM data powered by [GetSongBPM](https://getsongbpm.com).
+Key & BPM data powered by [GetSongBPM](https://getsongbpm.com) & [GetSongKey](https://getsongkey.com)
