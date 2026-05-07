@@ -1,8 +1,10 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { User, Gear, SignOut, CaretUp } from 'phosphor-svelte';
+  import { createQuery } from '@tanstack/svelte-query';
   import { credentials } from '$stores/credentials.svelte';
   import { disconnect } from '$services/NavidromeService';
+  import * as user from '$services/user';
 
   const username = $derived(credentials.current?.username ?? '');
   const initials = $derived.by(() => {
@@ -12,6 +14,18 @@
     if (parts.length === 1) return (parts[0]?.[0] ?? '?').toUpperCase();
     return ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
   });
+
+  // Avatar del backend — comparte cache key con /profile.
+  // Si el backend no tiene preferencias para el user, prefsQ.data === null y
+  // caemos a las initials.
+  const prefsQ = createQuery(() => ({
+    queryKey: ['userPreferences', username],
+    queryFn: () => user.getUserPreferences(username),
+    enabled: credentials.isConfigured && username.length > 0,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+  const avatarUrl = $derived(prefsQ.data?.avatarUrl ?? null);
 
   let open = $state(false);
   let triggerEl: HTMLButtonElement | undefined = $state();
@@ -27,7 +41,7 @@
 
   function handleProfile() {
     close();
-    // TODO: ruta /profile cuando exista
+    goto('/profile');
   }
   function handleSettings() {
     close();
@@ -72,7 +86,13 @@
     aria-expanded={open}
     onclick={toggle}
   >
-    <span class="avatar" aria-hidden="true">{initials}</span>
+    <span class="avatar" aria-hidden="true">
+      {#if avatarUrl}
+        <img class="avatar-img" src={avatarUrl} alt="" loading="lazy" decoding="async" />
+      {:else}
+        {initials}
+      {/if}
+    </span>
     <span class="info">
       <span class="name">{username || 'Invitado'}</span>
       <span class="hint">Cuenta</span>
@@ -133,6 +153,7 @@
   }
 
   .avatar {
+    position: relative;
     flex-shrink: 0;
     width: 32px;
     height: 32px;
@@ -144,6 +165,15 @@
     font-size: 12px;
     font-weight: 700;
     letter-spacing: var(--tracking-wide);
+    overflow: hidden;
+  }
+  .avatar-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 
   .info {

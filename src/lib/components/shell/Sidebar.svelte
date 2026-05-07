@@ -1,13 +1,18 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
+  import { createQuery } from '@tanstack/svelte-query';
   import {
     House, MagnifyingGlass, MusicNotes, Heart,
-    ListPlus, Star, X
+    ListPlus, Star, X, PushPin
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
+  import CoverImage from '$components/shared/CoverImage.svelte';
   import UserMenu from '$components/shell/UserMenu.svelte';
   import BrandWord from '$components/shell/BrandWord.svelte';
+  import * as user from '$services/user';
+  import { getPlaylistCoverUrl } from '$services/dailyMixes';
+  import { credentials } from '$stores/credentials.svelte';
 
   /** Categorías de navegación. Cada ruta cae en una; cada nav item declara
       la suya. Un solo highlight a la vez sin ambigüedad. */
@@ -137,6 +142,19 @@
     searchInputEl?.focus();
   }
 
+  // ==========================================================================
+  // Pinned Playlists — sincronizadas con backend Audiorr.
+  // Lista compacta debajo de las navs. Si no hay pinned, la sección se omite.
+  // ==========================================================================
+  const pinnedQ = createQuery(() => ({
+    queryKey: ['pinnedPlaylists', credentials.current?.username ?? ''],
+    queryFn: () => user.getPinnedPlaylists(credentials.current!.username),
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+  const pinnedPlaylists = $derived(pinnedQ.data ?? []);
+
   // Atajo global ⌘K / Ctrl+K / "/" → focus al input. Esto vive en el sidebar
   // porque es el dueño del input — el layout NO lo gestiona, evitando un
   // detour por context o store global solo para el focus.
@@ -228,6 +246,35 @@
       {/each}
     </nav>
   </div>
+
+  {#if pinnedPlaylists.length > 0}
+    <div class="section pinned-section">
+      <p class="section-label">
+        <PushPin size={11} weight="fill" />
+        <span>Ancladas</span>
+      </p>
+      <nav class="pinned-list" aria-label="Playlists ancladas">
+        {#each pinnedPlaylists as p (p.id)}
+          <a
+            class="pinned-item"
+            href={`/playlist/${p.id}`}
+            class:active={page.url.pathname === `/playlist/${p.id}`}
+            data-sveltekit-preload-data="hover"
+            title={p.name}
+          >
+            <span class="pinned-cover">
+              <CoverImage src={getPlaylistCoverUrl(p.id)} alt="">
+                {#snippet fallback()}
+                  <ListPlus size="60%" weight="regular" />
+                {/snippet}
+              </CoverImage>
+            </span>
+            <span class="pinned-name">{p.name}</span>
+          </a>
+        {/each}
+      </nav>
+    </div>
+  {/if}
 
   <div class="footer">
     <UserMenu />
@@ -389,6 +436,67 @@
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
     color: var(--text-tertiary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* === Pinned Playlists === */
+  /* Sección debajo de Biblioteca; lista compacta con cover 28×28 + nombre.
+     Scroll-friendly si hay muchas (el sidebar entero ya es overflow-y: auto). */
+  .pinned-section {
+    /* Sin gap-y interno aparte del default — la lista controla su propio. */
+    min-height: 0;
+  }
+  .pinned-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .pinned-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 6px var(--space-3);
+    min-height: 40px;
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1.3;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+    min-width: 0;
+  }
+  .pinned-item:hover {
+    background: var(--row-hover);
+    color: var(--text-primary);
+  }
+  .pinned-item.active {
+    background: var(--row-active);
+    color: var(--text-primary);
+  }
+  .pinned-item:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .pinned-cover {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-xs);
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-surface-elevated);
+    color: var(--text-tertiary);
+  }
+  .pinned-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .nav-item {

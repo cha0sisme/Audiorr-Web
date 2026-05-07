@@ -6,7 +6,7 @@
 
   type Props = {
     name: string;
-    src?: string;
+    src?: string | undefined;
     size?: Size;
     status?: Status;
   };

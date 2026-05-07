@@ -8,7 +8,13 @@
  */
 
 import { backendService } from './BackendService.svelte';
-import { RecentContextsSchema, type RecentContextItem } from '$types/backend';
+import {
+  RecentContextsSchema,
+  UserStatsSchema,
+  type RecentContextItem,
+  type UserStats,
+  type StatsPeriod
+} from '$types/backend';
 
 /**
  * Últimos contextos únicos escuchados — feed de "Volver a escuchar"
@@ -21,4 +27,22 @@ export async function getRecentContexts(username: string): Promise<RecentContext
   const path = `/api/stats/recent-contexts?username=${encodeURIComponent(username)}`;
   const data = await backendService.get(path, RecentContextsSchema);
   return data ?? [];
+}
+
+/**
+ * Estadísticas del usuario (Wrapped-lite) — total plays, top 5 songs/artists/
+ * genres, BPM y energía medios pesados por play count, en el período pedido.
+ *
+ * `period` default 'week' (últimos 7 días). 'month' = últimos 30 días.
+ *
+ * Devuelve un objeto con `total_plays: 0` y arrays vacíos si no hay datos
+ * (instalación nueva sin scrobbles). Nunca devuelve null en este caso —
+ * el backend siempre construye el shape completo.
+ */
+export async function getUserStats(
+  username: string,
+  period: StatsPeriod = 'week'
+): Promise<UserStats | null> {
+  const path = `/api/stats/user-stats?username=${encodeURIComponent(username)}&period=${period}`;
+  return backendService.get(path, UserStatsSchema);
 }

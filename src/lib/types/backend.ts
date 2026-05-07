@@ -106,3 +106,81 @@ export type SmartPlaylist = z.infer<typeof SmartPlaylistSchema>;
 export const SmartPlaylistsResponseSchema = z.object({
   playlists: z.array(SmartPlaylistSchema)
 });
+
+// ============================================================================
+// User Stats (Wrapped-lite) — /api/stats/user-stats?username=&period=week|month
+// ============================================================================
+
+export const UserStatsTopSongSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist: z.string(),
+  album: z.string().optional(),
+  album_id: z.string().optional(),
+  cover_art: z.string().nullable().optional(),
+  plays: z.number()
+});
+
+export const UserStatsTopArtistSchema = z.object({
+  artist: z.string(),
+  plays: z.number()
+});
+
+export const UserStatsTopGenreSchema = z.object({
+  genre: z.string(),
+  plays: z.number()
+});
+
+export const UserStatsSchema = z.object({
+  total_plays: z.number(),
+  weighted_average_release_year: z.number().nullable(),
+  weighted_average_BPM: z.number().nullable(),
+  weighted_average_Energy: z.number().nullable(),
+  top_songs: z.array(UserStatsTopSongSchema),
+  top_artists: z.array(UserStatsTopArtistSchema),
+  top_genres: z.array(UserStatsTopGenreSchema),
+  period: z.string(),
+  startDate: z.string(),
+  endDate: z.string()
+});
+export type UserStats = z.infer<typeof UserStatsSchema>;
+export type UserStatsTopSong = z.infer<typeof UserStatsTopSongSchema>;
+export type UserStatsTopArtist = z.infer<typeof UserStatsTopArtistSchema>;
+export type UserStatsTopGenre = z.infer<typeof UserStatsTopGenreSchema>;
+export type StatsPeriod = 'week' | 'month';
+
+// ============================================================================
+// User Preferences — /api/user/:username/*
+// ============================================================================
+
+/**
+ * Pinned playlist guardada en preferencias de usuario. El backend no exige
+ * shape estricto (id+name son obligatorios; el resto es opcional según
+ * cómo se haya pinneado en su momento).
+ */
+export const PinnedPlaylistSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    songCount: z.number().optional(),
+    coverArt: z.string().optional(),
+    owner: z.string().optional(),
+    pinnedAt: z.string().optional()
+  })
+  .passthrough();
+export type PinnedPlaylist = z.infer<typeof PinnedPlaylistSchema>;
+export const PinnedPlaylistsResponseSchema = z.object({
+  pinnedPlaylists: z.array(PinnedPlaylistSchema)
+});
+
+export const UserPreferencesSchema = z
+  .object({
+    username: z.string(),
+    avatarUrl: z.string().nullable().optional(),
+    pinnedPlaylists: z.array(PinnedPlaylistSchema).default([]),
+    preferences: z.record(z.string(), z.unknown()).optional(),
+    createdAt: z.string().optional(),
+    updatedAt: z.string().optional()
+  })
+  .passthrough();
+export type UserPreferences = z.infer<typeof UserPreferencesSchema>;
