@@ -32,6 +32,8 @@ pnpm-debug.log*
 
 # Claude Code (local-only settings; commit settings.json if shared with team)
 .claude/settings.local.json
+# CLAUDE.md — instrucciones locales del agente, no son parte del repo.
+CLAUDE.md
 
 # Söhne fonts (Klim Type Foundry, comercial — NO committear nunca).
 # Cada developer tiene los .otf/.woff2 localmente bajo su propia licencia.
