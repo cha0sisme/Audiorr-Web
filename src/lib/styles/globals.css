@@ -10,8 +10,9 @@
 @import '@fontsource-variable/inter';
 
 /* Söhne (Klim) — TEST/trial. Disponible vía font-family: 'Söhne' / 'Söhne Mono'.
-   No reemplaza al stack default todavía (--font-sans sigue Inter). Para usar:
-   `font-family: 'Söhne', var(--font-sans)` o la utility class .font-sohne. */
+   Los .otf están en `public/sohne/` (gitignored — cada dev aporta bajo su
+   licencia). Si vuelves a clonar el repo en otra máquina, copia los archivos
+   ahí o el browser tirará 404s y caerá al stack Inter automáticamente. */
 @import './fonts/sohne.css';
 
 /* Si en el futuro querés self-host SF Pro, agregar los WOFF2

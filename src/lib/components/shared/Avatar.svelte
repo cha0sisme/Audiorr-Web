@@ -1,5 +1,6 @@
 <script lang="ts">
   import CoverImage from './CoverImage.svelte';
+  import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
 
   type Size = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   type Status = 'online' | 'offline' | 'away';
@@ -23,19 +24,12 @@
 
   const dim = $derived(sizes[size]);
 
-  const initials = $derived(
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((s) => s[0]?.toUpperCase() ?? '')
-      .join('')
-  );
+  /* Inicial única (matching iOS). El componente usa initial; el title/aria
+     mantiene el name completo para accessibility. */
+  const initial = $derived(userAvatarInitial(name));
 
-  /* Hash determinístico → hue. Mismo nombre = mismo color siempre. */
-  const hue = $derived(
-    [...name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0) % 360
-  );
+  /* Hash → HSL determinístico. Mismo nombre = mismo color en iOS y web. */
+  const color = $derived(userAvatarColor(name));
 </script>
 
 <span
@@ -43,8 +37,8 @@
   data-size={size}
   style:width="{dim}px"
   style:height="{dim}px"
-  style:--avatar-bg="oklch(0.55 0.15 {hue})"
-  style:--avatar-fg="oklch(0.96 0.04 {hue})"
+  style:--avatar-bg={color.css}
+  style:--avatar-fg="white"
   aria-label={name}
   title={name}
 >
@@ -53,7 +47,7 @@
       <CoverImage {src} alt={name} shape="circle" />
     </span>
   {:else}
-    <span class="initials">{initials || '?'}</span>
+    <span class="initials">{initial}</span>
   {/if}
 
   {#if status}

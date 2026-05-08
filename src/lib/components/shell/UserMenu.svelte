@@ -3,21 +3,18 @@
   import { User, Gear, SignOut, CaretUp } from 'phosphor-svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { credentials } from '$stores/credentials.svelte';
+  import * as nav from '$services/NavidromeService';
   import { disconnect } from '$services/NavidromeService';
   import * as user from '$services/user';
+  import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
 
   const username = $derived(credentials.current?.username ?? '');
-  const initials = $derived.by(() => {
-    if (!username) return '?';
-    const parts = username.trim().split(/[\s._-]+/).filter(Boolean);
-    if (parts.length === 0) return '?';
-    if (parts.length === 1) return (parts[0]?.[0] ?? '?').toUpperCase();
-    return ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
-  });
+  const initial = $derived(userAvatarInitial(username || '?'));
+  const avatarColor = $derived(userAvatarColor(username || '?'));
 
   // Avatar del backend — comparte cache key con /profile.
   // Si el backend no tiene preferencias para el user, prefsQ.data === null y
-  // caemos a las initials.
+  // caemos al initial sobre fondo coloreado (mismo color que /profile).
   const prefsQ = createQuery(() => ({
     queryKey: ['userPreferences', username],
     queryFn: () => user.getUserPreferences(username),
@@ -26,6 +23,21 @@
     gcTime: 30 * 60 * 1000
   }));
   const avatarUrl = $derived(prefsQ.data?.avatarUrl ?? null);
+
+  // === Admin role (Subsonic getUser → adminRole) ===
+  // Mostramos "Admin" en lugar de "Cuenta" cuando el user lo es. Para usuarios
+  // sin permisos de getUser sobre otros, Subsonic permite consultar el OWN
+  // user sin restricciones — siempre funciona para el current user.
+  const userInfoQ = createQuery(() => ({
+    queryKey: ['navidromeUser', username],
+    queryFn: () => nav.getUser(username),
+    enabled: credentials.isConfigured && username.length > 0,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    retry: false
+  }));
+  const isAdmin = $derived(userInfoQ.data?.adminRole === true);
+  const roleLabel = $derived(isAdmin ? 'Admin' : 'Cuenta');
 
   let open = $state(false);
   let triggerEl: HTMLButtonElement | undefined = $state();
@@ -86,16 +98,16 @@
     aria-expanded={open}
     onclick={toggle}
   >
-    <span class="avatar" aria-hidden="true">
+    <span class="avatar" style:background={avatarColor.css} aria-hidden="true">
       {#if avatarUrl}
         <img class="avatar-img" src={avatarUrl} alt="" loading="lazy" decoding="async" />
       {:else}
-        {initials}
+        {initial}
       {/if}
     </span>
     <span class="info">
       <span class="name">{username || 'Invitado'}</span>
-      <span class="hint">Cuenta</span>
+      <span class="hint" class:admin={isAdmin}>{roleLabel}</span>
     </span>
     <CaretUp size={14} weight="bold" class="caret" />
   </button>
@@ -158,11 +170,11 @@
     width: 32px;
     height: 32px;
     border-radius: var(--radius-full);
-    background: var(--accent);
-    color: var(--bg-canvas);
+    /* background es inline (HSL determinístico del username). */
+    color: #fff;
     display: grid;
     place-items: center;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: var(--tracking-wide);
     overflow: hidden;
@@ -193,6 +205,14 @@
   .hint {
     font-size: 11px;
     color: var(--text-tertiary);
+  }
+  /* Cuando el user es admin, el label "Admin" toma el accent — pista visual
+     sutil de que tiene poderes elevados. Tipografía estándar, sin pill. */
+  .hint.admin {
+    color: var(--accent);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .trigger :global(.caret) {

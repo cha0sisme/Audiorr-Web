@@ -1,27 +1,29 @@
 <script lang="ts">
   /**
-   * Profile — Wrapped-lite del usuario.
+   * Profile — Wrapped-lite del usuario (mirrors UserProfileSheet de iOS).
    *
-   * Layout simplificado del legacy UserProfile:
-   *   - Hero: avatar grande + username.
+   * Layout:
+   *   - Hero (mismo patrón que ArtistDetail/PlaylistDetail): avatar grande
+   *     redondo + kicker "Perfil" + h1 username + meta-line opcional.
+   *     Background derivado del color determinístico del username (hue+chroma
+   *     fijo). El color es persistente: mismo username = mismo color siempre.
    *   - Period selector (semana/mes).
-   *   - 4 stat cards: total plays, género top, BPM medio, energía media.
-   *   - Top 5 canciones (cover + plays count + link al detalle).
-   *   - Top 5 artistas (avatar + plays count).
+   *   - 4 stat cards (plays, género, BPM, energía).
+   *   - Top 5 canciones + Top 5 artistas.
    *
-   * Datos: /api/stats/user-stats (requiere username, soporta period). El backend
-   * devuelve un shape completo (con arrays vacíos y total_plays=0) cuando no
-   * hay datos — no hace falta tratar null especialmente.
+   * Datos: /api/stats/user-stats. Devuelve shape completo con totales 0 y
+   * arrays vacíos cuando no hay scrobbles.
    */
   import { createQuery } from '@tanstack/svelte-query';
-  import { MusicNote, ChartBar, Lightning, User } from 'phosphor-svelte';
-  import Avatar from '$components/shared/Avatar.svelte';
+  import { MusicNote, ChartBar, User } from 'phosphor-svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import SegmentedControl from '$components/shared/SegmentedControl.svelte';
   import * as stats from '$services/stats';
   import * as user from '$services/user';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { credentials } from '$stores/credentials.svelte';
+  import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
+  import { heroBackgroundLayered, type CoverPalette } from '$utils/palette';
   import type { StatsPeriod } from '$types/backend';
 
   const username = $derived(credentials.current?.username ?? '');
@@ -39,8 +41,8 @@
     staleTime: 5 * 60 * 1000
   }));
 
-  /** Preferencias del backend — avatar URL + metadata. Falla suave si el user
-      aún no tiene un registro (devuelve preferences default). */
+  /** Preferencias del backend — avatar URL personalizado + metadata.
+      Falla suave si el user aún no tiene un registro. */
   const prefsQ = createQuery(() => ({
     queryKey: ['userPreferences', username],
     queryFn: () => user.getUserPreferences(username),
@@ -54,7 +56,19 @@
 
   const hasNoData = $derived(!statsQ.isPending && (!data || data.total_plays === 0));
 
-  // Formatos
+  // === Color del usuario (determinístico) → palette del hero ===
+  // Mismo username = mismo color, persistente sin storage. La fórmula
+  // matchea iOS exactamente (`avatar-color.ts` ↔ `SettingsView.swift:7-17`).
+  const avatarColor = $derived(userAvatarColor(username || '?'));
+  const initial = $derived(userAvatarInitial(username || '?'));
+
+  const palette = $derived<CoverPalette>({
+    hue: avatarColor.hue,
+    chroma: 0.14
+  });
+  const heroBg = $derived(heroBackgroundLayered(palette));
+
+  // === Formatos ===
   const fmtNumber = (n: number) => n.toLocaleString('es-ES');
   const fmtBPM = (n: number | null | undefined) =>
     n != null ? `${Math.round(n)} BPM` : '—';
@@ -62,181 +76,215 @@
     n != null ? `${Math.round(n * 100)}%` : '—';
 
   const topGenre = $derived(data?.top_genres?.[0]?.genre ?? null);
+
+  const memberSince = $derived.by(() => {
+    const created = prefsQ.data?.createdAt;
+    if (!created) return null;
+    return new Date(created).toLocaleDateString('es-ES', {
+      month: 'long',
+      year: 'numeric'
+    });
+  });
 </script>
 
 <svelte:head>
-  <title>{username} · Audiorr</title>
+  <title>{username || 'Perfil'} · Audiorr</title>
 </svelte:head>
 
 <div class="profile">
-  <header class="hero">
-    <div class="avatar-slot">
-      <Avatar name={username || '?'} src={avatarUrl} size="xl" />
+  <!-- Hero — mismo patrón que ArtistDetail/PlaylistDetail. Background del
+       avatar color determinístico (mismo username = mismo color). -->
+  <header class="hero" style:background={heroBg}>
+    <div class="hero-avatar" style:background={avatarColor.css}>
+      {#if avatarUrl}
+        <CoverImage src={avatarUrl} alt="" shape="circle" lazy={false} priority="high" />
+      {:else}
+        <span class="hero-initial" aria-hidden="true">{initial}</span>
+      {/if}
     </div>
-    <div class="meta">
+
+    <div class="hero-meta">
       <p class="kicker">Perfil</p>
-      <h1>{username || 'Invitado'}</h1>
-      {#if prefsQ.data?.createdAt}
-        <p class="muted">
-          Miembro desde {new Date(prefsQ.data.createdAt).toLocaleDateString('es-ES', {
-            month: 'long',
-            year: 'numeric'
-          })}
-        </p>
+      <h1 class="title">{username || 'Invitado'}</h1>
+      {#if memberSince}
+        <p class="meta-line">Miembro desde {memberSince}</p>
       {/if}
     </div>
   </header>
 
-  <div class="period-row">
-    <SegmentedControl
-      items={PERIOD_TABS}
-      value={period}
-      onChange={(v) => (period = v)}
-      ariaLabel="Período de estadísticas"
-    />
-    <p class="period-caption">
-      {period === 'week' ? 'Últimos 7 días' : 'Último mes'}
-    </p>
-  </div>
-
-  {#if statsQ.isPending}
-    <div class="stats-grid">
-      {#each Array(4) as _}
-        <div class="stat-card sk"></div>
-      {/each}
-    </div>
-    <div class="lists">
-      <div class="list-card sk-list"></div>
-      <div class="list-card sk-list"></div>
-    </div>
-  {:else if hasNoData}
-    <div class="empty">
-      <MusicNote size={48} weight="regular" />
-      <p>Sin datos en este período. Reproduce algo y vuelve aquí.</p>
-    </div>
-  {:else if data}
-    <div class="stats-grid">
-      <div class="stat-card">
-        <p class="stat-label">Reproducciones</p>
-        <p class="stat-value">{fmtNumber(data.total_plays)}</p>
-      </div>
-      <div class="stat-card">
-        <p class="stat-label">Género top</p>
-        <p class="stat-value truncate">{topGenre ?? '—'}</p>
-      </div>
-      <div class="stat-card">
-        <p class="stat-label">BPM medio</p>
-        <p class="stat-value">{fmtBPM(data.weighted_average_BPM)}</p>
-      </div>
-      <div class="stat-card">
-        <p class="stat-label">Energía media</p>
-        <p class="stat-value">{fmtEnergy(data.weighted_average_Energy)}</p>
-      </div>
+  <div class="content">
+    <div class="period-row">
+      <SegmentedControl
+        items={PERIOD_TABS}
+        value={period}
+        onChange={(v) => (period = v)}
+        ariaLabel="Período de estadísticas"
+      />
+      <p class="period-caption">
+        {period === 'week' ? 'Últimos 7 días' : 'Último mes'}
+      </p>
     </div>
 
-    <div class="lists">
-      <section class="list-card">
-        <header class="list-head">
-          <ChartBar size={18} weight="regular" />
-          <h2>Top canciones</h2>
-        </header>
-        {#if data.top_songs.length === 0}
-          <p class="list-empty">Sin canciones aún.</p>
-        {:else}
-          <ol class="rank-list">
-            {#each data.top_songs.slice(0, 5) as song, i (song.id ?? `${song.title}-${i}`)}
-              <li class="rank-row">
-                <span class="rank">{i + 1}</span>
-                <div class="thumb">
-                  <CoverImage
-                    src={song.cover_art ? getCoverArtUrl(song.cover_art, 120) : undefined}
-                    alt=""
-                  >
-                    {#snippet fallback()}
-                      <MusicNote size="100%" weight="regular" />
-                    {/snippet}
-                  </CoverImage>
-                </div>
-                <div class="rank-info">
-                  {#if song.id}
-                    <a class="rank-title" href={`/album/${song.album_id ?? ''}`}>
-                      {song.title}
+    {#if statsQ.isPending}
+      <div class="stats-grid">
+        {#each Array(4) as _}<div class="stat-card sk"></div>{/each}
+      </div>
+      <div class="lists">
+        <div class="list-card sk-list"></div>
+        <div class="list-card sk-list"></div>
+      </div>
+    {:else if statsQ.isError}
+      <div class="empty">
+        <MusicNote size={48} weight="regular" />
+        <p>No se pudieron cargar las estadísticas.</p>
+        <p class="empty-detail">{statsQ.error?.message ?? ''}</p>
+      </div>
+    {:else if hasNoData}
+      <div class="empty">
+        <MusicNote size={48} weight="regular" />
+        <p>Sin datos en este período. Reproduce algo y vuelve aquí.</p>
+      </div>
+    {:else if data}
+      <div class="stats-grid">
+        <div class="stat-card">
+          <p class="stat-label">Reproducciones</p>
+          <p class="stat-value">{fmtNumber(data.total_plays)}</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-label">Género top</p>
+          <p class="stat-value truncate">{topGenre ?? '—'}</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-label">BPM medio</p>
+          <p class="stat-value">{fmtBPM(data.weighted_average_BPM)}</p>
+        </div>
+        <div class="stat-card">
+          <p class="stat-label">Energía media</p>
+          <p class="stat-value">{fmtEnergy(data.weighted_average_Energy)}</p>
+        </div>
+      </div>
+
+      <div class="lists">
+        <section class="list-card">
+          <header class="list-head">
+            <ChartBar size={18} weight="regular" />
+            <h2>Top canciones</h2>
+          </header>
+          {#if data.top_songs.length === 0}
+            <p class="list-empty">Sin canciones aún.</p>
+          {:else}
+            <ol class="rank-list">
+              {#each data.top_songs.slice(0, 5) as song, i (song.id ?? `${song.title}-${i}`)}
+                <li class="rank-row">
+                  <span class="rank">{i + 1}</span>
+                  <div class="thumb">
+                    <CoverImage
+                      src={song.cover_art ? getCoverArtUrl(song.cover_art, 120) : undefined}
+                      alt=""
+                    >
+                      {#snippet fallback()}
+                        <MusicNote size="100%" weight="regular" />
+                      {/snippet}
+                    </CoverImage>
+                  </div>
+                  <div class="rank-info">
+                    {#if song.album_id}
+                      <a class="rank-title" href={`/album/${song.album_id}`}>
+                        {song.title}
+                      </a>
+                    {:else}
+                      <span class="rank-title">{song.title}</span>
+                    {/if}
+                    <span class="rank-sub">{song.artist}</span>
+                  </div>
+                  <div class="plays">
+                    <span class="plays-count">{fmtNumber(song.plays)}</span>
+                    <span class="plays-label">plays</span>
+                  </div>
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        </section>
+
+        <section class="list-card">
+          <header class="list-head">
+            <User size={18} weight="regular" />
+            <h2>Top artistas</h2>
+          </header>
+          {#if data.top_artists.length === 0}
+            <p class="list-empty">Sin artistas aún.</p>
+          {:else}
+            <ol class="rank-list">
+              {#each data.top_artists.slice(0, 5) as artist, i (`${artist.artist}-${i}`)}
+                {@const artistColor = userAvatarColor(artist.artist)}
+                <li class="rank-row">
+                  <span class="rank">{i + 1}</span>
+                  <div class="thumb thumb-round" style:background={artistColor.css}>
+                    <span class="thumb-initial">{userAvatarInitial(artist.artist)}</span>
+                  </div>
+                  <div class="rank-info">
+                    <a class="rank-title" href={`/search?q=${encodeURIComponent(artist.artist)}`}>
+                      {artist.artist}
                     </a>
-                  {:else}
-                    <span class="rank-title">{song.title}</span>
-                  {/if}
-                  <span class="rank-sub">{song.artist}</span>
-                </div>
-                <div class="plays">
-                  <span class="plays-count">{fmtNumber(song.plays)}</span>
-                  <span class="plays-label">plays</span>
-                </div>
-              </li>
-            {/each}
-          </ol>
-        {/if}
-      </section>
+                  </div>
+                  <div class="plays">
+                    <span class="plays-count">{fmtNumber(artist.plays)}</span>
+                    <span class="plays-label">plays</span>
+                  </div>
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        </section>
+      </div>
+    {/if}
 
-      <section class="list-card">
-        <header class="list-head">
-          <User size={18} weight="regular" />
-          <h2>Top artistas</h2>
-        </header>
-        {#if data.top_artists.length === 0}
-          <p class="list-empty">Sin artistas aún.</p>
-        {:else}
-          <ol class="rank-list">
-            {#each data.top_artists.slice(0, 5) as artist, i (`${artist.artist}-${i}`)}
-              <li class="rank-row">
-                <span class="rank">{i + 1}</span>
-                <div class="thumb thumb-round">
-                  <Avatar name={artist.artist} size="md" />
-                </div>
-                <div class="rank-info">
-                  <a class="rank-title" href={`/search?q=${encodeURIComponent(artist.artist)}`}>
-                    {artist.artist}
-                  </a>
-                </div>
-                <div class="plays">
-                  <span class="plays-count">{fmtNumber(artist.plays)}</span>
-                  <span class="plays-label">plays</span>
-                </div>
-              </li>
-            {/each}
-          </ol>
-        {/if}
-      </section>
-    </div>
-  {/if}
-
-  <div class="bottom-spacer" aria-hidden="true"></div>
+    <div class="bottom-spacer" aria-hidden="true"></div>
+  </div>
 </div>
 
 <style>
   .profile {
-    padding: var(--space-8) var(--space-6) var(--space-12);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-7);
+    min-height: 100%;
   }
 
+  /* === Hero — replica del de ArtistDetail/PlaylistDetail === */
   .hero {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: end;
-    gap: var(--space-6);
+    column-gap: var(--space-6);
+    padding: var(--space-12) var(--space-6) var(--space-8);
+    color: var(--hero-text-primary);
+    transition: background var(--duration-normal) var(--ease-ios-default);
   }
-  .avatar-slot :global(.avatar) {
-    width: 120px;
-    height: 120px;
+
+  .hero-avatar {
+    position: relative;
+    width: 200px;
+    height: 200px;
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    box-shadow: 0 8px 20px rgb(0 0 0 / 0.45);
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
   }
-  .avatar-slot :global(.avatar .initials) {
-    font-size: 48px;
+  .hero-initial {
+    font-size: 80px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: var(--tracking-display-lg);
+    user-select: none;
   }
-  .meta {
+
+  .hero-meta {
     min-width: 0;
     display: grid;
-    gap: var(--space-1);
+    gap: var(--space-2);
+    color: var(--hero-text-primary);
   }
   .kicker {
     margin: 0;
@@ -244,20 +292,29 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
-    color: var(--text-secondary);
+    color: var(--hero-text-secondary);
   }
-  h1 {
+  .title {
     margin: 0;
     font-size: var(--text-4xl);
     font-weight: 800;
     line-height: 1.05;
     letter-spacing: var(--tracking-display-lg);
-    color: var(--text-primary);
+    color: var(--hero-text-primary);
   }
-  .muted {
+  .meta-line {
     margin: 0;
     font-size: var(--text-sm);
-    color: var(--text-secondary);
+    font-weight: 500;
+    color: var(--hero-text-secondary);
+  }
+
+  /* === Contenido bajo el hero === */
+  .content {
+    padding: var(--space-2) var(--space-6) var(--space-12);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
   }
 
   .period-row {
@@ -308,7 +365,6 @@
     white-space: nowrap;
   }
 
-  /* Skeletons mientras llega la data — pulse uniforme. */
   .sk,
   .sk-list {
     background: var(--bg-surface);
@@ -398,10 +454,13 @@
     border-radius: var(--radius-full);
     display: grid;
     place-items: center;
+    color: #fff;
   }
-  .thumb-round :global(.avatar) {
-    width: 100%;
-    height: 100%;
+  .thumb-initial {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
   }
 
   .rank-info {
@@ -465,25 +524,31 @@
   .empty :global(svg) {
     opacity: 0.3;
   }
+  .empty-detail {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--text-disabled);
+    font-family: var(--font-mono);
+  }
 
   .bottom-spacer { height: 80px; }
 
   @media (max-width: 768px) {
-    .profile { padding: var(--space-6) var(--space-4) var(--space-12); }
     .hero {
       grid-template-columns: 1fr;
-      justify-items: center;
       text-align: center;
-      gap: var(--space-4);
+      padding: var(--space-8) var(--space-4) var(--space-6);
+      justify-items: center;
     }
-    .meta { justify-items: center; }
-    h1 { font-size: var(--text-3xl); }
-    .avatar-slot :global(.avatar) {
-      width: 96px;
-      height: 96px;
+    .hero-avatar {
+      width: 160px;
+      height: 160px;
     }
-    .avatar-slot :global(.avatar .initials) {
-      font-size: 36px;
+    .hero-initial {
+      font-size: 64px;
     }
+    .hero-meta { justify-items: center; }
+    .title { font-size: var(--text-3xl); }
+    .content { padding: var(--space-2) var(--space-4) var(--space-12); }
   }
 </style>
