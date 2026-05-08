@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
   import { Play, Queue } from 'phosphor-svelte';
+  import { createQuery } from '@tanstack/svelte-query';
   import NowPlayingIndicator from './NowPlayingIndicator.svelte';
   import CoverImage from './CoverImage.svelte';
   import { player } from '$stores/player.svelte';
@@ -12,6 +13,8 @@
     id: string;
     name: string;
     songCount?: number | undefined;
+    /** Reservado para casos donde no podemos resolver `topArtists` (id no
+        Subsonic). PlaylistDetail sí lo expone con `playlistAuthorDetail`. */
     owner?: string | undefined;
     coverUrl?: string | undefined;
     href?: string | undefined;
@@ -48,14 +51,91 @@
     }
   }
 
-  const subtitle = $derived(
-    [songCount && `${songCount} canciones`, owner && `por ${owner}`]
-      .filter(Boolean)
-      .join(' · ')
-  );
+  // ===========================================================================
+  // Subtitle "Incluye Drake, J. Cole, Kendrick" (estilo Spotify).
+  //
+  // Lazy fetch del detalle SOLO cuando la card entra en viewport (rootMargin
+  // 200px para anticipar). Reusa la queryKey ['playlist', id] que también
+  // consume PlaylistDetail → al click el detail está instantáneo.
+  //
+  // Skip fetch si el id no es Subsonic-real (placeholders del backend Audiorr
+  // tipo "mix-N" / "smart-X" cuando aún no hay navidromeId asignado).
+  // ===========================================================================
+
+  let visible = $state(false);
+  let cardEl: HTMLAnchorElement | undefined = $state();
+
+  $effect(() => {
+    if (!cardEl || visible) return;
+    const target = cardEl;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          obs.disconnect();
+          visible = true;
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    obs.observe(target);
+    return () => obs.disconnect();
+  });
+
+  // `enabled` se computa inline dentro del getter de createQuery — `id` no es
+  // reactiva durante la vida del card (key estable en {#each}), así que el
+  // regex se evalúa eagerly sin necesidad de un `$derived` separado. Eso
+  // evita un derived "huérfano" siendo leído por TanStack durante el cleanup
+  // del componente (Svelte 5 derived_inert warning).
+  const previewQ = createQuery(() => ({
+    queryKey: ['playlist', id],
+    queryFn: () => nav.getPlaylist(id),
+    enabled: visible && !/^(mix|smart)-/.test(id),
+    // Los artistas de una playlist cambian poco — 1h. PlaylistDetail tiene la
+    // misma key sin staleTime explícito (default 0) → si el usuario abre el
+    // detail y luego vuelve, la card sigue caliente.
+    staleTime: 60 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false
+  }));
+
+  /** Parsea "Drake feat. J. Cole & Kendrick" → ["Drake", "J. Cole", "Kendrick"]. */
+  function parseArtists(haystack: string): string[] {
+    return haystack
+      .split(/\s*(?:,|\s&\s|\sfeat\.\s|\sfeat\s|\sft\.\s|\sft\s|\sand\s|\swith\s|\sx\s)\s*/i)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+
+  const topArtists = $derived.by(() => {
+    const songs = previewQ.data?.entry ?? [];
+    if (songs.length === 0) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const s of songs) {
+      for (const artist of parseArtists(s.artist ?? '')) {
+        const key = artist.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(artist);
+        if (result.length >= 3) return result;
+      }
+    }
+    return result;
+  });
+
+  const subtitle = $derived.by(() => {
+    if (topArtists.length > 0) {
+      return `Incluye ${topArtists.join(', ')}`;
+    }
+    if (songCount != null) {
+      return `${songCount} canciones`;
+    }
+    return owner ?? '';
+  });
 </script>
 
 <a
+  bind:this={cardEl}
   class="card"
   {href}
   onclick={handleClick}

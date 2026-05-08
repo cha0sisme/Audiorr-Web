@@ -10,6 +10,7 @@
   import CoverImage from '$components/shared/CoverImage.svelte';
   import * as nav from '$services/NavidromeService';
   import { songToListItem } from '$utils/navidrome-mappers';
+  import { playlistAuthorDetail } from '$utils/playlist-section-mappers';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -158,8 +159,9 @@
       {:else if playlist}
         <p class="kicker">Playlist</p>
         <h1 class="title">{playlist.name}</h1>
-        {#if playlist.owner}
-          <p class="owner">por {playlist.owner}</p>
+        {@const authorLine = playlistAuthorDetail(playlist)}
+        {#if authorLine}
+          <p class="owner">{authorLine}</p>
         {/if}
         <p class="meta-line">
           {tracks.length} {tracks.length === 1 ? 'canción' : 'canciones'} · {totalDurationFormatted}

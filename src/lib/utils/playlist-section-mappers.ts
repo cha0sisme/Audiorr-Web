@@ -21,6 +21,7 @@ export function dailyMixToProps(mix: DailyMix): PlaylistCardProps {
     id: mix.navidromeId ?? `mix-${mix.mixNumber}`,
     name: mix.name,
     songCount: mix.trackCount,
+    owner: AUDIORR_ENGINE_LABEL,
     coverUrl: mix.navidromeId ? getPlaylistCoverUrl(mix.navidromeId) : undefined,
     href: mix.navidromeId ? `/playlist/${mix.navidromeId}` : '#',
     prefetchHero: () => {}
@@ -32,6 +33,7 @@ export function smartPlaylistToProps(sp: SmartPlaylist): PlaylistCardProps {
     id: sp.navidromeId ?? `smart-${sp.playlistKey}`,
     name: sp.name,
     songCount: sp.trackCount,
+    owner: AUDIORR_ENGINE_LABEL,
     coverUrl: sp.navidromeId ? getPlaylistCoverUrl(sp.navidromeId) : undefined,
     href: sp.navidromeId ? `/playlist/${sp.navidromeId}` : '#',
     prefetchHero: () => {}
@@ -60,6 +62,32 @@ export function isDailyMixName(p: NavidromePlaylist): boolean {
 
 export function isEditorial(p: NavidromePlaylist): boolean {
   return (p.comment ?? '').includes('[Editorial]');
+}
+
+// ============================================================================
+// Branding del autor — Audiorr nunca expone al admin de Navidrome como autor
+// de playlists curadas o auto-generadas. Editoriales y Spotify-synced van
+// firmadas como `Audiorr` (la marca); Daily Mix y Smart Playlists como
+// `Audiorr Engine` (sugiere generación algorítmica). Solo las playlists del
+// usuario muestran al owner real.
+// ============================================================================
+
+const AUDIORR_BRAND_LABEL = 'Audiorr';
+const AUDIORR_ENGINE_LABEL = 'Audiorr Engine';
+
+/** Subtítulo corto para PlaylistCard (cabe en una línea con `· N canciones`).
+    Devuelve la string LISTA para concatenar (incluye "por …" si aplica). */
+export function playlistAuthorDisplay(p: NavidromePlaylist): string {
+  if (isDailyMixName(p) || isSmartPlaylistName(p)) return AUDIORR_ENGINE_LABEL;
+  if (isEditorial(p) || isSpotifySynced(p)) return AUDIORR_BRAND_LABEL;
+  return p.owner ? `por ${p.owner}` : '';
+}
+
+/** Frase larga para PlaylistDetail bajo el título (estilo "From the editors of …"). */
+export function playlistAuthorDetail(p: NavidromePlaylist): string {
+  if (isDailyMixName(p) || isSmartPlaylistName(p)) return 'Generada por Audiorr Engine';
+  if (isEditorial(p) || isSpotifySynced(p)) return 'Una selección de Audiorr';
+  return p.owner ? `Por ${p.owner}` : '';
 }
 
 /**

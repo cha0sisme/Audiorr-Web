@@ -10,10 +10,12 @@
 import { getCoverArtUrl } from '$services/NavidromeService';
 import { getPlaylistCoverUrl } from '$services/dailyMixes';
 import { prefetchCover, prefetchUrl } from '$utils/cover-cache';
+import { playlistAuthorDisplay } from '$utils/playlist-section-mappers';
 import type {
   NavidromeAlbum,
   NavidromePlaylist,
   NavidromeArtist,
+  NavidromeSimilarArtist,
   NavidromeSong
 } from '$types/navidrome';
 
@@ -75,11 +77,13 @@ export function playlistToCardProps(p: NavidromePlaylist): PlaylistCardProps {
   // Cover SIEMPRE del backend personalizado (`/api/playlists/<id>/cover.png`)
   // — nunca cover original de Navidrome (decisión de producto: el backend
   // re-renderiza con estilo Audiorr y cachea con TTL/contentHash).
+  // `owner` viene preformateado por `playlistAuthorDisplay`: editorial/synced
+  // → "Audiorr"; daily/smart → "Audiorr Engine"; user → "por {owner}".
   return {
     id: p.id,
     name: p.name,
     songCount: p.songCount,
-    owner: p.owner,
+    owner: playlistAuthorDisplay(p),
     coverUrl: getPlaylistCoverUrl(p.id),
     href: `/playlist/${p.id}`,
     // Hero usa la misma URL que el card (es el mismo cover del backend).
@@ -118,6 +122,30 @@ export function artistToCardProps(a: NavidromeArtist): ArtistCardProps {
     prefetchHero: externalUrl
       ? () => prefetchUrl(externalUrl)
       : () => prefetchCover(a.coverArt, HERO_SIZE)
+  };
+}
+
+/** Mismo contrato que `artistToCardProps`, pero acepta el shape laxo de
+    `NavidromeSimilarArtist` (id opcional — Last.fm no garantiza match local).
+    Si el id está vacío, href cae a `#` (no se navega). El call site debe
+    filtrar antes los items sin id si quiere ocultarlos del carrusel. */
+export function similarArtistToCardProps(sa: NavidromeSimilarArtist): ArtistCardProps {
+  const externalUrl =
+    sa.artistImageUrl && sa.artistImageUrl.length > 0 ? sa.artistImageUrl : undefined;
+  const hasId = !!sa.id && sa.id.length > 0;
+  return {
+    id: sa.id ?? '',
+    name: sa.name,
+    albumCount: sa.albumCount,
+    coverUrl: externalUrl
+      ? externalUrl
+      : sa.coverArt
+        ? getCoverArtUrl(sa.coverArt, CARD_SIZE)
+        : undefined,
+    href: hasId ? `/artist/${sa.id}` : '#',
+    prefetchHero: externalUrl
+      ? () => prefetchUrl(externalUrl)
+      : () => prefetchCover(sa.coverArt, HERO_SIZE)
   };
 }
 
