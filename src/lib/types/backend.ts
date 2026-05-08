@@ -44,6 +44,31 @@ export const RecentContextItemSchema = z.object({
 export type RecentContextItem = z.infer<typeof RecentContextItemSchema>;
 export const RecentContextsSchema = z.array(RecentContextItemSchema);
 
+/**
+ * Item del endpoint `/api/stats/top-weekly` (Más escuchado de la semana).
+ *
+ * Top 10 global de la última semana, comparado con la anterior. El backend
+ * devuelve trends ('up' | 'down' | 'same' | 'new') + magnitud del cambio,
+ * estilo charts musicales semanales (Billboard, Top 40).
+ */
+export const TopWeeklySongSchema = z.object({
+  song_id: z.string(),
+  title: z.string(),
+  artist: z.string(),
+  artist_id: z.string().nullable().optional(),
+  album: z.string(),
+  album_id: z.string().nullable(),
+  cover_art: z.string().nullable(),
+  duration: z.number().optional(),
+  plays: z.number(),
+  rank: z.number(),
+  previousRank: z.number().nullable(),
+  trend: z.enum(['up', 'down', 'same', 'new']),
+  change: z.number().nullable()
+});
+export type TopWeeklySong = z.infer<typeof TopWeeklySongSchema>;
+export const TopWeeklyResponseSchema = z.array(TopWeeklySongSchema);
+
 // ============================================================================
 // Daily Mixes — /api/daily-mixes
 // ============================================================================
@@ -150,12 +175,19 @@ export const GlobalSettingResponseSchema = z.object({
 // User Stats (Wrapped-lite) — /api/stats/user-stats?username=&period=week|month
 // ============================================================================
 
+/**
+ * Shape devuelto por `/api/stats/user-stats` — el backend NO incluye `id`
+ * (Subsonic) en top_songs (la query SQLite agrupa por song_id internamente
+ * pero solo expone title+album+album_id). Si en el futuro el backend añade
+ * el id, se promueve a obligatorio. `album` y `album_id` son nullables porque
+ * scrobbles antiguos pueden tener nulls.
+ */
 export const UserStatsTopSongSchema = z.object({
-  id: z.string(),
+  id: z.string().optional(),
   title: z.string(),
   artist: z.string(),
-  album: z.string().optional(),
-  album_id: z.string().optional(),
+  album: z.string().nullable().optional(),
+  album_id: z.string().nullable().optional(),
   cover_art: z.string().nullable().optional(),
   plays: z.number()
 });

@@ -17,6 +17,8 @@ import {
   ArtistsResponseSchema,
   PlaylistsResponseSchema,
   AlbumResponseSchema,
+  SongResponseSchema,
+  UserResponseSchema,
   PlaylistResponseSchema,
   ArtistResponseSchema,
   AlbumInfoResponseSchema,
@@ -182,6 +184,41 @@ export async function getAlbumList2(
   return data.albumList2.album ?? [];
 }
 
+/** Variante `byYear` de getAlbumList2 — devuelve los álbumes lanzados entre
+    `fromYear` y `toYear` (inclusive). Útil para "Nuevos lanzamientos" del
+    año en curso. Subsonic acepta from > to para invertir el orden. */
+export async function getAlbumsByYear(
+  fromYear: number,
+  toYear: number,
+  size = 30
+): Promise<NavidromeAlbum[]> {
+  const creds = requireCreds();
+  const data = await call(
+    creds,
+    'getAlbumList2',
+    { type: 'byYear', fromYear, toYear, size },
+    AlbumList2ResponseSchema
+  );
+  return data.albumList2.album ?? [];
+}
+
+/** Variante `byGenre` — álbumes etiquetados con un género específico.
+    Devuelve hasta `size`. Reusable para sacar artistas representativos de
+    un género (cruzando con `getArtists()` por nombre). */
+export async function getAlbumsByGenre(
+  genre: string,
+  size = 50
+): Promise<NavidromeAlbum[]> {
+  const creds = requireCreds();
+  const data = await call(
+    creds,
+    'getAlbumList2',
+    { type: 'byGenre', genre, size },
+    AlbumList2ResponseSchema
+  );
+  return data.albumList2.album ?? [];
+}
+
 export async function getArtists(): Promise<NavidromeArtist[]> {
   const creds = requireCreds();
   const data = await call(creds, 'getArtists', {}, ArtistsResponseSchema);
@@ -199,6 +236,25 @@ export async function getAlbum(id: string) {
   const creds = requireCreds();
   const data = await call(creds, 'getAlbum', { id }, AlbumResponseSchema);
   return data.album;
+}
+
+/** GET /rest/getSong — singleton song. Útil para enriquecer items de
+    endpoints que solo devuelven metadata mínima (ej. /api/stats/top-weekly
+    no incluye `explicitStatus` ni `replayGain`). */
+export async function getSong(id: string) {
+  const creds = requireCreds();
+  const data = await call(creds, 'getSong', { id }, SongResponseSchema);
+  return data.song;
+}
+
+/** GET /rest/getUser — info del user incluyendo `adminRole`. Subsonic permite
+    consultar OWN user sin permisos especiales; consultar OTROS solo si el
+    caller es admin. Para nuestro flow (saber si el current user es admin)
+    siempre pedimos el username actual. */
+export async function getUser(username: string) {
+  const creds = requireCreds();
+  const data = await call(creds, 'getUser', { username }, UserResponseSchema);
+  return data.user;
 }
 
 export async function getPlaylist(id: string) {

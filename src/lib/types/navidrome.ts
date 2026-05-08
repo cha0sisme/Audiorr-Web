@@ -168,6 +168,33 @@ export const AlbumResponseSchema = z.object({
   })
 });
 
+/** GET /rest/getSong → song singleton */
+export const SongResponseSchema = z.object({
+  song: NavidromeSongSchema
+});
+
+/** GET /rest/getUser — info del usuario incluyendo roles. */
+export const NavidromeUserSchema = z.object({
+  username: z.string(),
+  email: z.string().optional(),
+  scrobblingEnabled: z.boolean().optional(),
+  adminRole: z.boolean().optional(),
+  settingsRole: z.boolean().optional(),
+  downloadRole: z.boolean().optional(),
+  uploadRole: z.boolean().optional(),
+  playlistRole: z.boolean().optional(),
+  coverArtRole: z.boolean().optional(),
+  commentRole: z.boolean().optional(),
+  podcastRole: z.boolean().optional(),
+  streamRole: z.boolean().optional(),
+  jukeboxRole: z.boolean().optional(),
+  shareRole: z.boolean().optional()
+});
+export type NavidromeUser = z.infer<typeof NavidromeUserSchema>;
+export const UserResponseSchema = z.object({
+  user: NavidromeUserSchema
+});
+
 /** GET /rest/getPlaylist → playlist with embedded entries (songs) */
 export const PlaylistResponseSchema = z.object({
   playlist: NavidromePlaylistSchema.extend({

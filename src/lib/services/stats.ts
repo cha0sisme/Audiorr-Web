@@ -10,8 +10,10 @@
 import { backendService } from './BackendService.svelte';
 import {
   RecentContextsSchema,
+  TopWeeklyResponseSchema,
   UserStatsSchema,
   type RecentContextItem,
+  type TopWeeklySong,
   type UserStats,
   type StatsPeriod
 } from '$types/backend';
@@ -45,4 +47,15 @@ export async function getUserStats(
 ): Promise<UserStats | null> {
   const path = `/api/stats/user-stats?username=${encodeURIComponent(username)}&period=${period}`;
   return backendService.get(path, UserStatsSchema);
+}
+
+/**
+ * Top 10 global semanal con tendencias (rank, trend up/down/same/new, change).
+ * Mirrors `BackendService.getTopWeekly()` de iOS. El backend lo calcula desde
+ * `wrapped.db` comparando últimos 7 días vs los 7 anteriores. Devuelve `[]`
+ * si la base de datos está vacía.
+ */
+export async function getTopWeekly(): Promise<TopWeeklySong[]> {
+  const data = await backendService.get('/api/stats/top-weekly', TopWeeklyResponseSchema);
+  return data ?? [];
 }

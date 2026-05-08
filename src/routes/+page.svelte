@@ -5,20 +5,23 @@
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import QuickAccessCard from '$components/home/QuickAccessCard.svelte';
+  import TopWeeklyChart from '$components/home/TopWeeklyChart.svelte';
   import * as nav from '$services/NavidromeService';
   import * as stats from '$services/stats';
   import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { prefetchCover } from '$utils/cover-cache';
-  import {
-    albumToCardProps,
-    playlistToCardProps,
-    artistToCardProps
-  } from '$utils/navidrome-mappers';
+  import { albumToCardProps } from '$utils/navidrome-mappers';
+  import { player } from '$stores/player.svelte';
+  import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
+  import type { RecentContextItem, TopWeeklySong } from '$types/backend';
+  import type { NavidromeSong } from '$types/navidrome';
 
-  // Saludo dinámico por hora
+  // Saludo dinámico por hora — una sola línea, sin username (decisión UI:
+  // los nombres de Navidrome suelen ser lowercase técnicos tipo "leandro" o
+  // "admin", añadirlos rompe el tono editorial limpio que queremos).
   const hour = new Date().getHours();
   const greeting =
     hour < 6 ? 'Buenas noches'
@@ -26,12 +29,20 @@
     : hour < 20 ? 'Buenas tardes'
     : 'Buenas noches';
 
-  // Reactive query options — function form se re-evalúa si credentials cambia
-  const recentAlbums = createQuery(() => ({
-    queryKey: ['albumList2', 'recent'],
-    queryFn: () => nav.getAlbumList2('recent', 30),
-    enabled: credentials.isConfigured
-  }));
+  // ===========================================================================
+  // Subsonic queries.
+  //
+  // - `newest` = recién añadidos a la biblioteca (Navidrome ordena por
+  //   `created_at` desc). Es lo que queremos en "Recientemente añadido".
+  // - `frequent` = más reproducidos del usuario.
+  // - `random` = surtido aleatorio (refresca cada visita, staleTime 0).
+  // - `byYear` con año actual = "Nuevos lanzamientos" — no son adds recientes
+  //   sino lanzamientos del año (un álbum del 2026 añadido hoy y uno del
+  //   2026 añadido hace meses entran ambos).
+  //
+  // Eliminado: `recent` (recently played) — el feed correcto de "lo que has
+  // estado escuchando" lo da el backend Audiorr en /api/stats/recent-contexts.
+  // ===========================================================================
 
   const newestAlbums = createQuery(() => ({
     queryKey: ['albumList2', 'newest'],
@@ -39,55 +50,93 @@
     enabled: credentials.isConfigured
   }));
 
-  const frequentAlbums = createQuery(() => ({
-    queryKey: ['albumList2', 'frequent'],
-    queryFn: () => nav.getAlbumList2('frequent', 30),
-    enabled: credentials.isConfigured
-  }));
-
   const randomAlbums = createQuery(() => ({
     queryKey: ['albumList2', 'random'],
     queryFn: () => nav.getAlbumList2('random', 30),
-    // random no se cachea fuerte — refetch al volver a la home da variedad
     staleTime: 0,
     enabled: credentials.isConfigured
   }));
 
-  // playlists y artists rara vez cambian durante una sesión y `getArtists`
-  // es pesado (devuelve TODOS los artistas indexados — 100-200 KB JSON gzip
-  // en bibliotecas grandes). Los retenemos durante toda la sesión.
-  const playlistsQ = createQuery(() => ({
-    queryKey: ['playlists'],
-    queryFn: () => nav.getPlaylists(),
+  const currentYear = new Date().getFullYear();
+  const newReleases = createQuery(() => ({
+    queryKey: ['albumList2', 'byYear', currentYear],
+    queryFn: () => nav.getAlbumsByYear(currentYear, currentYear, 30),
     enabled: credentials.isConfigured,
-    staleTime: Infinity,
-    gcTime: Infinity
+    staleTime: 60 * 60 * 1000
   }));
 
-  const artistsQ = createQuery(() => ({
-    queryKey: ['artists'],
-    queryFn: () => nav.getArtists(),
-    enabled: credentials.isConfigured,
-    staleTime: Infinity,
-    gcTime: Infinity
-  }));
+  // ===========================================================================
+  // Backend Audiorr — Jump Back In + Top semanal.
+  //
+  // Quick-play grid (bajo el saludo) muestra los primeros 6 recentContexts
+  // del backend (mezcla album/playlist/smartmix/artist). Si está vacío
+  // (instalación nueva sin scrobbles), fallback a `newestAlbums.slice(0, 6)`
+  // — siempre hay algo bajo el saludo.
+  //
+  // "Volver a escuchar" como HorizontalScrollSection aparece SOLO cuando hay
+  // overflow (>6 contexts). Mirrors el patrón quickPlayGrid + jumpBackInSection
+  // de iOS HomeView.
+  // ===========================================================================
 
-  // Quick access usa los albums más recientes (top 8)
-  const quickAccess = $derived(recentAlbums.data?.slice(0, 8) ?? []);
-
-  // Jump Back In — feed personal del backend Audiorr (últimos contextos
-  // únicos escuchados: álbumes, playlists, smart mixes, artistas).
-  // Si el wrapped.db está vacío (instalación nueva sin scrobbles), el
-  // backend devuelve [] y la sección se omite del DOM.
   const recentContextsQ = createQuery(() => ({
     queryKey: ['recentContexts', credentials.current?.username ?? ''],
     queryFn: () => stats.getRecentContexts(credentials.current!.username),
     enabled: credentials.isConfigured,
-    // 1 min staleTime: el feed actualiza cada vez que el usuario reproduce
-    // algo nuevo, pero no tan frecuente como para refetch agresivo.
     staleTime: 60 * 1000
   }));
   const recentContexts = $derived(recentContextsQ.data ?? []);
+
+  const topWeeklyQ = createQuery(() => ({
+    queryKey: ['topWeekly'],
+    queryFn: () => stats.getTopWeekly(),
+    enabled: credentials.isConfigured,
+    // El chart cambia día a día (la ventana semanal corre); 5 min es OK,
+    // pero como no es crítico, podemos dejar staleTime más alto.
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000
+  }));
+  const topWeekly = $derived(topWeeklyQ.data ?? []);
+
+  // Quick-play grid: primeros 6 contexts. Si vacío → fallback a newest albums.
+  type QuickItem =
+    | { kind: 'context'; ctx: RecentContextItem }
+    | { kind: 'album'; album: NonNullable<typeof newestAlbums.data>[number] };
+
+  const quickItems = $derived.by<QuickItem[]>(() => {
+    if (recentContexts.length > 0) {
+      return recentContexts.slice(0, 6).map((ctx) => ({ kind: 'context' as const, ctx }));
+    }
+    return (newestAlbums.data ?? [])
+      .slice(0, 6)
+      .map((album) => ({ kind: 'album' as const, album }));
+  });
+
+  const jumpBackOverflow = $derived(recentContexts.slice(6));
+
+  // === Top semanal play handler ===
+  // Convertimos TopWeeklySong → NavidromeSong inline para arrancar la queue.
+  // iOS hace lo mismo (con un getSong N+1 en background para hidratar
+  // explicit/replayGain) — aquí simplificamos al MVP: la queue es funcional
+  // sin esos detalles y el siguiente analyze enriquece on-demand.
+  function topWeeklyToNavidromeSong(s: TopWeeklySong): NavidromeSong {
+    return {
+      id: s.song_id,
+      title: s.title,
+      artist: s.artist,
+      ...(s.artist_id ? { artistId: s.artist_id } : {}),
+      album: s.album,
+      ...(s.album_id ? { albumId: s.album_id } : {}),
+      ...(s.cover_art ? { coverArt: s.cover_art } : {}),
+      ...(typeof s.duration === 'number' ? { duration: s.duration } : {})
+    };
+  }
+
+  function playTopWeekly(index: number) {
+    if (topWeekly.length === 0) return;
+    const songs = topWeekly.map(topWeeklyToNavidromeSong);
+    player.context = { type: 'playlist', id: 'top-weekly' };
+    queueManager.play(songs, index);
+  }
 
   // Side effect: pre-cargar los `coverContentHash` de daily mixes + smart
   // playlists en el store global `playlistCovers`. Mirrors
@@ -113,47 +162,74 @@
 
 <div class="home">
   <header class="hero">
-    <div>
-      <p class="eyebrow">{greeting}</p>
-      <h1>Bienvenido</h1>
-    </div>
-    <div class="chips" role="tablist" aria-label="Filtros">
-      <button class="chip active" role="tab" aria-selected="true">Todo</button>
-      <button class="chip" role="tab" aria-selected="false">Música</button>
-      <button class="chip" role="tab" aria-selected="false">Mixes</button>
-    </div>
+    <h1>{greeting}</h1>
   </header>
 
-  <section class="quick-access">
-    {#each quickAccess as a (a.id)}
-      {@const props = albumToCardProps(a)}
-      <QuickAccessCard
-        id={props.id}
-        contextType="album"
-        title={props.title}
-        coverUrl={props.coverUrl}
-        href={props.href}
-        prefetchHero={props.prefetchHero}
-      />
+  <!-- Quick-play grid: 6 primeros recentContexts (album/playlist/smartmix/
+       artist mezclados). Mirrors el quickPlayGrid de iOS. Si el wrapped.db
+       está vacío (instalación nueva) cae a los 6 primeros álbumes recién
+       añadidos para que esta sección nunca aparezca vacía. -->
+  <section class="quick-access" aria-label="Acceso rápido">
+    {#each quickItems as item (item.kind === 'context' ? item.ctx.contextUri : item.album.id)}
+      {#if item.kind === 'context'}
+        {@const ctx = item.ctx}
+        {#if ctx.type === 'album'}
+          <QuickAccessCard
+            id={ctx.id}
+            contextType="album"
+            title={ctx.title}
+            coverUrl={ctx.coverArtId ? getCoverArtUrl(ctx.coverArtId, 120) : undefined}
+            href={`/album/${ctx.id}`}
+            prefetchHero={() => prefetchCover(ctx.coverArtId ?? undefined, 600)}
+          />
+        {:else if ctx.type === 'playlist' || ctx.type === 'smartmix'}
+          <QuickAccessCard
+            id={ctx.id}
+            contextType="playlist"
+            title={ctx.title}
+            coverUrl={getPlaylistCoverUrl(ctx.id)}
+            href={`/playlist/${ctx.id}`}
+          />
+        {:else if ctx.type === 'artist'}
+          <!-- ctx.id es el NOMBRE para artist (limitación backend) → href cae
+               a /search?q=<name>. Cuando el backend exponga el id Subsonic
+               real, simplificar a /artist/<id>. -->
+          <QuickAccessCard
+            id={ctx.id}
+            contextType="artist"
+            title={ctx.title}
+            href={`/search?q=${encodeURIComponent(ctx.title)}`}
+          />
+        {/if}
+      {:else}
+        {@const props = albumToCardProps(item.album)}
+        <QuickAccessCard
+          id={props.id}
+          contextType="album"
+          title={props.title}
+          coverUrl={props.coverUrl}
+          href={props.href}
+          prefetchHero={props.prefetchHero}
+        />
+      {/if}
     {/each}
   </section>
 
-  {#if recentContexts.length > 0}
-    <!-- Jump Back In ("Volver a escuchar"): carrusel reutilizando los cards
-         estándar de la app (AlbumCard / PlaylistCard / ArtistCard) según el
-         tipo del contexto. Esto garantiza coherencia visual con el resto
-         de carruseles de la home (mismo itemMinWidth=180, mismas medidas
-         tipográficas, mismas animaciones).
+  <!-- Top semanal: 2 columnas de 5 (Top 10 con tendencias). Solo aparece
+       si el backend devolvió data — wrapped.db vacío = sin sección. -->
+  {#if topWeekly.length > 0}
+    <section class="top-weekly" aria-label="Top semanal">
+      <header class="section-header">
+        <h2>Top semanal</h2>
+        <p>Lo más escuchado de la semana</p>
+      </header>
+      <TopWeeklyChart songs={topWeekly} onPlay={playTopWeekly} />
+    </section>
+  {/if}
 
-         Cover por tipo:
-           album    → Navidrome (Subsonic) por coverArtId.
-           playlist | smartmix → backend personalizado por id.
-           artist   → fallback a iniciales (ArtistCard).
-
-         `other` se filtra (sin cover representativo).
-         Para artist, ctx.id es el NOMBRE en el shape del backend, así que
-         href cae a /search?q=<name>. -->
-    <HorizontalScrollSection title="Volver a escuchar" items={recentContexts}>
+  <!-- Volver a escuchar — overflow del quick-play grid (>6 contexts). -->
+  {#if jumpBackOverflow.length > 0}
+    <HorizontalScrollSection title="Volver a escuchar" items={jumpBackOverflow}>
       {#snippet item(ctx)}
         {#if ctx.type === 'album'}
           <AlbumCard
@@ -186,48 +262,12 @@
 
   <HorizontalScrollSection
     title="Recientemente añadido"
-    items={recentAlbums.data ?? []}
+    items={newestAlbums.data ?? []}
     seeAllHref="/library/recent"
   >
     {#snippet item(a)}
       {@const props = albumToCardProps(a)}
       <AlbumCard {...props} />
-    {/snippet}
-  </HorizontalScrollSection>
-
-  <HorizontalScrollSection
-    title="Más escuchado"
-    subtitle="Tus álbumes favoritos"
-    items={frequentAlbums.data ?? []}
-    seeAllHref="/library/most-played"
-  >
-    {#snippet item(a)}
-      {@const props = albumToCardProps(a)}
-      <AlbumCard {...props} />
-    {/snippet}
-  </HorizontalScrollSection>
-
-  <HorizontalScrollSection
-    title="Tus playlists"
-    items={playlistsQ.data ?? []}
-    seeAllHref="/library/playlists"
-  >
-    {#snippet item(p)}
-      {@const props = playlistToCardProps(p)}
-      <PlaylistCard {...props} />
-    {/snippet}
-  </HorizontalScrollSection>
-
-  <HorizontalScrollSection
-    title="Artistas"
-    items={artistsQ.data ?? []}
-    seeAllHref="/library/artists"
-    itemMinWidth={140}
-    seeAllShape="round"
-  >
-    {#snippet item(a)}
-      {@const props = artistToCardProps(a)}
-      <ArtistCard {...props} />
     {/snippet}
   </HorizontalScrollSection>
 
@@ -243,16 +283,21 @@
     {/snippet}
   </HorizontalScrollSection>
 
-  <HorizontalScrollSection
-    title="Nuevos lanzamientos"
-    items={newestAlbums.data ?? []}
-    seeAllHref="/library/newest"
-  >
-    {#snippet item(a)}
-      {@const props = albumToCardProps(a)}
-      <AlbumCard {...props} />
-    {/snippet}
-  </HorizontalScrollSection>
+  <!-- Nuevos lanzamientos: álbumes del año en curso (`byYear`) — diferente
+       de "Recientemente añadido" (newest = recién metidos a la biblioteca). -->
+  {#if (newReleases.data ?? []).length > 0}
+    <HorizontalScrollSection
+      title="Nuevos lanzamientos"
+      subtitle={`Lanzamientos de ${currentYear}`}
+      items={newReleases.data ?? []}
+      seeAllHref="/library/new-releases"
+    >
+      {#snippet item(a)}
+        {@const props = albumToCardProps(a)}
+        <AlbumCard {...props} subtitleMode="year" />
+      {/snippet}
+    </HorizontalScrollSection>
+  {/if}
 </div>
 
 <style>
@@ -263,17 +308,7 @@
   }
 
   .hero {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--space-6);
-    flex-wrap: wrap;
     padding: 0 var(--space-6);
-  }
-  .eyebrow {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    margin-bottom: var(--space-1);
   }
   h1 {
     font-size: var(--text-3xl);
@@ -283,31 +318,6 @@
     margin: 0;
   }
 
-  .chips {
-    display: flex;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-  .chip {
-    padding: var(--space-2) var(--space-4);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    border-radius: var(--radius-full);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-ios-default);
-  }
-  .chip:hover:not(.active) {
-    background: var(--bg-surface-hover);
-  }
-  .chip.active {
-    background: var(--text-primary);
-    color: var(--bg-canvas);
-    border-color: var(--text-primary);
-  }
-
   .quick-access {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
@@ -315,6 +325,28 @@
     padding: 0 var(--space-6);
   }
 
+  .top-weekly {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+  .section-header {
+    padding: 0 var(--space-6);
+  }
+  .section-header h2 {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+  .section-header p {
+    margin: 2px 0 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+  }
 
   @media (max-width: 640px) {
     .home {
@@ -326,6 +358,9 @@
     .quick-access {
       padding: 0 var(--space-4);
       grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    }
+    .section-header {
+      padding: 0 var(--space-4);
     }
     h1 {
       font-size: var(--text-2xl);

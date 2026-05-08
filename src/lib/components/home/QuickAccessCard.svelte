@@ -30,16 +30,23 @@
   const isCurrent = $derived(player.isPlayingFrom(contextType, id));
 
   let coverEl: HTMLDivElement | undefined = $state();
+
+  /** Asigna el `view-transition-name` al cover usando el mismo prefijo que
+      el Detail correspondiente (album-, playlist-, artist-). Esto encadena
+      la View Transition card → hero del Detail (el cover crece al hero
+      mientras el background hace cross-fade). Mirrors el comportamiento
+      ya implementado en AlbumCard / PlaylistCard / ArtistCard. */
   function handleClick() {
-    // Solo álbumes participan del View Transition con el hero del AlbumDetail
-    if (coverEl && contextType === 'album') {
-      coverEl.style.viewTransitionName = `album-${id}`;
+    if (!coverEl) return;
+    if (contextType === 'album' || contextType === 'playlist' || contextType === 'artist') {
+      coverEl.style.viewTransitionName = `${contextType}-${id}`;
     }
   }
 </script>
 
 <a
   class="card"
+  data-context={contextType}
   {href}
   onclick={handleClick}
   onmouseenter={prefetchHero}
@@ -100,6 +107,12 @@
     height: 56px;
     flex-shrink: 0;
     overflow: hidden;
+  }
+  /* Artist tiene avatar redondo en /artist/[id] — el cover del card también
+     redondo para que la View Transition card → hero anime cleanly sin
+     "salto" de border-radius. */
+  .card[data-context='artist'] .cover {
+    border-radius: var(--radius-full);
   }
   .playing-overlay {
     position: absolute;
