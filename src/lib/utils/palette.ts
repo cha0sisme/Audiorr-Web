@@ -103,19 +103,22 @@ export function heroPaletteOklchSecondary(palette: CoverPalette, alpha = 0.76): 
 }
 
 /**
- * Background del hero al estilo iOS: gradiente diagonal primary→secondary +
- * scrim oscuro vertical para legibilidad del texto + fade-out final hacia
- * bg-canvas en el último 35% (smooth merge con el contenido inferior).
+ * Background del hero al estilo iOS 2026: gradiente diagonal primary→secondary
+ * + scrim oscuro vertical para legibilidad del texto.
  *
- * Devuelve un string `background:` multi-layer listo para usar.
+ * NOTA: el fade hacia `bg-canvas` ya NO está aquí — se aplica fuera, vía
+ * `mask-image` con curva ease-out al backdrop del hero (`::before`). Esa
+ * técnica evita el banding del antiguo `linear-gradient(transparent → canvas)`,
+ * porque la mask interpola opacidad puramente sin "calcular" un color
+ * intermedio entre el del hero y el del canvas. Apple Music, Tidal y Spotify
+ * post-redesign usan esta misma aproximación.
+ *
+ * Ver `HERO_BACKDROP_MASK` para el gradient con stops curve-style.
  */
 export function heroBackgroundLayered(palette: CoverPalette): string {
   const p = heroPaletteOklchPrimary(palette);
   const s = heroPaletteOklchSecondary(palette);
   return [
-    // Fade final hacia bg-canvas en el último 35% — sin esto, el corte hero/
-    // contenido se siente abrupto.
-    `linear-gradient(to bottom, transparent 0%, transparent 65%, var(--bg-canvas) 100%)`,
     // Scrim vertical para contraste del texto blanco.
     `linear-gradient(to bottom, rgb(0 0 0 / 0.38) 0%, rgb(0 0 0 / 0.22) 50%, rgb(0 0 0 / 0.06) 100%)`,
     // Gradient diagonal con el color del cover.
@@ -124,15 +127,42 @@ export function heroBackgroundLayered(palette: CoverPalette): string {
 }
 
 /** Para cuando NO hay imagen: hero como flat fill del primary del palette
-    (el iOS llama a esto "isSolid" — covers monocromáticos). */
+    (el iOS llama a esto "isSolid" — covers monocromáticos). El fade lo hace
+    la mask del backdrop. */
 export function heroBackgroundFlat(palette: CoverPalette): string {
   // L=0.42 da bg dark-ish con buen contraste para texto blanco; chroma full
   // del palette para que el color del álbum siga siendo protagonista.
-  return [
-    `linear-gradient(to bottom, transparent 0%, transparent 65%, var(--bg-canvas) 100%)`,
-    `oklch(0.42 ${palette.chroma} ${palette.hue})`
-  ].join(', ');
+  return `oklch(0.42 ${palette.chroma} ${palette.hue})`;
 }
+
+/**
+ * Mask CSS para el backdrop del hero — fade del fondo en el tercio inferior
+ * con curva ease-out aproximada por stops manuales. Aplicar como
+ * `mask-image: var(--hero-backdrop-mask)` (o el valor literal vía clase
+ * compartida).
+ *
+ * Curva (output approx. cubic-bezier(0.4, 0, 0.2, 1) en alpha):
+ *   60% → 100% opaco (hero a pleno color)
+ *   70% → 96% (transición empieza muy lenta — invisible)
+ *   80% → 78% (curva acelerándose)
+ *   88% → 45% (cae rápido)
+ *   94% → 16% (suave)
+ *   100% → 0% (fundido total con el bg-canvas)
+ *
+ * Resultado visual: el hero NUNCA termina con un corte abrupto. El último
+ * 40% se desvanece sobre el contenido de abajo de forma natural, sin banding
+ * (la mask interpola alpha pura — no hay color intermedio que calcular).
+ */
+export const HERO_BACKDROP_MASK =
+  'linear-gradient(to bottom, ' +
+  'rgb(0 0 0 / 1) 0%, ' +
+  'rgb(0 0 0 / 1) 60%, ' +
+  'rgb(0 0 0 / 0.96) 70%, ' +
+  'rgb(0 0 0 / 0.78) 80%, ' +
+  'rgb(0 0 0 / 0.45) 88%, ' +
+  'rgb(0 0 0 / 0.16) 94%, ' +
+  'rgb(0 0 0 / 0) 100%' +
+  ')';
 
 /**
  * Paleta neutral para el hero MIENTRAS se extrae la real con Vibrant.

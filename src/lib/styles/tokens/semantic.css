@@ -319,6 +319,31 @@
   --hero-text-secondary: rgb(255 255 255 / 0.85);
   --hero-text-tertiary: rgb(255 255 255 / 0.75);
 
+  /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
+     curva ease-out aproximada por stops. La técnica: aplicar como
+     `mask-image` al pseudo-element `::before` del hero, cuyo fondo es la
+     paleta extraída. Resultado: el hero se desvanece sobre `--bg-canvas`
+     puro (no se interpola color), eliminando el banding del antiguo
+     `linear-gradient(transparent → bg-canvas)`.
+
+     Curva: 60% opaco → 100% transparente con stops 70/80/88/94/100 que
+     simulan cubic-bezier(0.4, 0, 0.2, 1). Apple Music / Tidal / Spotify
+     post-redesign usan esta misma aproximación.
+
+     Ojo: WebKit todavía exige el prefix `-webkit-mask-image`; los componentes
+     que apliquen la mask deben declarar ambos. */
+  --hero-backdrop-mask:
+    linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 1) 0%,
+      rgb(0 0 0 / 1) 60%,
+      rgb(0 0 0 / 0.96) 70%,
+      rgb(0 0 0 / 0.78) 80%,
+      rgb(0 0 0 / 0.45) 88%,
+      rgb(0 0 0 / 0.16) 94%,
+      rgb(0 0 0 / 0) 100%
+    );
+
   /* Drag handle bar — la "pildora" arriba de los sheets que indica que se
      pueden arrastrar (iOS pattern, también usado por Vaul). */
   --handle-bar: var(--gray-7);

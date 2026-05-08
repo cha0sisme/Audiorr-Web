@@ -94,7 +94,7 @@
 <div class="profile">
   <!-- Hero — mismo patrón que ArtistDetail/PlaylistDetail. Background del
        avatar color determinístico (mismo username = mismo color). -->
-  <header class="hero" style:background={heroBg}>
+  <header class="hero" style:--hero-bg={heroBg}>
     <div class="hero-avatar" style:background={avatarColor.css}>
       {#if avatarUrl}
         <CoverImage src={avatarUrl} alt="" shape="circle" lazy={false} priority="high" />
@@ -251,12 +251,25 @@
 
   /* === Hero — replica del de ArtistDetail/PlaylistDetail === */
   .hero {
+    position: relative;
+    isolation: isolate;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: end;
     column-gap: var(--space-6);
     padding: var(--space-12) var(--space-6) var(--space-8);
     color: var(--hero-text-primary);
+  }
+  /* Backdrop con mask ease-out — el hero se desvanece sobre `--bg-canvas`
+     en su tercio inferior sin banding (la mask interpola alpha pura). */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--hero-bg);
+    -webkit-mask-image: var(--hero-backdrop-mask);
+    mask-image: var(--hero-backdrop-mask);
+    z-index: -1;
     transition: background var(--duration-normal) var(--ease-ios-default);
   }
 
