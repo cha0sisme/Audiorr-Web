@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
+  import { ArrowsClockwise, CaretRight } from 'phosphor-svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
@@ -68,6 +69,170 @@
     enabled: credentials.isConfigured && currentTab === 'artists',
     gcTime: 30 * 60 * 1000
   }));
+
+  // ==========================================================================
+  // Artists tab — replica el ArtistsView de iOS:
+  //   1. "Más escuchados" — 12 artistas top extraídos de `frequent` albums.
+  //   2. "Recientes" — 12 artistas con álbumes recién añadidos (`newest`).
+  //   3. "{Genre random}" — 12 artistas de un género aleatorio + botón shuffle.
+  //   4. Link al final → /library/artists (lista A-Z completa).
+  //
+  // Las 3 secciones se cruzan con `getArtists()` por nombre para resolver el
+  // ID Subsonic (los álbumes solo traen `artist: string`, no el id). Si el
+  // mismo nombre está duplicado en la biblioteca, nos quedamos con el primero.
+  // ==========================================================================
+
+  const allArtists = $derived(artistsQ.data ?? []);
+
+  /** Map nombre → primera ocurrencia. Tolera duplicados (Subsonic permite
+      varios artistas con el mismo nombre). Ports `artistLookupByName` de iOS. */
+  const artistByName = $derived.by(() => {
+    const map = new Map<string, NonNullable<typeof artistsQ.data>[number]>();
+    for (const a of allArtists) {
+      if (!map.has(a.name)) map.set(a.name, a);
+    }
+    return map;
+  });
+
+  // === Featured: top artistas por frecuencia de plays (frequent albums) ===
+  const frequentAlbumsForArtistsQ = createQuery(() => ({
+    queryKey: ['library', 'artists', 'frequent'],
+    queryFn: () => nav.getAlbumList2('frequent', 50),
+    enabled: credentials.isConfigured && currentTab === 'artists',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const featuredArtists = $derived.by(() => {
+    const albums = frequentAlbumsForArtistsQ.data ?? [];
+    const counts = new Map<string, number>();
+    for (const album of albums) {
+      const name = album.artist ?? '';
+      if (!name) continue;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([name]) => artistByName.get(name))
+      .filter((a): a is NonNullable<typeof allArtists[number]> => !!a);
+  });
+
+  // === Recent: artistas con álbumes recién añadidos ===
+  const newestAlbumsForArtistsQ = createQuery(() => ({
+    queryKey: ['library', 'artists', 'newest'],
+    queryFn: () => nav.getAlbumList2('newest', 30),
+    enabled: credentials.isConfigured && currentTab === 'artists',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const recentArtists = $derived.by(() => {
+    const albums = newestAlbumsForArtistsQ.data ?? [];
+    const seen = new Set<string>();
+    const out: NonNullable<typeof allArtists[number]>[] = [];
+    for (const album of albums) {
+      const name = album.artist ?? '';
+      if (!name || seen.has(name)) continue;
+      const a = artistByName.get(name);
+      if (!a) continue;
+      seen.add(name);
+      out.push(a);
+      if (out.length >= 12) break;
+    }
+    return out;
+  });
+
+  // === Genre random — pool de 3 listas + filter blacklist ===
+  let currentGenre = $state<string | null>(null);
+  let recentGenres: string[] = [];
+  const GENRE_HISTORY_DEPTH = 3;
+
+  /** Pool de albums para extraer géneros. Se carga una vez al entrar al tab. */
+  const genrePoolQ = createQuery(() => ({
+    queryKey: ['library', 'artists', 'genre-pool'],
+    queryFn: async () => {
+      const [n, f, r] = await Promise.all([
+        nav.getAlbumList2('newest', 100),
+        nav.getAlbumList2('frequent', 100),
+        nav.getAlbumList2('random', 100)
+      ]);
+      return [...n, ...f, ...r];
+    },
+    enabled: credentials.isConfigured && currentTab === 'artists',
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const availableGenres = $derived.by(() => {
+    const albums = genrePoolQ.data ?? [];
+    const set = new Set<string>();
+    for (const album of albums) {
+      const g = album.genre ?? '';
+      if (!g) continue;
+      for (const part of g.split(',')) {
+        const trimmed = part.trim();
+        if (trimmed) set.add(trimmed);
+      }
+    }
+    return [...set];
+  });
+
+  /** Selecciona un género evitando los últimos `GENRE_HISTORY_DEPTH` y el
+      actual. Fallback: cualquiera distinto al actual si la lista es chica. */
+  function pickGenre(): string | null {
+    const genres = availableGenres;
+    if (genres.length === 0) return null;
+    const blocked = new Set([currentGenre, ...recentGenres].filter(Boolean) as string[]);
+    let candidates = genres.filter((g) => !blocked.has(g));
+    if (candidates.length === 0) {
+      candidates = genres.filter((g) => g !== currentGenre);
+    }
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+  }
+
+  // Auto-selecciona el primer género cuando el pool llega.
+  $effect(() => {
+    if (currentTab !== 'artists') return;
+    if (currentGenre !== null) return;
+    if (availableGenres.length === 0) return;
+    const picked = pickGenre();
+    if (picked) currentGenre = picked;
+  });
+
+  function shuffleGenre() {
+    const next = pickGenre();
+    if (!next) return;
+    if (currentGenre) {
+      recentGenres = [currentGenre, ...recentGenres].slice(0, GENRE_HISTORY_DEPTH);
+    }
+    currentGenre = next;
+  }
+
+  const genreAlbumsQ = createQuery(() => ({
+    queryKey: ['library', 'artists', 'byGenre', currentGenre ?? ''],
+    queryFn: () => nav.getAlbumsByGenre(currentGenre!, 50),
+    enabled: credentials.isConfigured && currentTab === 'artists' && !!currentGenre,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000
+  }));
+
+  const genreArtists = $derived.by(() => {
+    const albums = genreAlbumsQ.data ?? [];
+    const seen = new Set<string>();
+    const out: NonNullable<typeof allArtists[number]>[] = [];
+    for (const album of albums) {
+      const name = album.artist ?? '';
+      if (!name || seen.has(name)) continue;
+      const a = artistByName.get(name);
+      if (!a) continue;
+      seen.add(name);
+      out.push(a);
+      if (out.length >= 12) break;
+    }
+    return out;
+  });
 
   // ==========================================================================
   // Playlists tab — replica el layout completo del legacy PlaylistsPage:
@@ -329,24 +494,75 @@
         </div>
       {/if}
     {:else}
+      <!-- Tab Artistas — 3 carruseles + link "Todos los artistas". -->
       {#if artistsQ.isPending}
         <div class="grid-skeleton" data-kind="artists">
           {#each Array(12) as _}<div class="card-sk round"></div>{/each}
         </div>
-      {:else if artistsQ.data}
-        <!-- ArtistCard: 140px round + nombre 1 línea ≈ 200px de altura. -->
-        <VirtualGrid
-          items={artistsQ.data}
-          minItemWidth={140}
-          estimateRowHeight={200}
-          gap={24}
-          getKey={(a) => a.id}
-        >
-          {#snippet item(a)}
-            {@const props = artistToCardProps(a)}
-            <ArtistCard {...props} />
-          {/snippet}
-        </VirtualGrid>
+      {:else if allArtists.length > 0}
+        <div class="artist-sections">
+          {#if featuredArtists.length > 0}
+            <HorizontalScrollSection
+              title="Más escuchados"
+              items={featuredArtists}
+              itemMinWidth={140}
+              seeAllShape="round"
+            >
+              {#snippet item(a)}
+                {@const props = artistToCardProps(a)}
+                <ArtistCard {...props} />
+              {/snippet}
+            </HorizontalScrollSection>
+          {/if}
+
+          {#if recentArtists.length > 0}
+            <HorizontalScrollSection
+              title="Recientes"
+              items={recentArtists}
+              itemMinWidth={140}
+              seeAllShape="round"
+            >
+              {#snippet item(a)}
+                {@const props = artistToCardProps(a)}
+                <ArtistCard {...props} />
+              {/snippet}
+            </HorizontalScrollSection>
+          {/if}
+
+          {#if currentGenre && genreArtists.length > 0}
+            <section class="genre-section">
+              <header class="genre-header">
+                <h2>{currentGenre}</h2>
+                <button
+                  type="button"
+                  class="shuffle-btn"
+                  onclick={shuffleGenre}
+                  aria-label="Cambiar género"
+                  title="Cambiar género"
+                >
+                  <ArrowsClockwise size={16} weight="bold" />
+                </button>
+              </header>
+              <HorizontalScrollSection
+                title=""
+                items={genreArtists}
+                itemMinWidth={140}
+                seeAllShape="round"
+              >
+                {#snippet item(a)}
+                  {@const props = artistToCardProps(a)}
+                  <ArtistCard {...props} />
+                {/snippet}
+              </HorizontalScrollSection>
+            </section>
+          {/if}
+
+          <a class="all-artists-link" href="/library/artists">
+            <span class="all-label">Todos los artistas</span>
+            <span class="all-count">{allArtists.length}</span>
+            <CaretRight size={14} weight="bold" />
+          </a>
+        </div>
       {/if}
     {/if}
   </div>
@@ -391,11 +607,96 @@
   /* Layout del tab playlists: stack vertical de las secciones del layout
      configurado por admin (daily, smart, user, dynamic). Cada sección es
      un carrusel HorizontalScrollSection con seeAllHref. */
-  .playlist-sections {
+  .playlist-sections,
+  .artist-sections {
     display: flex;
     flex-direction: column;
     gap: var(--space-7);
     min-width: 0;
+  }
+
+  /* === Tab Artistas — sección Genre con shuffle button === */
+  .genre-section {
+    display: grid;
+    gap: var(--space-3);
+    min-width: 0;
+  }
+  .genre-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 0 var(--space-6);
+  }
+  .genre-header h2 {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    line-height: 1.2;
+    color: var(--text-primary);
+  }
+  .shuffle-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default),
+      transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .shuffle-btn:hover {
+    background: var(--bg-surface-hover);
+    color: var(--text-primary);
+  }
+  .shuffle-btn:active {
+    transform: rotate(120deg);
+    transition-duration: var(--duration-instant);
+  }
+  .shuffle-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* === Link "Todos los artistas (N)" al final del tab Artistas === */
+  .all-artists-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-6);
+    margin: 0 var(--space-2);
+    border-top: 1px solid var(--separator-subtle);
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: background var(--duration-fast) var(--ease-ios-default);
+  }
+  .all-artists-link:hover {
+    background: var(--row-hover);
+  }
+  .all-artists-link:focus-visible {
+    outline: none;
+    background: var(--row-hover);
+    box-shadow: var(--focus-ring);
+  }
+  .all-label {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    line-height: 1.2;
+  }
+  .all-count {
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    margin-right: auto;
+  }
+  .all-artists-link :global(svg) {
+    color: var(--text-tertiary);
   }
 
   .empty {

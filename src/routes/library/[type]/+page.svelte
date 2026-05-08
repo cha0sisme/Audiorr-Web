@@ -26,6 +26,7 @@
     | 'most-played'
     | 'random'
     | 'newest'
+    | 'new-releases'
     | 'playlists'
     | 'artists'
     | 'daily-mixes'
@@ -39,6 +40,7 @@
     'most-played':      { title: 'Más escuchado',             kind: 'album' },
     'random':           { title: 'Aleatorio',                 kind: 'album' },
     'newest':           { title: 'Nuevos lanzamientos',       kind: 'album' },
+    'new-releases':     { title: 'Nuevos lanzamientos',       kind: 'album' },
     'playlists':        { title: 'Tus playlists',             kind: 'playlist' },
     'artists':          { title: 'Artistas',                  kind: 'artist' },
     'daily-mixes':      { title: 'Tus mixes diarios',         kind: 'playlist' },
@@ -59,7 +61,9 @@
   const title = $derived(route?.title ?? '');
   const kind = $derived(route?.kind ?? 'album');
 
-  /** Mapea el type al subsonic albumList type. */
+  /** Mapea el type al subsonic albumList type. `new-releases` no usa
+      `getAlbumList2` directamente — usa `getAlbumsByYear` con el año actual,
+      que es lo que la home también consume. */
   const albumListType = $derived(
     type === 'recent' ? 'recent'
     : type === 'most-played' ? 'frequent'
@@ -67,13 +71,22 @@
     : 'random'
   );
 
+  const currentYear = new Date().getFullYear();
+
   // ============================================================================
-  // Albums (recent / most-played / random / newest)
+  // Albums (recent / most-played / random / newest / new-releases)
   // ============================================================================
   const albumsQ = createQuery(() => ({
-    queryKey: ['library-grid', 'albums', albumListType],
-    queryFn: () => nav.getAlbumList2(albumListType, 100),
-    enabled: credentials.isConfigured && kind === 'album'
+    queryKey:
+      type === 'new-releases'
+        ? ['library-grid', 'albums', 'byYear', currentYear]
+        : ['library-grid', 'albums', albumListType],
+    queryFn: () =>
+      type === 'new-releases'
+        ? nav.getAlbumsByYear(currentYear, currentYear, 100)
+        : nav.getAlbumList2(albumListType, 100),
+    enabled: credentials.isConfigured && kind === 'album',
+    staleTime: type === 'new-releases' ? 60 * 60 * 1000 : 0
   }));
 
   // ============================================================================
@@ -133,7 +146,10 @@
     {#if albumsQ.data}
       {#each albumsQ.data as a (a.id)}
         {@const props = albumToCardProps(a)}
-        <AlbumCard {...props} />
+        <AlbumCard
+          {...props}
+          subtitleMode={type === 'new-releases' ? 'year' : 'artist'}
+        />
       {/each}
     {/if}
   {:else if type === 'daily-mixes'}
