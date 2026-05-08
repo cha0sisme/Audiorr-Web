@@ -166,7 +166,7 @@
 </svelte:head>
 
 <div class="album-detail">
-  <header class="hero" style:background={heroBg}>
+  <header class="hero" style:--hero-bg={heroBg}>
     <div
       class="hero-cover"
       style:view-transition-name={albumId ? `album-${albumId}` : undefined}
@@ -228,7 +228,7 @@
             onclick={playAll}
             disabled={tracks.length === 0}
           >
-            Play
+            Reproducir
           </HeroPlayButton>
           <HeroCircleButton
             bgColor={playBg}
@@ -311,16 +311,26 @@
 
   /* === Hero (layout side-by-side, cover izquierda + meta derecha) === */
   .hero {
+    position: relative;
+    isolation: isolate;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: end;
     column-gap: var(--space-6);
     padding: var(--space-12) var(--space-6) var(--space-8);
     color: var(--hero-text-primary);
-    /* Suaviza el swap de bg cuando la paleta resuelve (placeholder → real).
-       Browsers modernos interpolan gradients del mismo type; el resto
-       hace snap pero la transición sigue siendo de "neutro a color"
-       en lugar de "color falso → color real". */
+  }
+  /* Backdrop con mask ease-out — el hero se desvanece sobre `--bg-canvas`
+     en su tercio inferior sin banding (la mask interpola alpha pura). */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--hero-bg);
+    -webkit-mask-image: var(--hero-backdrop-mask);
+    mask-image: var(--hero-backdrop-mask);
+    z-index: -1;
+    /* Suaviza el swap de bg cuando la paleta resuelve (placeholder → real). */
     transition: background var(--duration-normal) var(--ease-ios-default);
   }
 

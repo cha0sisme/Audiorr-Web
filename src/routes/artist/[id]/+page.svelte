@@ -66,6 +66,20 @@
     staleTime: 1000 * 60 * 30
   }));
 
+  // "Aparece en" — álbumes donde el artista colabora (no es el albumArtist).
+  // Search server-side con artist name + filtro local idéntico a iOS:515-535.
+  // Aislada como query independiente — no bloquea hero ni discografía.
+  const collaborationsQ = createQuery(() => ({
+    queryKey: ['artistCollaborations', artist?.name ?? ''],
+    queryFn: () => nav.getArtistCollaborations(artist!.name),
+    enabled: credentials.isConfigured && !!artist?.name,
+    retry: false,
+    // Las collabs son derivadas del catálogo Navidrome — cambian poco.
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000
+  }));
+  const collaborations = $derived(collaborationsQ.data ?? []);
+
   // Playlists con este artista — SOLO Editorial o "This is …".
   // Aislada del resto de queries: nunca bloquea el render del hero/discografía
   // porque corre en su propio createQuery (Svelte Query maneja el loading state
@@ -150,8 +164,13 @@
     [...albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
   );
 
+  // Similar artists: solo los que existen en la biblioteca (id presente Y
+  // albumCount > 0). Sin esa garantía el card lleva al usuario a una vista
+  // vacía. iOS no muestra similares "fantasma" tampoco.
   const similarArtists = $derived<NavidromeSimilarArtist[]>(
-    (artistInfoQ.data?.similarArtist ?? []).filter((a) => a.id && a.id.length > 0)
+    (artistInfoQ.data?.similarArtist ?? []).filter(
+      (a) => a.id && a.id.length > 0 && (a.albumCount ?? 0) > 0
+    )
   );
 
   const biography = $derived(cleanNotes(artistInfoQ.data?.biography));
@@ -204,7 +223,7 @@
 </svelte:head>
 
 <div class="artist-detail">
-  <header class="hero" style:background={heroBg}>
+  <header class="hero" style:--hero-bg={heroBg}>
     <div
       class="hero-avatar"
       style:view-transition-name={artistId ? `artist-${artistId}` : undefined}
@@ -255,7 +274,7 @@
             onclick={playArtist}
             disabled={albums.length === 0 && allTopSongs.length === 0}
           >
-            Play
+            Reproducir
           </HeroPlayButton>
           <div class="menu-anchor">
             <HeroCircleButton
@@ -330,6 +349,24 @@
           {#snippet item(album)}
             {@const props = albumToCardProps(album)}
             <AlbumCard {...props} subtitleMode="year" />
+          {/snippet}
+        </HorizontalScrollSection>
+      </section>
+    {/if}
+
+    <!-- === Aparece en === Álbumes donde el artista colabora (feat./&) y no
+         es el albumArtist principal. Mismo patrón aislado que la sección
+         "Playlists con {artist}" — query independiente. -->
+    {#if collaborations.length > 0 && artist}
+      <section class="section">
+        <HorizontalScrollSection
+          title={`Aparece en`}
+          items={collaborations}
+          seeAllHref={`/artist/${artistId}/appears-in`}
+        >
+          {#snippet item(album)}
+            {@const props = albumToCardProps(album)}
+            <AlbumCard {...props} />
           {/snippet}
         </HorizontalScrollSection>
       </section>
@@ -421,12 +458,25 @@
 
   /* === Hero (layout side-by-side, avatar izquierda + meta derecha) === */
   .hero {
+    position: relative;
+    isolation: isolate;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: end;
     column-gap: var(--space-6);
     padding: var(--space-12) var(--space-6) var(--space-8);
     color: var(--hero-text-primary);
+  }
+  /* Backdrop con mask ease-out — el hero se desvanece sobre `--bg-canvas`
+     en su tercio inferior sin banding (la mask interpola alpha pura). */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--hero-bg);
+    -webkit-mask-image: var(--hero-backdrop-mask);
+    mask-image: var(--hero-backdrop-mask);
+    z-index: -1;
     transition: background var(--duration-normal) var(--ease-ios-default);
   }
 

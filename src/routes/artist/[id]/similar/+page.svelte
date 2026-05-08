@@ -27,8 +27,13 @@
   }));
 
   const artist = $derived(artistQ.data);
+  // Solo similares que existen en la biblioteca (id presente Y albumCount > 0).
+  // Sin esa garantía el card lleva al usuario a una vista vacía. Mismo filtro
+  // que /artist/[id] (Fans también escuchan).
   const similar = $derived<NavidromeSimilarArtist[]>(
-    (artistInfoQ.data?.similarArtist ?? []).filter((a) => a.id && a.id.length > 0)
+    (artistInfoQ.data?.similarArtist ?? []).filter(
+      (a) => a.id && a.id.length > 0 && (a.albumCount ?? 0) > 0
+    )
   );
 </script>
 

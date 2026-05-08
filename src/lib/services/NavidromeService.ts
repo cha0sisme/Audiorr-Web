@@ -219,6 +219,39 @@ export async function getAlbumsByGenre(
   return data.albumList2.album ?? [];
 }
 
+/**
+ * Albumes donde el artista APARECE como colaborador (no como artist principal).
+ * Mirrors `getArtistCollaborations` de iOS NavidromeService.swift:515-535:
+ *
+ *   1. search3 con query=artistName, albumCount=1000.
+ *   2. Filtra: descarta álbumes donde el artista es el `albumArtist` principal
+ *      (matches exactos o que empiezan con "{name}{,&and feat ft featuring}").
+ *   3. Mantiene solo los que CONTIENEN el nombre en el campo `artist` del
+ *      álbum (para que sea una colaboración real, no falso positivo).
+ *   4. Ordena por año desc.
+ *
+ * iOS usa search2; aquí search3 (estructuralmente equivalente para álbumes).
+ */
+export async function getArtistCollaborations(
+  artistName: string
+): Promise<NavidromeAlbum[]> {
+  if (!artistName) return [];
+  const result = await search3(artistName, {
+    artistCount: 0,
+    albumCount: 1000,
+    songCount: 0
+  });
+  const lower = artistName.toLowerCase().trim();
+  const mainPrefixes = [',', ' &', ' and', ' ', ' feat', ' ft', ' featuring'];
+  return result.albums
+    .filter((album) => {
+      const a = (album.artist ?? '').toLowerCase();
+      const isMain = a === lower || mainPrefixes.some((p) => a.startsWith(lower + p));
+      return !isMain && a.includes(lower);
+    })
+    .sort((x, y) => (y.year ?? 0) - (x.year ?? 0));
+}
+
 export async function getArtists(): Promise<NavidromeArtist[]> {
   const creds = requireCreds();
   const data = await call(creds, 'getArtists', {}, ArtistsResponseSchema);
