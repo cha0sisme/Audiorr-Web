@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { User, DotsThree, Plus, ListPlus } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
@@ -8,15 +8,19 @@
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
+  import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import SongList from '$components/shared/SongList.svelte';
   import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import * as nav from '$services/NavidromeService';
   import {
     albumToCardProps,
+    playlistToCardProps,
+    similarArtistToCardProps,
     songToListItem,
     type SongListItem
   } from '$utils/navidrome-mappers';
+  import { findPlaylistsByArtist } from '$utils/playlists-by-artist';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -34,6 +38,8 @@
   import type { NavidromeSimilarArtist } from '$types/navidrome';
 
   const artistId = $derived(page.params.id ?? '');
+
+  const queryClient = useQueryClient();
 
   const artistQ = createQuery(() => ({
     queryKey: ['artist', artistId],
@@ -59,6 +65,33 @@
     retry: false,
     staleTime: 1000 * 60 * 30
   }));
+
+  // Playlists con este artista — SOLO Editorial o "This is …".
+  // Aislada del resto de queries: nunca bloquea el render del hero/discografía
+  // porque corre en su propio createQuery (Svelte Query maneja el loading state
+  // independiente). Reusa el cache global de `['library', 'playlists']` cuando
+  // existe (p. ej. el usuario navegó desde /library?tab=playlists) — eso evita
+  // un round-trip a Navidrome y la query resuelve en milisegundos.
+  const artistPlaylistsQ = createQuery(() => ({
+    queryKey: ['artistPlaylists', artist?.name ?? ''],
+    queryFn: async () => {
+      const all = await queryClient.fetchQuery({
+        queryKey: ['library', 'playlists'],
+        queryFn: () => nav.getPlaylists(),
+        staleTime: 5 * 60 * 1000
+      });
+      return findPlaylistsByArtist(artist!.name, all, (id) => nav.getPlaylist(id));
+    },
+    enabled: credentials.isConfigured && !!artist?.name,
+    retry: false,
+    // 15 min: editoriales y "This is …" cambian poco. Si el admin sube/quita
+    // una editorial, en el peor caso el usuario la ve al cabo de 15 min o tras
+    // refrescar la página.
+    staleTime: 15 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+
+  const artistPlaylists = $derived(artistPlaylistsQ.data ?? []);
 
   // 600: hero size mayor que las cards (300). El prefetch on hover de las
   // cards calienta el cache HTTP. Si artistImageUrl (Last.fm scrape) está
@@ -302,19 +335,45 @@
       </section>
     {/if}
 
+    <!-- === Playlists con {artist} ===
+         SOLO Editorial o "This is …". "This is {artistName}" siempre primero.
+         La query es aislada: si tarda no bloquea ninguna otra sección. La
+         sección entera solo se monta cuando hay matches. Mientras pending y el
+         resto del detail ya está visible, mostramos un skeleton breve. -->
+    {#if artist}
+      {#if artistPlaylistsQ.isPending}
+        <section class="section">
+          <header class="section-header">
+            <h2 class="section-title">Playlists con {artist.name}</h2>
+          </header>
+          <div class="card-row-skeleton" aria-hidden="true">
+            {#each Array(4) as _}
+              <div class="card-sk"></div>
+            {/each}
+          </div>
+        </section>
+      {:else if artistPlaylists.length > 0}
+        <section class="section">
+          <HorizontalScrollSection
+            title={`Playlists con ${artist.name}`}
+            items={artistPlaylists}
+            seeAllHref={`/artist/${artistId}/playlists`}
+          >
+            {#snippet item(p)}
+              {@const props = playlistToCardProps(p)}
+              <PlaylistCard {...props} />
+            {/snippet}
+          </HorizontalScrollSection>
+        </section>
+      {/if}
+    {/if}
+
     <!--
       TODO: "Appears in" (collabs). Subsonic no expone un endpoint directo
       para "álbumes donde el artista aparece pero no es albumArtist". El iOS
       lo arma con el plugin custom `getAlbumsAppearedOn` del backend, que aún
       no expusimos en el web. Omitido por ahora — añadir cuando portemos
       backendService.appearsOn(artistId).
-    -->
-
-    <!--
-      TODO: "Playlists with {artist}". iOS llama getPlaylistsByArtist (custom
-      del backend Audiorr). No es derivable trivialmente desde getPlaylists
-      sin descargar las entries de cada playlist (N+1 fetch). Omitido por
-      scope-creep — añadir cuando expongamos el endpoint en el backend.
     -->
 
     <!-- === Fans también escuchan === -->
@@ -328,18 +387,8 @@
           seeAllHref={`/artist/${artistId}/similar`}
         >
           {#snippet item(sa)}
-            <ArtistCard
-              id={sa.id ?? ''}
-              name={sa.name}
-              albumCount={sa.albumCount}
-              coverUrl={sa.artistImageUrl && sa.artistImageUrl.length > 0
-                ? sa.artistImageUrl
-                : sa.coverArt
-                  ? getCoverArtUrl(sa.coverArt, 300)
-                  : undefined}
-              prefetchHero={() => {}}
-              href={sa.id ? `/artist/${sa.id}` : '#'}
-            />
+            {@const props = similarArtistToCardProps(sa)}
+            <ArtistCard {...props} />
           {/snippet}
         </HorizontalScrollSection>
       </section>
@@ -532,6 +581,22 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
+  /* Skeleton de carruseles tipo card-row (mismo paddings y altura aproximada
+     que HorizontalScrollSection con cards 180px). */
+  .card-row-skeleton {
+    display: flex;
+    gap: var(--space-4);
+    padding: 0 var(--space-6);
+    overflow: hidden;
+  }
+  .card-sk {
+    flex: 0 0 180px;
+    aspect-ratio: 1;
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
   .about-card {
     margin: 0 var(--space-4);
     padding: var(--space-6);
@@ -597,6 +662,7 @@
     .actions { justify-content: center; }
     .section-header { padding: 0 var(--space-4); }
     .popular-list { padding: 0 var(--space-3); }
+    .card-row-skeleton { padding: 0 var(--space-4); }
     .about-card { padding: var(--space-5); }
   }
 </style>

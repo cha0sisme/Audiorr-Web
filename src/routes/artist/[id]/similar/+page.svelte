@@ -4,7 +4,7 @@
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import VirtualGrid from '$components/shared/VirtualGrid.svelte';
   import * as nav from '$services/NavidromeService';
-  import { getCoverArtUrl } from '$services/NavidromeService';
+  import { similarArtistToCardProps } from '$utils/navidrome-mappers';
   import { credentials } from '$stores/credentials.svelte';
   import type { NavidromeSimilarArtist } from '$types/navidrome';
 
@@ -60,17 +60,8 @@
       getKey={(a) => a.id ?? a.name}
     >
       {#snippet item(sa)}
-        <ArtistCard
-          id={sa.id ?? ''}
-          name={sa.name}
-          albumCount={sa.albumCount}
-          coverUrl={sa.artistImageUrl && sa.artistImageUrl.length > 0
-            ? sa.artistImageUrl
-            : sa.coverArt
-              ? getCoverArtUrl(sa.coverArt, 500)
-              : undefined}
-          href={sa.id ? `/artist/${sa.id}` : '#'}
-        />
+        {@const props = similarArtistToCardProps(sa)}
+        <ArtistCard {...props} />
       {/snippet}
     </VirtualGrid>
   {:else}
