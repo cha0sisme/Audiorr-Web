@@ -11,11 +11,13 @@
    *   - playButtonBg() en $utils/palette fuerza L=0.55 en dark y L=0.45 en
    *     light, con chroma máx 0.18. Esos rangos garantizan ratio ≥ 4.5:1
    *     contra blanco para cualquier hue (verificado en OKLCH gamut).
-   *   - Si en el futuro queremos texto adaptativo, calcularlo aquí y no en
-   *     el caller (la decisión depende de la L del bg).
    *
-   * El fallback (cuando palette extraction falla) lo decide el caller pasando
-   * el color del hue-por-hash como bgColor.
+   * `collapsed`: muta el botón a círculo 40x40 sin label. Mismo elemento DOM
+   * en ambos estados — la transición CSS de width/padding/opacity da el
+   * morph fluido (mirror del iOS `.frame(width: isExpanded ? nil : 40)
+   * .animation(Anim.moderate, value: collapsePlay)`). Hacer swap
+   * condicional con `{#if}` produce flick porque Svelte destruye/recrea el
+   * elemento — esto evita el flash y mantiene el ripple/focus continuos.
    */
   import type { HTMLButtonAttributes } from 'svelte/elements';
   import type { Snippet } from 'svelte';
@@ -24,10 +26,21 @@
   type Props = HTMLButtonAttributes & {
     /** Color de fondo. OKLCH recomendado vía playButtonBg(palette, isDark). */
     bgColor: string;
+    /** Si true, el botón muta a círculo (40x40) ocultando el label.
+        Usado para el hand-off con SmartMixButton — mientras éste expande a
+        cápsula, el Play colapsa para mantener prominencia visual. */
+    collapsed?: boolean;
     children?: Snippet;
   };
 
-  let { bgColor, type = 'button', disabled, children, ...rest }: Props = $props();
+  let {
+    bgColor,
+    type = 'button',
+    disabled,
+    collapsed = false,
+    children,
+    ...rest
+  }: Props = $props();
 </script>
 
 <button
@@ -36,22 +49,25 @@
   {...rest}
   style:--play-bg-dynamic={bgColor}
   class="hero-play"
+  class:collapsed
+  aria-label={collapsed ? 'Reproducir' : undefined}
 >
   <Play size={18} weight="fill" />
-  <span class="label">
+  <span class="label" aria-hidden={collapsed}>
     {#if children}{@render children()}{:else}Reproducir{/if}
   </span>
 </button>
 
 <style>
+  /* ─── Liquid Glass morph cápsula ↔ círculo ────────────────────────────
+     Consume los tokens `--morph-*` definidos en tokens/primitives.css.
+     Detalles de la receta + lecciones aprendidas (no usar gap, no usar
+     max-width, layout absolute para evitar reflow) viven allí. */
   .hero-play {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-
+    position: relative;
+    display: inline-block;
     height: 40px;
-    padding: 0 var(--space-5);
+    width: 140px;
 
     background: var(--play-bg-dynamic);
     color: #fff;
@@ -63,19 +79,34 @@
     font-weight: 600;
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    flex-shrink: 0;
 
     cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
 
-    /* Sombra coloreada sutil — refuerza el "color del álbum" sin gritar.
-       black/30 directo se vería plano sobre el gradient ya tintado del hero. */
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+    /* Sombra Liquid Glass — 2 capas: tight (depth) + soft tinted (lift).
+       Al colapsar la capa soft se atenúa: el círculo tiene menos
+       "presencia"; mantener la sombra intensa lo haría parecer flotando. */
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 4px 12px -4px color-mix(in srgb, var(--play-bg-dynamic) 35%, transparent);
+
+    will-change: width, box-shadow;
 
     transition:
+      width var(--morph-duration) var(--morph-ease),
+      box-shadow var(--morph-duration) var(--morph-ease),
       filter var(--duration-fast) var(--ease-ios-default),
-      transform var(--duration-fast) var(--ease-ios-default),
-      box-shadow var(--duration-fast) var(--ease-ios-default);
+      transform var(--duration-fast) var(--ease-ios-default);
+  }
+
+  .hero-play.collapsed {
+    width: 40px;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 2px 8px -3px color-mix(in srgb, var(--play-bg-dynamic) 22%, transparent);
   }
 
   /* Hover: brillo +6% en lugar de tocar el bg (mantiene el color exacto del
@@ -98,8 +129,36 @@
     cursor: not-allowed;
   }
 
+  /* Icon centrado absolute en los primeros 40px del botón. Cuando el
+     botón colapsa a 40px de ancho, el icono queda perfectamente centrado
+     en el círculo sin reflow ni reposicionamiento. */
+  .hero-play :global(svg) {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  /* Label slide + fade asimétrico — consume tokens --morph-label-*. */
   .label {
-    display: inline-flex;
-    align-items: center;
+    position: absolute;
+    top: 50%;
+    left: 38px;
+    right: 16px;
+    transform: translateY(-50%) translateX(0);
+    text-align: left;
+    opacity: 1;
+    transition:
+      opacity var(--morph-label-in-opacity-duration) var(--morph-ease) var(--morph-label-in-delay),
+      transform var(--morph-label-in-transform-duration) var(--morph-ease) var(--morph-label-in-delay);
+  }
+  .hero-play.collapsed .label {
+    opacity: 0;
+    transform: translateY(-50%) translateX(calc(var(--morph-label-slide-distance) * -1));
+    pointer-events: none;
+    transition:
+      opacity var(--morph-label-out-opacity-duration) var(--ease-ios-default) 0ms,
+      transform var(--morph-label-out-transform-duration) var(--ease-ios-default) 0ms;
   }
 </style>

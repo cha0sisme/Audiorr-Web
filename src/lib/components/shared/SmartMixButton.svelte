@@ -95,38 +95,48 @@
   aria-live="polite"
   onclick={handleClick}
 >
+  <!-- Icon stack: cinco iconos superpuestos, opacidad/scale por estado.
+       Mismo elemento DOM siempre visible — el cross-fade entre estados
+       imita el `.transition(.blurReplace)` de iOS PlaylistDetailView. -->
   <span class="icon" aria-hidden="true">
-    {#if isSmartMixPlaying}
+    <span class="icon-slot" class:active={isSmartMixPlaying}>
       <Pause size={15} weight="fill" />
-    {:else if isSmartMixContext}
+    </span>
+    <span class="icon-slot" class:active={isSmartMixContext && !isSmartMixPlaying}>
       <Play size={15} weight="fill" />
-    {:else if status === 'analyzing'}
+    </span>
+    <span
+      class="icon-slot"
+      class:active={!isSmartMixContext && status === 'analyzing'}
+    >
       <span class="spinner"><ArrowsClockwise size={15} weight="bold" /></span>
-    {:else if status === 'error'}
+    </span>
+    <span class="icon-slot" class:active={!isSmartMixContext && status === 'error'}>
       <Warning size={15} weight="fill" />
-    {:else}
+    </span>
+    <span
+      class="icon-slot"
+      class:active={!isSmartMixContext && (status === 'idle' || status === 'ready')}
+    >
       <Sparkle size={15} weight="fill" />
-    {/if}
+    </span>
   </span>
 
-  {#if isExpanded}
-    <span class="label">SmartMix</span>
-  {/if}
+  <span class="label" aria-hidden={!isExpanded}>SmartMix</span>
 </button>
 
 <style>
-  /* Mismo ancho/alto base que HeroPlayButton/HeroCircleButton para alinear
-     verticalmente la fila de actions. La cápsula se expande añadiendo
-     padding lateral + label, exactamente como en iOS. */
+  /* ─── Liquid Glass morph círculo ↔ cápsula ────────────────────────────
+     Consume los tokens `--morph-*` definidos en tokens/primitives.css
+     — las mismas curvas y duraciones que HeroPlayButton para que ambos
+     botones progresen al unísono durante el hand-off visual. */
   .smartmix {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
+    position: relative;
+    display: inline-block;
     height: 40px;
     width: 40px;
-    padding: 0;
     flex-shrink: 0;
+    overflow: hidden;
 
     background: var(--play-bg-dynamic);
     color: #fff;
@@ -142,24 +152,32 @@
     cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
+
+    /* Sombra Liquid Glass — base sutil (círculo). Al expandir crece. */
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 2px 8px -3px color-mix(in srgb, var(--play-bg-dynamic) 22%, transparent);
+
+    will-change: width, box-shadow;
 
     transition:
-      width var(--duration-base) var(--ease-ios-default),
-      padding var(--duration-base) var(--ease-ios-default),
+      width var(--morph-duration) var(--morph-ease),
+      box-shadow var(--morph-duration) var(--morph-ease),
       filter var(--duration-fast) var(--ease-ios-default),
-      transform var(--duration-fast) var(--ease-ios-default),
-      box-shadow var(--duration-fast) var(--ease-ios-default);
+      transform var(--duration-fast) var(--ease-ios-default);
   }
 
+  /* Expanded: cápsula 144px (icon 40 + label ~88 + padding 16) con sombra
+     reforzada — cuando promueve a cápsula gana protagonismo visual. */
   .smartmix.expanded {
-    width: auto;
-    padding: 0 var(--space-5);
+    width: 144px;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 6px 16px -5px color-mix(in srgb, var(--play-bg-dynamic) 38%, transparent);
   }
 
   .smartmix:hover:not(:disabled) {
     filter: brightness(1.08);
-    box-shadow: 0 2px 6px rgb(0 0 0 / 0.22);
   }
   .smartmix:active:not(:disabled) {
     transform: scale(0.97);
@@ -168,24 +186,75 @@
   }
   .smartmix:focus-visible {
     outline: none;
-    box-shadow: var(--focus-ring), 0 1px 2px rgb(0 0 0 / 0.18);
+    box-shadow:
+      var(--focus-ring),
+      0 1px 2px rgb(0 0 0 / 0.18),
+      0 4px 12px -4px color-mix(in srgb, var(--play-bg-dynamic) 32%, transparent);
   }
   .smartmix:disabled {
     opacity: 0.65;
     cursor: not-allowed;
   }
 
+  /* Icon centrado absolute en los primeros 40px del botón — sin reflow
+     durante el morph. */
   .icon {
-    display: inline-grid;
-    place-items: center;
+    position: absolute;
+    top: 50%;
+    left: 20px;
     width: 18px;
     height: 18px;
-    flex-shrink: 0;
+    margin-left: -9px;
+    margin-top: -9px;
+    pointer-events: none;
   }
 
+  /* Stack de iconos superpuestos — blur-replace SwiftUI canónico.
+     Consume tokens --morph-icon-*. */
+  .icon-slot {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transform: scale(var(--morph-icon-scale-from));
+    filter: blur(var(--morph-icon-blur));
+    pointer-events: none;
+    transition:
+      opacity var(--morph-icon-out-opacity-duration) var(--ease-ios-default) 0ms,
+      transform var(--morph-icon-out-transform-duration) var(--ease-ios-default) 0ms,
+      filter var(--morph-icon-out-opacity-duration) var(--ease-ios-default) 0ms;
+  }
+  .icon-slot.active {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+    transition:
+      opacity var(--morph-icon-in-opacity-duration) var(--morph-ease) var(--morph-icon-in-delay),
+      transform var(--morph-icon-in-transform-duration) var(--morph-ease) var(--morph-icon-in-delay),
+      filter var(--morph-icon-in-opacity-duration) var(--morph-ease) var(--morph-icon-in-delay);
+  }
+
+  /* Label slide + fade asimétrico — consume tokens --morph-label-*. */
   .label {
-    display: inline-flex;
-    align-items: center;
+    position: absolute;
+    top: 50%;
+    left: 40px;
+    right: 16px;
+    transform: translateY(-50%) translateX(0);
+    text-align: left;
+    opacity: 1;
+    pointer-events: none;
+    transition:
+      opacity var(--morph-label-in-opacity-duration) var(--morph-ease) var(--morph-label-in-delay),
+      transform var(--morph-label-in-transform-duration) var(--morph-ease) var(--morph-label-in-delay);
+  }
+  .smartmix:not(.expanded) .label {
+    opacity: 0;
+    transform: translateY(-50%) translateX(calc(var(--morph-label-slide-distance) * -1));
+    transition:
+      opacity var(--morph-label-out-opacity-duration) var(--ease-ios-default) 0ms,
+      transform var(--morph-label-out-transform-duration) var(--ease-ios-default) 0ms;
   }
 
   /* Spinner del estado analyzing — rotación constante sobre el icono refresh. */

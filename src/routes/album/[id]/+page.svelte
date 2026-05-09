@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
-  import { MusicNote, Shuffle, DotsThree, Plus, ListPlus, User, Play } from 'phosphor-svelte';
+  import { MusicNote, Shuffle, DotsThree, Plus, ListPlus, User } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
@@ -235,24 +235,14 @@
         </p>
 
         <div class="actions">
-          {#if collapsePlay}
-            <HeroCircleButton
-              bgColor={playBg}
-              onclick={playAll}
-              disabled={tracks.length === 0}
-              aria-label="Reproducir"
-            >
-              <Play size={15} weight="fill" />
-            </HeroCircleButton>
-          {:else}
-            <HeroPlayButton
-              bgColor={playBg}
-              onclick={playAll}
-              disabled={tracks.length === 0}
-            >
-              Reproducir
-            </HeroPlayButton>
-          {/if}
+          <HeroPlayButton
+            bgColor={playBg}
+            onclick={playAll}
+            disabled={tracks.length === 0}
+            collapsed={collapsePlay}
+          >
+            Reproducir
+          </HeroPlayButton>
           <HeroCircleButton
             bgColor={playBg}
             onclick={shuffleAll}

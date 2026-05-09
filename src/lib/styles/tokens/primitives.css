@@ -587,6 +587,63 @@
   --duration-slower:  600ms;
   --duration-slowest: 900ms;
 
+  /* === LIQUID GLASS MORPH ===
+     Tokens del morph cápsula ↔ círculo (HeroPlayButton ↔ SmartMixButton
+     hand-off, y reusables para cualquier botón pill que mute a circle).
+
+     Validado 2026-05-10 por el director: "una animación perfecta".
+     El feel premium viene de la coordinación de TRES capas independientes
+     que progresan al unísono pero con timings asimétricos:
+
+       1. Container morph (width / box-shadow): 480ms ease-out-expo.
+          La curva expo decelera fuerte al 70% del progreso → asentamiento
+          líquido sin overshoot. 480ms es el sweet spot iOS Music: < 400ms
+          se siente "snap"; > 500ms se siente lento.
+
+       2. Label slide + fade asimétrico:
+            EXPAND  → in 240ms con 180ms delay (esperamos a que el morph
+                      haya abierto ~40% antes de mostrar texto) +
+                      transform translateX(-6px → 0) 320ms delay 180ms.
+            COLLAPSE → out 140ms sin delay + transform 240ms.
+          Sin la asimetría, label y width compiten visualmente y el
+          morph se siente "barato".
+
+       3. Icon blur-replace (cuando hay stack de iconos por estado):
+            INCOMING → 280ms ease-out-expo, delay 80ms, blur 6px → 0,
+                       scale 0.55 → 1.
+            OUTGOING → 180ms ease-ios-default sin delay.
+          Mirror del `.transition(.blurReplace)` de SwiftUI.
+
+     CRÍTICO para que se sienta fluido (lecciones aprendidas):
+       - El contenido NUNCA se reflowa durante el morph. Usa layout
+         absolute (icon + label posicionados con `left:` explícito) para
+         que el cambio de width del contenedor SOLO mueva el clip del
+         overflow:hidden, no el contenido.
+       - NO usar `gap` en el container — cualquier `gap > 0` colocaría
+         el icono off-center cuando el botón colapsa a círculo.
+       - NO usar `max-width` para morph: tiene un "step" perceptible al
+         cruzar el ancho natural del contenido. Usa `width` con valor
+         numérico fijo en ambos extremos. */
+  --morph-duration:       480ms;
+  --morph-ease:           var(--ease-out-expo);
+
+  /* Label asimétrico */
+  --morph-label-in-opacity-duration:    240ms;
+  --morph-label-in-transform-duration:  320ms;
+  --morph-label-in-delay:               180ms;
+  --morph-label-out-opacity-duration:   140ms;
+  --morph-label-out-transform-duration: 240ms;
+  --morph-label-slide-distance:           6px;
+
+  /* Icon blur-replace */
+  --morph-icon-in-opacity-duration:    280ms;
+  --morph-icon-in-transform-duration:  320ms;
+  --morph-icon-in-delay:                80ms;
+  --morph-icon-out-opacity-duration:   180ms;
+  --morph-icon-out-transform-duration: 220ms;
+  --morph-icon-blur:                     6px;
+  --morph-icon-scale-from:              0.55;
+
   /* === STAGGER & REVEAL ===
      Para listas que aparecen en cascada al primer paint (tracklists,
      carruseles). Tight (30ms) para tracklists muchas filas — total ≤300ms.
