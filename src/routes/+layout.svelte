@@ -290,7 +290,7 @@
             progress={player.progress}
             isPlaying={player.isPlaying}
             volume={player.volume}
-            autoMixActive={true}
+            autoMixActive={false}
             queueOpen={queueUI.isOpen}
             canvasOpen={canvas.visible}
             canvasAvailable={canvas.videoUrl !== null || canvas.demoMode}

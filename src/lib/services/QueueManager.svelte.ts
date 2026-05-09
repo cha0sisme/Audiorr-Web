@@ -131,6 +131,23 @@ function persistableToPlayerSong(s: PersistableSong): {
   };
 }
 
+/** Mapea el `contextUri` del lastPlayback a un `PlaybackContext` reactivo
+    cuando el scheme es uno de los reconocidos (album/playlist/artist).
+    Retorna null para `smartmix:` u otros — no son contextos navegables y
+    el contextUri original sigue accesible via `player.contextUri`. */
+function parseContextUri(uri: string | null): PlaybackContext {
+  if (!uri) return null;
+  const idx = uri.indexOf(':');
+  if (idx <= 0) return null;
+  const scheme = uri.slice(0, idx);
+  const id = uri.slice(idx + 1);
+  if (!id) return null;
+  if (scheme === 'album' || scheme === 'playlist' || scheme === 'artist') {
+    return { type: scheme, id };
+  }
+  return null;
+}
+
 /** Fisher-Yates shuffle in-place. */
 function fisherYates<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -836,18 +853,44 @@ class QueueManager {
   }
 
   /** Mantiene el `player` store en sync con la canción actual de la queue.
-      Mirrors NowPlayingState.shared en iOS. */
+      Mirrors NowPlayingState.shared en iOS — actualiza metadata visible
+      SIN disparar audioEngine.load (eso lo hace playCurrentSong cuando el
+      user pulse play). El MiniPlayer se gatea con `player.hasSong`, así
+      que sin este sync el player parece "vacio" tras restoreLastPlayback
+      aunque la queue interna tenga contenido.
+
+      Llamado desde restoreLastPlayback() y loadRemoteQueue(). NO se llama
+      desde playCurrentSong (allí player.load ya hace el sync completo). */
   private syncNowPlayingState(): void {
-    // El player.load() lo sincroniza al disparar playback. Acá sería para
-    // estados sin reproducir (loadRemoteQueue). Phase 1: solo updateamos la
-    // metadata visible si hay currentSong y player aún no la tiene cargada.
     const cur = this.currentSong;
     if (!cur) return;
-    if (player.currentSong?.id !== cur.id) {
-      // Solo metadata, sin engine load (suppressLoadOnce ya marcó el flow).
-      // En Phase 1 esto se cubre completamente con player.load() en playCurrentSong.
-      // Dejamos noop acá.
-    }
+
+    player.currentSong = persistableToPlayerSong(cur);
+    player.context = parseContextUri(this.contextUri);
+    player.playbackMode = this.playbackMode;
+    player.contextUri = this.contextUri;
+    player.isPlaying = false; // restore es siempre paused — user pulsa play
+
+    // Slider del MiniPlayer muestra la posición restaurada hasta que el
+    // engine empiece a emitir progress real (post-play).
+    const pos = this.pendingResumePosition;
+    player.positionSec = pos;
+    const dur = cur.duration;
+    player.progress = dur > 0 ? Math.max(0, Math.min(1, pos / dur)) : 0;
+  }
+
+  /**
+   * Llamado por `player.play()` cuando el user pulsa play tras un restore
+   * (cold-start con queue rehidratada pero audioEngine sin media cargado).
+   * Limpia el suppressLoadOnce que `restoreLastPlayback` puso defensivo y
+   * dispara `playCurrentSong`, que carga el audio + seek a la posición
+   * pendiente + arranca playback.
+   */
+  resumeFromRestore(): void {
+    if (this.queue.length === 0) return;
+    if (this.currentIndex < 0) return;
+    this.suppressLoadOnce = false;
+    this.playCurrentSong();
   }
 
   // ---------- persistencia ----------
@@ -980,8 +1023,11 @@ class QueueManager {
       this.shuffleMode = snap.shuffleMode;
       this.repeatMode = snap.repeatMode;
       this.pendingResumePosition = snap.position;
-      // No re-disparamos load — iOS tampoco lo hace. La UI ya verá la queue
-      // restaurada; el primer click del usuario en play hará playCurrentSong.
+      // No re-disparamos load — iOS tampoco lo hace. Pero SÍ sincronizamos
+      // el `player` store con la metadata para que el MiniPlayer aparezca.
+      // El primer click del usuario en play delega a `resumeFromRestore`.
+      this.suppressLoadOnce = true;
+      this.syncNowPlayingState();
       return;
     }
 

@@ -76,6 +76,12 @@ class PlayerStore {
   hasSong = $derived(this.currentSong !== null);
 
   private wired = false;
+  /** True una vez que `load()` ha pasado por aquí — es decir, el AudioEngine
+      tiene media cargado. Si false y `play()` se invoca, delegamos al
+      QueueManager para que arranque desde el restoredCurrent. Mirror del
+      gap que iOS no tiene (allí MPRemoteCommandCenter siempre va via
+      QueueManager). */
+  private hasLoadedOnce = false;
 
   constructor() {
     // En SSR no hay engine — wiring solo en browser.
@@ -163,6 +169,7 @@ class PlayerStore {
       this.isPlaying = false;
       return;
     }
+    this.hasLoadedOnce = true;
     void audioEngine
       .load(url, { duration: song.durationSec })
       .then(() => audioEngine.play())
@@ -193,6 +200,16 @@ class PlayerStore {
 
   play() {
     if (!this.currentSong) return;
+    // Cold-restore path: tenemos metadata pero el AudioEngine nunca recibió
+    // un load(). audioEngine.play() retornaría silencioso (chainA.hasMedia
+    // === false), así que delegamos al QueueManager para que cargue +
+    // reproduzca el current song con la posición pendiente.
+    if (browser && !this.hasLoadedOnce) {
+      void import('$services/QueueManager.svelte').then(({ queueManager }) => {
+        queueManager.resumeFromRestore();
+      });
+      return;
+    }
     this.isPlaying = true;
     if (browser) void audioEngine.play().catch(() => (this.isPlaying = false));
   }
