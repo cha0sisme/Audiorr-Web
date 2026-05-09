@@ -205,6 +205,21 @@
     applyScroll(nav.type, nav.to?.url.pathname);
   });
 
+  /** Mutex visual canvas ↔ queue. Es el "edge case guardian" del render:
+      - Origen: `canvas.setForSong()` ya gatea con `!queueUI.isOpen`, así
+        que con el flujo normal nunca se da el caso ambos visibles a la
+        vez.
+      - Defensa: este derived garantiza la exclusión también en render,
+        por si algún flujo futuro toca `canvas.visible` directamente sin
+        pasar por `setForSong`. La cola tiene prioridad — fue una
+        elección explícita del usuario.
+      - Side-effect: se usa también para el grid layout (--canvas-col-
+        width, --side-panel-width) y para el botón Canvas del MiniPlayer
+        (`canvasOpen` prop). Cuando la cola se cierra, este derived
+        vuelve a depender solo de `canvas.visible` — el panel reaparece
+        si seguía intencional. */
+  const canvasShown = $derived(canvas.visible && !queueUI.isOpen);
+
   /** Toggle del QueuePanel — abrir cierra automáticamente CanvasPanel.
       Mutex visual: queue es overlay, canvas desplaza el main. Tener ambos a
       la vez se vería raro (queue solapando un main ya estrecho). */
@@ -263,11 +278,11 @@
   {:else}
     <div
       class="shell"
-      class:canvas-displacing={canvas.visible}
+      class:canvas-displacing={canvasShown}
       class:dragging-canvas={canvas.isDragging}
-      style:--canvas-col-width="{canvas.visible ? canvas.width : 0}px"
+      style:--canvas-col-width="{canvasShown ? canvas.width : 0}px"
       style:--canvas-panel-width="{canvas.width}px"
-      style:--side-panel-width="{queueUI.isOpen ? 360 : canvas.visible ? canvas.width : 0}px"
+      style:--side-panel-width="{queueUI.isOpen ? 360 : canvasShown ? canvas.width : 0}px"
     >
       <Sidebar />
 
@@ -278,7 +293,7 @@
       {#if player.hasSong && player.currentSong}
         <div
           class="player-dock"
-          class:side-panel-open={canvas.visible || queueUI.isOpen}
+          class:side-panel-open={canvasShown || queueUI.isOpen}
         >
           <MiniPlayer
             compact={isPlayerCompact}
@@ -292,7 +307,7 @@
             volume={player.volume}
             autoMixActive={false}
             queueOpen={queueUI.isOpen}
-            canvasOpen={canvas.visible}
+            canvasOpen={canvasShown}
             canvasAvailable={canvas.videoUrl !== null || canvas.demoMode}
             onPlayPause={() => player.toggle()}
             onNext={() => player.next()}
@@ -308,7 +323,7 @@
 
       <!-- Canvas como columna 3 del grid — la animación de aparición/desaparición
            viene del transition de grid-template-columns en .shell, no de Svelte. -->
-      {#if canvas.visible}
+      {#if canvasShown}
         <CanvasPanel />
       {/if}
 

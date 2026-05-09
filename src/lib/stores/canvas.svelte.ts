@@ -9,9 +9,17 @@
  * - `width` controla el ancho del panel. Es draggable desde el borde izq.
  *   Persiste en localStorage. Min/max para que no se desborde.
  * - `forceShowDemo()` permite probar la animación sin backend real.
+ *
+ * Mutex con QueuePanel: si la cola está abierta, `setForSong` NUNCA
+ * dispara auto-show — la cola es una elección explícita del usuario y no
+ * debe verse pisada por un cambio de canción que casualmente tenga
+ * canvas. La `videoUrl` sí se actualiza para que el botón Canvas en
+ * MiniPlayer refleje disponibilidad; el usuario lo pulsa si quiere
+ * cambiar al canvas (y `toggleCanvasPanel` cierra la cola entonces).
  */
 
 import { browser } from '$app/environment';
+import { queueUI } from './queue-ui.svelte';
 
 const WIDTH_KEY = 'audiorr-canvas-width';
 
@@ -47,7 +55,10 @@ class CanvasStore {
       return;
     }
     this.videoUrl = url;
-    this.visible = !!url;
+    // Auto-show solo si hay URL Y la cola NO está abierta. Si la cola
+    // está abierta, `videoUrl` queda guardado (botón Canvas habilitado)
+    // pero el panel no se monta — no pisamos la elección del usuario.
+    this.visible = !!url && !queueUI.isOpen;
   }
 
   dismiss(songId: string | null) {

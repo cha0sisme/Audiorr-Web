@@ -247,11 +247,18 @@ class QueueManager {
     options: { playbackMode?: 'normal' | 'dj'; contextUri?: string | null } = {}
   ): void {
     if (songs.length === 0) return;
+    // CRÍTICO: limpia los flags pendientes del restore (lastPlayback /
+    // Dexie) ANTES de cualquier setup. Sin esto, si hay un restore activo
+    // (suppressLoadOnce=true, pendingResumePosition>0), iniciar una nueva
+    // queue (Reproducir / Shuffle / SmartMix) hace que `playCurrentSong`
+    // skip el load por el suppress y/o seek la nueva canción a la
+    // posición de la canción restored. Bug clásico de iOS — aquí lo
+    // prevenimos en origen.
+    this.clearRestoreState();
     const idx = Math.max(0, Math.min(startIndex, songs.length - 1));
     this.queue = [...songs];
     this.originalQueue = [...songs];
     this.currentIndex = idx;
-    this.pendingResumePosition = 0;
     this.playbackMode = options.playbackMode ?? 'normal';
     this.contextUri = options.contextUri ?? null;
 
@@ -259,6 +266,26 @@ class QueueManager {
 
     this.persistState();
     this.playCurrentSong();
+  }
+
+  /**
+   * Limpia los flags pendientes de un restore previo (lastPlayback /
+   * Dexie cold-start). Se llama al inicio de cada acción user-initiated
+   * que CAMBIA el contexto de reproducción (nueva queue, skip, jumpTo,
+   * insertNext sobre queue vacía). Tras el clear:
+   *   - `suppressLoadOnce` y `suppressBackendSaveOnce` quedan limpios:
+   *     `playCurrentSong` cargará el audio normalmente.
+   *   - `pendingResumePosition = 0`: la nueva canción arranca desde el
+   *     principio, no desde la posición de la canción restored.
+   *
+   * NO se llama desde `next()` (engine fired): el primer track del
+   * restore ya tuvo que cargarse via `play()` para llegar a `ended`,
+   * lo que ya consumió los flags.
+   */
+  private clearRestoreState(): void {
+    this.suppressLoadOnce = false;
+    this.suppressBackendSaveOnce = false;
+    this.pendingResumePosition = 0;
   }
 
   /**
@@ -308,6 +335,7 @@ class QueueManager {
     if (this.isAdvancingTrack) return;
     if (this.queue.length === 0) return;
 
+    this.clearRestoreState();
     this.isAdvancingTrack = true;
     try {
       const cur = this.currentSong;
@@ -344,6 +372,7 @@ class QueueManager {
       return;
     }
 
+    this.clearRestoreState();
     if (this.currentIndex > 0) {
       this.currentIndex -= 1;
       this.persistState();
@@ -373,6 +402,7 @@ class QueueManager {
     if (index < 0 || index >= this.queue.length) return;
     if (index === this.currentIndex) return;
 
+    this.clearRestoreState();
     const cur = this.currentSong;
     if (cur) this.pushToHistory(cur);
 
@@ -403,7 +433,10 @@ class QueueManager {
 
     this.persistState();
     // Caso "queue vacía → primer insert" debe arrancar playback inmediato.
-    if (this.queue.length === 1) this.playCurrentSong();
+    if (this.queue.length === 1) {
+      this.clearRestoreState();
+      this.playCurrentSong();
+    }
   }
 
   /** Conveniencia: insertNext desde el SongListItem que rinde SongRow. */
@@ -434,7 +467,10 @@ class QueueManager {
     if (this.currentIndex < 0) this.currentIndex = 0;
 
     this.persistState();
-    if (this.queue.length === songs.length) this.playCurrentSong();
+    if (this.queue.length === songs.length) {
+      this.clearRestoreState();
+      this.playCurrentSong();
+    }
   }
 
   /** Append al final, en queue y originalQueue. */
@@ -447,7 +483,10 @@ class QueueManager {
     this.originalQueue = [...this.originalQueue, song];
     if (this.currentIndex < 0) this.currentIndex = 0;
     this.persistState();
-    if (this.queue.length === 1) this.playCurrentSong();
+    if (this.queue.length === 1) {
+      this.clearRestoreState();
+      this.playCurrentSong();
+    }
   }
 
   /**
@@ -824,19 +863,34 @@ class QueueManager {
     const startAt = this.pendingResumePosition;
     this.pendingResumePosition = 0;
 
-    // El player.load() actual no acepta startAt — lo aplicamos via seek post-play.
-    // Limpia esto cuando AudioEngine exponga loadAtPosition.
+    // `startAt` se propaga al audioEngine via player.load → audioEngine.load
+    // (que lo aplica como `currentTime` ANTES de marcar hasMedia + esperar
+    // metadata). Sin race conditions con el seek post-load anterior, y sin
+    // flicker "posición correcta → 0 → resume" en el MiniPlayer.
+    //
+    // Validamos `startAt < duration - 5` para no arrancar a 5s del final
+    // (probable fin de canción guardado por error) — empieza desde 0.
+    const safeStart =
+      startAt > 0 && cur.duration > 0 && startAt < cur.duration - 5
+        ? startAt
+        : 0;
     player.load(persistableToPlayerSong(cur), ctx, {
       playbackMode: this.playbackMode,
-      contextUri: this.contextUri
+      contextUri: this.contextUri,
+      startAt: safeStart
     });
-    if (startAt > 0 && cur.duration > 0 && startAt < cur.duration - 5) {
-      // Espera mínima para que el media element tenga metadata; el seek de
-      // AudioEngine es tolerante a llamadas pre-metadata pero queremos asegurar
-      // que el progreso reportado sea correcto.
-      queueMicrotask(() => this.seekTo(startAt));
-    }
 
+    // TODO Phase 2 (DJ Mixing port): cuando `startAt` cae en la zona outro
+    // de la canción (últimos N segundos definidos por outroStartTime del
+    // análisis), arrancar con DOS chains activos — la canción actual desde
+    // `startAt` mezclando contra la siguiente desde 0. iOS hace esto en
+    // QueueManager.restoreLastPlayback cuando playbackMode='dj' y la
+    // posición está en outro: el restore reanuda el mid-crossfade.
+    // Hoy: el AudioEngine solo tiene chainA expuesto al exterior, sin
+    // capacidad de iniciar mid-crossfade. Cuando se porte DJMixingService
+    // y AudioEngine.startMidCrossfade(songA, posA, songB), este bloque
+    // detecta la condición y delega.
+    //
     // TODO Phase 2: ScrobbleService.songDidStart(song)
     // ⚠️ Cuando se implemente ScrobbleService: NO enviar contextUri al backend
     // si this.playbackMode === 'dj' (URI scheme `smartmix:<id>`). Si entra al

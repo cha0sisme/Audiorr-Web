@@ -146,18 +146,36 @@ class PlayerStore {
    * `options.playbackMode` (default `'normal'`) y `options.contextUri` se
    * publican al store para que los Detail views distingan el SmartMix de
    * la misma playlist en modo normal — mirror del iOS NowPlayingState.
+   *
+   * `options.startAt`: posición inicial en segundos. Usado por
+   * QueueManager al consumir `pendingResumePosition` tras un restore
+   * (lastPlayback o IndexedDB cold-start). Se propaga a
+   * `audioEngine.load`, que lo aplica como `currentTime` ANTES de
+   * marcar el media como `hasMedia` — sin race-condition con metadata
+   * loading. También se publica inmediatamente en `positionSec`/`progress`
+   * para evitar el flicker "posición correcta → 0 → resume" que se veía
+   * con el seekTo post-load anterior.
    */
   load(
     song: Song,
     context: PlaybackContext = null,
-    options: { playbackMode?: 'normal' | 'dj'; contextUri?: string | null } = {}
+    options: {
+      playbackMode?: 'normal' | 'dj';
+      contextUri?: string | null;
+      startAt?: number;
+    } = {}
   ) {
     this.currentSong = song;
     this.context = context;
     this.playbackMode = options.playbackMode ?? 'normal';
     this.contextUri = options.contextUri ?? null;
-    this.progress = 0;
-    this.positionSec = 0;
+
+    const startAt = options.startAt ?? 0;
+    this.positionSec = startAt;
+    this.progress =
+      song.durationSec && song.durationSec > 0
+        ? Math.max(0, Math.min(1, startAt / song.durationSec))
+        : 0;
     // Optimismo: marcamos isPlaying=true para que el mini player aparezca al
     // toque; el engine confirmará/corregirá via eventos.
     this.isPlaying = true;
@@ -170,8 +188,11 @@ class PlayerStore {
       return;
     }
     this.hasLoadedOnce = true;
+    const loadOpts: { duration?: number; startAt?: number } = {};
+    if (song.durationSec !== undefined) loadOpts.duration = song.durationSec;
+    if (startAt > 0) loadOpts.startAt = startAt;
     void audioEngine
-      .load(url, { duration: song.durationSec })
+      .load(url, loadOpts)
       .then(() => audioEngine.play())
       .catch((err) => {
         console.error('[player] load/play failed', err);
