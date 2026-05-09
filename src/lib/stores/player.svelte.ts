@@ -42,7 +42,18 @@ class PlayerStore {
   progress = $state(0);
   /** Posición actual en segundos. */
   positionSec = $state(0);
-  volume = $state(1);
+  /** Volumen 0..1 — el setter propaga al AudioEngine.setVolume() para que el
+      slider del MiniPlayer funcione realmente. Sin ese bridge, mover el
+      slider solo cambia el state visual sin tocar el masterGain. */
+  private _volume = $state(1);
+  get volume() {
+    return this._volume;
+  }
+  set volume(v: number) {
+    const clamped = Math.max(0, Math.min(1, v));
+    this._volume = clamped;
+    if (browser) audioEngine.setVolume(clamped);
+  }
   /** De dónde se inició el playback (album X, playlist Y, etc). */
   context = $state<PlaybackContext>(null);
 

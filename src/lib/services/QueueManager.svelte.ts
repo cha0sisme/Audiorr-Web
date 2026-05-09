@@ -713,9 +713,16 @@ class QueueManager {
   // ---------- persistencia ----------
 
   private snapshot() {
+    // `this.queue` es `$state<PersistableSong[]>` → un Proxy de Svelte 5.
+    // IndexedDB usa structured clone, que NO sabe clonar Proxies → tira
+    // `DataCloneError: [object Array] could not be cloned`. La API
+    // idiomática para des-proxyar es `$state.snapshot()` (deep clone con
+    // los $state quitados). Aplicamos también a `originalQueue` por
+    // seguridad — aunque arranca como array plano, en algún flow podría
+    // ensuciarse con references reactivas.
     return {
-      queue: this.queue,
-      originalQueue: this.originalQueue,
+      queue: $state.snapshot(this.queue),
+      originalQueue: $state.snapshot(this.originalQueue),
       currentIndex: this.currentIndex,
       position: browser ? player.positionSec : 0,
       shuffleMode: this.shuffleMode,

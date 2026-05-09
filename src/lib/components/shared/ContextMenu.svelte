@@ -50,12 +50,13 @@
 
   let menuEl: HTMLDivElement | null = $state(null);
 
-  /** Items interactivos (excluye dividers) — para navegación por teclado. */
-  const itemRefs: HTMLButtonElement[] = [];
+  /** Items interactivos (excluye dividers) — para navegación por teclado.
+      `$state` array porque Svelte 5 marca `bind:this={itemRefs[idx]}` como
+      "binding to a non-reactive property" si itemRefs no es reactivo. */
+  const itemRefs = $state<HTMLButtonElement[]>([]);
 
   function focusItem(idx: number) {
-    const ref = itemRefs[idx];
-    if (ref) ref.focus();
+    itemRefs[idx]?.focus();
   }
 
   $effect(() => {
