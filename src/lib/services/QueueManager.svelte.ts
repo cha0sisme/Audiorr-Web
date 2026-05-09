@@ -710,6 +710,11 @@ class QueueManager {
     }
 
     // TODO Phase 2: ScrobbleService.songDidStart(song)
+    // ⚠️ Cuando se implemente ScrobbleService: NO enviar contextUri al backend
+    // si this.playbackMode === 'dj' (URI scheme `smartmix:<id>`). Si entra al
+    // wrapped.db scrobbles, contamina recentContexts → home muestra cards
+    // smartmix que se intentan navegar como playlist y dan 404. Decisión
+    // director 2026-05-09. El home filtra defensivo igualmente.
     // TODO Phase 2: OfflineStorageManager.markPlayed(songId)
   }
 

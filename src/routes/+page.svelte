@@ -69,13 +69,21 @@
   // Backend Audiorr — Jump Back In + Top semanal.
   //
   // Quick-play grid (bajo el saludo) muestra los primeros 6 recentContexts
-  // del backend (mezcla album/playlist/smartmix/artist). Si está vacío
+  // del backend (album / playlist / artist solamente). Si está vacío
   // (instalación nueva sin scrobbles), fallback a `newestAlbums.slice(0, 6)`
   // — siempre hay algo bajo el saludo.
   //
   // "Volver a escuchar" como HorizontalScrollSection aparece SOLO cuando hay
   // overflow (>6 contexts). Mirrors el patrón quickPlayGrid + jumpBackInSection
   // de iOS HomeView.
+  //
+  // ⚠️ Filtro defensivo `smartmix` / `other`: el backend puede devolver items
+  // con `type === 'smartmix'` cuando un cliente (iOS hoy, web cuando se
+  // implemente ScrobbleService) ha scrobbleado una cola SmartMix. Esos
+  // items NO son navegables como Album/Playlist/Artist — su `id` es el id
+  // de la playlist base con prefix smartmix:, así que tratarlos como
+  // playlist envía a `/playlist/<smartmix-id>` que tira 404. Decisión
+  // director 2026-05-09: SmartMix no debe aparecer nunca en Jump Back In.
   // ===========================================================================
 
   const recentContextsQ = createQuery(() => ({
@@ -84,7 +92,11 @@
     enabled: credentials.isConfigured,
     staleTime: 60 * 1000
   }));
-  const recentContexts = $derived(recentContextsQ.data ?? []);
+  const recentContexts = $derived(
+    (recentContextsQ.data ?? []).filter(
+      (ctx) => ctx.type === 'album' || ctx.type === 'playlist' || ctx.type === 'artist'
+    )
+  );
 
   const topWeeklyQ = createQuery(() => ({
     queryKey: ['topWeekly'],
@@ -165,10 +177,10 @@
     <h1>{greeting}</h1>
   </header>
 
-  <!-- Quick-play grid: 6 primeros recentContexts (album/playlist/smartmix/
-       artist mezclados). Mirrors el quickPlayGrid de iOS. Si el wrapped.db
-       está vacío (instalación nueva) cae a los 6 primeros álbumes recién
-       añadidos para que esta sección nunca aparezca vacía. -->
+  <!-- Quick-play grid: 6 primeros recentContexts (album/playlist/artist).
+       Mirrors el quickPlayGrid de iOS. Si el wrapped.db está vacío
+       (instalación nueva) cae a los 6 primeros álbumes recién añadidos
+       para que esta sección nunca aparezca vacía. -->
   <section class="quick-access" aria-label="Acceso rápido">
     {#each quickItems as item (item.kind === 'context' ? item.ctx.contextUri : item.album.id)}
       {#if item.kind === 'context'}
@@ -182,7 +194,7 @@
             href={`/album/${ctx.id}`}
             prefetchHero={() => prefetchCover(ctx.coverArtId ?? undefined, 600)}
           />
-        {:else if ctx.type === 'playlist' || ctx.type === 'smartmix'}
+        {:else if ctx.type === 'playlist'}
           <QuickAccessCard
             id={ctx.id}
             contextType="playlist"
@@ -240,7 +252,7 @@
             href={`/album/${ctx.id}`}
             prefetchHero={() => prefetchCover(ctx.coverArtId ?? undefined, 600)}
           />
-        {:else if ctx.type === 'playlist' || ctx.type === 'smartmix'}
+        {:else if ctx.type === 'playlist'}
           <PlaylistCard
             id={ctx.id}
             name={ctx.title}
