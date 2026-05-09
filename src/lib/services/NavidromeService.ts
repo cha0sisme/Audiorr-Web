@@ -11,6 +11,7 @@
 
 import { md5 } from 'js-md5';
 import { z } from 'zod';
+import { backendService } from './BackendService.svelte';
 import {
   SubsonicEnvelopeSchema,
   AlbumList2ResponseSchema,
@@ -147,6 +148,34 @@ export async function connect(input: {
   const envelope = SubsonicEnvelopeSchema.parse(env);
 
   credentials.set(candidate);
+
+  // Notifica al backend Audiorr para que persista las creds Subsonic del user
+  // y los crons (Daily Mixes, Smart Playlists) puedan generar playlists con
+  // owner correcto. Non-fatal: el login a Navidrome ya fue válido; si el
+  // backend rechaza o está caído, los crons no funcionarán para este user
+  // hasta que se reintente login, pero la sesión web sigue operativa.
+  try {
+    const url = `${backendService.baseUrl}/api/auth/login`;
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serverUrl: candidate.serverUrl,
+        username: candidate.username,
+        token: candidate.token,
+        salt: candidate.salt
+      })
+    });
+    if (!res.ok) {
+      console.warn(
+        `[Audiorr] Backend rechazó la persistencia de creds (${res.status}). Los crons no actuarán para "${candidate.username}" hasta el próximo login.`
+      );
+    }
+  } catch (err) {
+    console.warn('[Audiorr] No se pudo notificar al backend Audiorr:', err);
+  }
+
   return {
     version: envelope.version,
     serverVersion: envelope.serverVersion
