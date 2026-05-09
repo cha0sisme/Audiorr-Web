@@ -396,3 +396,68 @@ export const UserPreferencesSchema = z
   })
   .passthrough();
 export type UserPreferences = z.infer<typeof UserPreferencesSchema>;
+
+// ============================================================================
+// Last Playback — /api/user/:username/last-playback
+// ============================================================================
+
+/**
+ * Item de la cola persistida en `lastPlayback.queue`. Mirror del shape que
+ * iOS envía via `QueueManager.saveToBackend` y que el backend serializa
+ * dentro del blob `preferences.lastPlayback`. El backend lo trata como
+ * `unknown[]` así que no fuerza shape — somos nosotros (cliente) los
+ * únicos consumidores de esto.
+ *
+ * iOS QueueManager:1670-1679 hace `PersistableSong(id, title, artist,
+ * album, albumId, coverArt, duration, artistId="")` al restaurar.
+ */
+export const LastPlaybackQueueItemSchema = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    artist: z.string(),
+    album: z.string(),
+    albumId: z.string().nullable().optional(),
+    coverArt: z.string().nullable().optional(),
+    duration: z.number()
+  })
+  .passthrough();
+export type LastPlaybackQueueItem = z.infer<typeof LastPlaybackQueueItemSchema>;
+
+/**
+ * Estado completo del último playback. Backend interface
+ * `LastPlaybackState` en userPreferencesService.ts:17-35. iOS lo restaura
+ * con QueueManager.restoreLastPlayback (no autoplay).
+ *
+ * `path` es legacy iOS (file path local) — en web siempre vacío.
+ * `currentIndex` lo añade iOS, no está tipado en el backend (vive dentro
+ * del blob como campo extra). Lo aceptamos via passthrough.
+ */
+export const LastPlaybackStateSchema = z
+  .object({
+    songId: z.string(),
+    title: z.string(),
+    artist: z.string(),
+    album: z.string(),
+    coverArt: z.string().nullable().optional(),
+    albumId: z.string().nullable().optional(),
+    path: z.string().optional(),
+    duration: z.number(),
+    position: z.number(),
+    savedAt: z.string().optional(),
+    queue: z.array(LastPlaybackQueueItemSchema).optional(),
+    currentIndex: z.number().optional(),
+    contextUri: z.string().optional(),
+    playbackMode: z.string().optional()
+  })
+  .passthrough();
+export type LastPlaybackState = z.infer<typeof LastPlaybackStateSchema>;
+
+/**
+ * Wrapper del response del GET. Si nunca hubo playback, `lastPlayback` es
+ * `null`. Si lo hubo, viene el objeto entero.
+ */
+export const LastPlaybackResponseSchema = z.object({
+  lastPlayback: LastPlaybackStateSchema.nullable()
+});
+export type LastPlaybackResponse = z.infer<typeof LastPlaybackResponseSchema>;

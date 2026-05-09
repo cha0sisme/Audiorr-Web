@@ -17,6 +17,7 @@
   import { queueUI } from '$stores/queue-ui.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
+  import { queueManager } from '$services/QueueManager.svelte';
 
   /** Rutas que se renderizan SIN shell (sin sidebar, sin mini player).
       Login es full-screen — el shell distrae. */
@@ -36,6 +37,28 @@
     if (!credentials.isConfigured && !PUBLIC_ROUTES.has(path)) {
       goto('/login', { replaceState: true });
     }
+  });
+
+  /** Restore lastPlayback del backend tras login fresco (logout → login en
+      la misma sesión). Cold-start con creds ya lo cubre el restoreState
+      del QueueManager. Idempotente: si la queue ya tiene contenido, no-op.
+      Mirror del iOS RootView.onAppear post-login. */
+  $effect(() => {
+    if (credentials.isConfigured) {
+      void queueManager.restoreLastPlayback();
+    }
+  });
+
+  /** Flush sincronico al cerrar pestaña — único momento en que el browser
+      garantiza un POST con sendBeacon. Sin esto, la última posición/cola
+      se pierde si el user cierra antes del próximo debounce window (2s). */
+  $effect(() => {
+    if (!browser) return;
+    const onPageHide = () => {
+      queueManager.flushBackendBeacon();
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return () => window.removeEventListener('pagehide', onPageHide);
   });
 
   let { children } = $props();

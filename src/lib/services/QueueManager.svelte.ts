@@ -32,6 +32,14 @@ import {
 import type { NavidromeSong } from '$types/navidrome';
 import type { SongListItem } from '$utils/navidrome-mappers';
 import { getCoverArtUrl } from '$services/NavidromeService';
+import { credentials } from '$stores/credentials.svelte';
+import {
+  getLastPlayback,
+  saveLastPlayback,
+  saveLastPlaybackBeacon,
+  type LastPlaybackPayload
+} from '$services/lastPlayback';
+import type { LastPlaybackQueueItem } from '$types/backend';
 
 // ============================================================================
 // Types
@@ -59,6 +67,10 @@ export type RepeatMode = 'off' | 'all' | 'one';
 const HISTORY_LIMIT = 500;
 const POSITION_SAVE_THROTTLE_MS = 15_000;
 const PERSIST_DEBOUNCE_MS = 250;
+/** Backend save tiene su propio debounce más largo: la red pesa más que disco
+    y el contenido cambia con poca granularidad (canción + índice + posición
+    cada 10s+). Mirror del iOS `saveToBackend` debounce. */
+const BACKEND_SAVE_DEBOUNCE_MS = 2000;
 
 // ============================================================================
 // Helpers (pure)
@@ -170,6 +182,14 @@ class QueueManager {
       Se propaga al player para que SmartMixButton distinga el SmartMix de
       la misma playlist en modo normal. */
   private contextUri: string | null = null;
+  /** Timer del save backend (debounce 2s). Cancelable cuando llega un cambio
+      antes de que dispare. Mirror del iOS `saveToBackendWork`. */
+  private backendSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Si true, los próximos save al backend se suprimen — usado durante el
+      restore para evitar el loop "lo que acabamos de leer del backend lo
+      volvemos a escribir". El flag se limpia tras el primer save real
+      iniciado por el usuario. */
+  private suppressBackendSaveOnce = false;
 
   constructor() {
     if (browser) {
@@ -552,11 +572,102 @@ class QueueManager {
     void this.saveToBackend();
   }
 
-  /** Cold start: si no hay queue local, pedirle al backend la última playback. */
+  /**
+   * Cold start: si no hay queue local, pide al backend la última playback
+   * y la rehidrata. NO autoplay (iOS tampoco). Mirror exacto del Swift
+   * `QueueManager.restoreLastPlayback()` (line 1661+).
+   *
+   * Llamada idempotente:
+   *   - Si ya hay queue local → no-op (no pisamos lo que el user tenía).
+   *   - Si no hay credenciales → no-op (cold-start pre-login).
+   *   - Si el backend devuelve null → no-op silencioso (cuenta nueva).
+   *
+   * Aplica las mismas invariantes iOS para `playbackMode='dj'`:
+   *   - solo se respeta si `contextUri` empieza por `smartmix:` (cualquier
+   *     otra cosa es payload corrupto y caemos a `normal`).
+   *   - mensaje en consola si las invariantes fallan, igual que el Swift.
+   */
   async restoreLastPlayback(): Promise<void> {
-    // TODO Phase 2: integrar con BackendService.getLastPlayback cuando exponga el endpoint.
-    // iOS: BackendService.shared.getLastPlayback(username) → { queue, currentIndex, position }.
-    return;
+    if (!browser) return;
+    if (this.queue.length > 0) return;
+    const username = credentials.current?.username;
+    if (!username) return;
+
+    const last = await getLastPlayback(username);
+    if (!last) return;
+
+    let restored: PersistableSong[];
+    let nextIndex: number;
+
+    if (last.queue && last.queue.length > 0) {
+      restored = last.queue.map((item) => ({
+        id: item.id,
+        title: item.title,
+        artist: item.artist,
+        album: item.album,
+        albumId: item.albumId ?? '',
+        artistId: '',
+        coverArt: item.coverArt ?? '',
+        duration: item.duration,
+        replayGainMultiplier: 1.0
+      }));
+      const explicitIdx =
+        typeof last.currentIndex === 'number' && last.currentIndex >= 0
+          ? last.currentIndex
+          : -1;
+      nextIndex =
+        explicitIdx >= 0
+          ? Math.min(explicitIdx, restored.length - 1)
+          : Math.max(
+              0,
+              restored.findIndex((s) => s.id === last.songId)
+            );
+    } else {
+      // Solo single song persistida — typical después del primer scrobble.
+      restored = [
+        {
+          id: last.songId,
+          title: last.title,
+          artist: last.artist,
+          album: last.album,
+          albumId: last.albumId ?? '',
+          artistId: '',
+          coverArt: last.coverArt ?? '',
+          duration: last.duration,
+          replayGainMultiplier: 1.0
+        }
+      ];
+      nextIndex = 0;
+    }
+
+    this.queue = restored;
+    this.originalQueue = [...restored];
+    this.currentIndex = Math.max(0, Math.min(nextIndex, restored.length - 1));
+    this.pendingResumePosition = last.position;
+
+    // Restore mode + contextUri con invariantes (mirror Swift line 1703-1721).
+    const restoredContextUri = last.contextUri ?? '';
+    const restoredMode: 'normal' | 'dj' =
+      last.playbackMode === 'dj' ? 'dj' : 'normal';
+    if (restoredMode === 'dj' && restoredContextUri.startsWith('smartmix:')) {
+      this.playbackMode = 'dj';
+    } else {
+      if (restoredMode === 'dj') {
+        console.warn(
+          '[QueueManager] backend-restore `.dj` invariants failed — falling back to .normal'
+        );
+      }
+      this.playbackMode = 'normal';
+    }
+    this.contextUri = restoredContextUri.length > 0 ? restoredContextUri : null;
+
+    // Sync UI sin disparar load (NO autoplay). El user pulsa play y
+    // playCurrentSong() consume `pendingResumePosition` para hacer seek.
+    this.suppressLoadOnce = true;
+    this.suppressBackendSaveOnce = true;
+    this.syncNowPlayingState();
+    // Persistencia local del nuevo estado restaurado, sin re-saves backend.
+    void saveSnapshot(this.snapshot());
   }
 
   /** Connect remote control inbound — reemplaza queue sin auto-play. */
@@ -770,34 +881,114 @@ class QueueManager {
     }, PERSIST_DEBOUNCE_MS);
   }
 
-  /** Stub — backend persistence (debounced 2s en iOS). */
-  private async saveToBackend(): Promise<void> {
-    // TODO Phase 2: integrar con BackendService.saveLastPlayback(username, state).
-    // iOS skip cuando Connect está conectado — replicar.
-    return;
+  /**
+   * Save throttled del lastPlayback al backend. Debounce 2s — re-llamadas
+   * dentro de la ventana cancelan el anterior y reagendan.
+   *
+   *   - Skip si no hay credenciales (cold-start pre-login).
+   *   - Skip si la queue está vacía (nada útil que guardar).
+   *   - Skip si `suppressBackendSaveOnce` (evita el loop post-restore).
+   *
+   * Errores en `saveLastPlayback` ya están tragados al servicio (best
+   * effort). Aquí no propagamos.
+   */
+  private saveToBackend(): void {
+    if (!browser) return;
+    if (this.suppressBackendSaveOnce) {
+      this.suppressBackendSaveOnce = false;
+      return;
+    }
+
+    const username = credentials.current?.username;
+    if (!username) return;
+    if (this.queue.length === 0) return;
+
+    if (this.backendSaveTimer) clearTimeout(this.backendSaveTimer);
+    this.backendSaveTimer = setTimeout(() => {
+      this.backendSaveTimer = null;
+      const payload = this.buildLastPlaybackPayload();
+      if (!payload) return;
+      void saveLastPlayback(username, payload);
+    }, BACKEND_SAVE_DEBOUNCE_MS);
   }
 
-  /** Cold start: lee Dexie y rehidrata estado. NO auto-play (iOS tampoco). */
+  /** Construye el payload del PUT a partir del estado actual. Devuelve null
+      si no hay current song (queue vacía / index inválido). */
+  private buildLastPlaybackPayload(): LastPlaybackPayload | null {
+    const cur = this.currentSong;
+    if (!cur) return null;
+    const queueItems: LastPlaybackQueueItem[] = $state
+      .snapshot(this.queue)
+      .map((s) => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        album: s.album ?? '',
+        albumId: s.albumId ?? null,
+        coverArt: s.coverArt ?? null,
+        duration: s.duration
+      }));
+    const payload: LastPlaybackPayload = {
+      songId: cur.id,
+      title: cur.title,
+      artist: cur.artist,
+      album: cur.album ?? '',
+      albumId: cur.albumId ?? null,
+      coverArt: cur.coverArt ?? null,
+      path: '',
+      duration: cur.duration,
+      position: browser ? player.positionSec : 0,
+      queue: queueItems,
+      currentIndex: this.currentIndex,
+      playbackMode: this.playbackMode
+    };
+    if (this.contextUri) payload.contextUri = this.contextUri;
+    return payload;
+  }
+
+  /**
+   * Flush sincrono via `navigator.sendBeacon`. Único método válido en
+   * `pagehide` / `beforeunload` — fetch normal se aborta. Garantiza que la
+   * última posición queda persistida al cerrar pestaña.
+   */
+  flushBackendBeacon(): boolean {
+    if (!browser) return false;
+    const username = credentials.current?.username;
+    if (!username) return false;
+    if (this.queue.length === 0) return false;
+    const payload = this.buildLastPlaybackPayload();
+    if (!payload) return false;
+    return saveLastPlaybackBeacon(username, payload);
+  }
+
+  /** Cold start: lee Dexie y rehidrata estado. NO auto-play (iOS tampoco).
+      Si Dexie está vacío (instalación nueva o cache cleared), encadena con
+      `restoreLastPlayback()` del backend para no quedar sin estado. */
   private async restoreState(): Promise<void> {
     if (this.restored) return;
     this.restored = true;
 
     const snap = await loadSnapshot();
-    if (!snap) return;
+    if (snap && snap.queue.length > 0) {
+      this.queue = snap.queue;
+      this.originalQueue =
+        snap.originalQueue.length > 0 ? snap.originalQueue : [...snap.queue];
+      this.currentIndex = Math.max(
+        0,
+        Math.min(snap.currentIndex, snap.queue.length - 1)
+      );
+      this.shuffleMode = snap.shuffleMode;
+      this.repeatMode = snap.repeatMode;
+      this.pendingResumePosition = snap.position;
+      // No re-disparamos load — iOS tampoco lo hace. La UI ya verá la queue
+      // restaurada; el primer click del usuario en play hará playCurrentSong.
+      return;
+    }
 
-    this.queue = snap.queue;
-    this.originalQueue =
-      snap.originalQueue.length > 0 ? snap.originalQueue : [...snap.queue];
-    this.currentIndex =
-      snap.queue.length === 0
-        ? -1
-        : Math.max(0, Math.min(snap.currentIndex, snap.queue.length - 1));
-    this.shuffleMode = snap.shuffleMode;
-    this.repeatMode = snap.repeatMode;
-    this.pendingResumePosition = snap.position;
-
-    // No re-disparamos load — iOS tampoco lo hace. La UI ya verá la queue
-    // restaurada; el primer click del usuario en play hará playCurrentSong.
+    // Dexie vacío o snapshot sin queue → fallback al backend (lastPlayback).
+    // Este path cubre instalación nueva en este browser pero cuenta con
+    // historial en otros devices, o cache local borrado por el usuario.
+    await this.restoreLastPlayback();
   }
 }
 
