@@ -6,7 +6,7 @@
  * página de playlists).
  */
 
-import type { z } from 'zod';
+import { z } from 'zod';
 import { backendService, BackendError } from './BackendService.svelte';
 import {
   GlobalSettingResponseSchema,
@@ -44,6 +44,43 @@ export async function getGlobalSetting<T>(
     debe usar el default `[fixed_daily, fixed_smart, fixed_user]`. */
 export async function getHomepageLayout(): Promise<PlaylistSection[] | null> {
   return getGlobalSetting('homepage_layout', PlaylistSectionsArraySchema);
+}
+
+/**
+ * Mutation: setea un global setting. Usado por la sección Editorial del
+ * panel de admin para persistir `homepage_layout`, `this_is_playlists`,
+ * etc. La response del backend tiene la misma forma `{ key, value }` que
+ * el GET.
+ */
+export async function setGlobalSetting<T>(key: string, value: T): Promise<void> {
+  const path = `/api/settings/${encodeURIComponent(key)}`;
+  // Backend devuelve `{ key, value }` con el value persistido. Solo nos
+  // importa que pase el status check; el body lo descartamos.
+  await backendService.put(path, { value }, GlobalSettingResponseSchema);
+}
+
+/**
+ * Mapping `this_is_playlists`: nombre de artista → playlist id Navidrome.
+ * Usado por el cover service del backend para resolver covers de playlists
+ * "This is X" (ya tiene su propio store playlistCovers; aquí se administra
+ * desde Editorial).
+ */
+const ThisIsMappingSchema = z.record(z.string(), z.string());
+export type ThisIsMapping = z.infer<typeof ThisIsMappingSchema>;
+
+export async function getThisIsMapping(): Promise<ThisIsMapping> {
+  const data = await getGlobalSetting('this_is_playlists', ThisIsMappingSchema);
+  return data ?? {};
+}
+
+export async function setThisIsMapping(mapping: ThisIsMapping): Promise<void> {
+  await setGlobalSetting('this_is_playlists', mapping);
+}
+
+/** Setea solo el `homepage_layout` — wrapper tipado para evitar usar el
+    helper genérico con el schema cada vez. */
+export async function setHomepageLayout(sections: PlaylistSection[]): Promise<void> {
+  await setGlobalSetting('homepage_layout', sections);
 }
 
 /** Layout default cuando el admin no ha configurado nada. Coincide con el

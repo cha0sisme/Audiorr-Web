@@ -10,7 +10,14 @@
  */
 
 import { backendService } from './BackendService.svelte';
-import { SmartPlaylistsResponseSchema, type SmartPlaylist } from '$types/backend';
+import {
+  SmartPlaylistsResponseSchema,
+  SmartPlaylistsCronStatusSchema,
+  GenerateAllSmartPlaylistsResponseSchema,
+  type SmartPlaylist,
+  type SmartPlaylistsCronStatus,
+  type GenerateAllSmartPlaylistsResponse
+} from '$types/backend';
 import { playlistCovers } from '$stores/playlist-covers.svelte';
 
 /**
@@ -26,4 +33,30 @@ export async function getSmartPlaylists(username: string): Promise<SmartPlaylist
     playlists.map((p) => ({ id: p.navidromeId, hash: p.coverContentHash }))
   );
   return playlists;
+}
+
+/**
+ * Estado de los crons que regeneran cada smart playlist (en_bucle daily,
+ * tiempo_atras y radar_novedades weekly). Devuelve {} si el server aún no
+ * ha completado la primera ejecución.
+ */
+export async function getSmartPlaylistsCronStatus(): Promise<SmartPlaylistsCronStatus> {
+  const data = await backendService.get(
+    '/api/smart-playlists/cron-status',
+    SmartPlaylistsCronStatusSchema
+  );
+  return data ?? {};
+}
+
+/**
+ * Dispara la regeneración de TODAS las smart playlists para todos los users.
+ * El backend tiene cooldown 30s server-side; un 429 indica "espera" y el
+ * BackendError preserva el status para que el caller muestre el cooldown.
+ */
+export async function generateAllSmartPlaylists(): Promise<GenerateAllSmartPlaylistsResponse> {
+  return backendService.post(
+    '/api/smart-playlists/generate-all',
+    undefined,
+    GenerateAllSmartPlaylistsResponseSchema
+  );
 }

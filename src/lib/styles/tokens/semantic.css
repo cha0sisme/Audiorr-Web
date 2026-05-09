@@ -319,6 +319,92 @@
   --hero-text-secondary: rgb(255 255 255 / 0.85);
   --hero-text-tertiary: rgb(255 255 255 / 0.75);
 
+  /* ========================================================================
+     === HOUSEKEEPING — Liquid Glass + Spatial UI híbrido (Sentient UX) ===
+     ========================================================================
+     Tokens prefijados `--hk-*` exclusivos del panel de admin. Encapsulan el
+     sistema visual hibrido: glass refraction (multi-stop top/bottom edges)
+     + spatial floating (sombras direccionales, hover lift) + sentient
+     feedback (halos que reaccionan, springs en lugar de transitions linear).
+
+     IMPORTANTE: estos tokens NO deben usarse fuera de /housekeeping. La
+     fortaleza visual del panel viene de su contraste con el resto de la app
+     (que sigue siendo iOS clean). Si se filtran, se pierde la diferenciación.
+     ======================================================================== */
+
+  /* ── Spring physics — overshoot suave para que todo se sienta "vivo" ──── */
+  --hk-spring: cubic-bezier(0.34, 1.32, 0.54, 1);          /* overshoot leve */
+  --hk-spring-soft: cubic-bezier(0.22, 0.96, 0.32, 1.04);   /* casi imperceptible */
+  --hk-spring-bounce: cubic-bezier(0.68, -0.2, 0.27, 1.5);  /* press de chip */
+
+  /* ── Jerarquía de elevación (theme-aware) ──────────────────────────────
+     Convención estándar para que dark/light tengan contraste correcto:
+
+       canvas (página)    →  bg-canvas       — gray-1 (negro / blanco)
+       card primaria      →  bg-surface      — gray-2 (negro+5% / blanco-2%)
+       tile dentro card   →  bg-surface-elev — gray-3 (negro+10% / blanco-4%)
+       tile hover         →  bg-surface-hover — gray-3 + un punto
+
+     En dark, cada nivel sube un 5% hacia blanco — tiles SE VEN sobre el
+     glass de la card. En light, cada nivel baja un 2% hacia gris — sutil
+     pero presente.
+
+     El glass de la card primaria usa `bg-glass-solid` (translúcido + blur)
+     porque es la "marca" Liquid Glass del panel. Las tiles internas son
+     SÓLIDAS para no compoundizar el blur (un blur sobre otro = mush). */
+
+  /* ── Card primaria (Liquid Glass) ──────────────────────────────────── */
+  --hk-card-radius: 22px;
+  --hk-card-padding: var(--space-6);
+  --hk-card-bg: var(--bg-glass-solid);
+  --hk-card-blur: blur(48px) saturate(1.6);
+  --hk-card-border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  --hk-card-border-hover: 1px solid var(--border-subtle);
+
+  /* ── Tile (item dentro de card) — sólido, theme-aware via surface ──── */
+  --hk-tile-bg: var(--bg-surface-elevated);
+  --hk-tile-bg-hover: var(--bg-surface-hover);
+  --hk-tile-border: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
+  --hk-tile-border-hover: 1px solid var(--border-subtle);
+  /* Active state (Editorial on) — el accent overlay sobre la base sólida. */
+  --hk-tile-bg-active: color-mix(in srgb, var(--accent) 10%, var(--bg-surface-elevated));
+  --hk-tile-border-active: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+
+  /* ── Sliding tab indicator — el "thumb" físico que viaja entre tabs ──── */
+  --hk-tab-track-bg: var(--bg-glass-thin);
+  --hk-tab-track-blur: blur(24px) saturate(1.4);
+  --hk-tab-indicator-bg: var(--accent);
+
+  /* ── Toggle (switch sentient) ──────────────────────────────────────────
+     `gray-6` da un track gris medio que funciona en ambos themes (claro en
+     dark, oscuro en light) — más fiable que el color-mix anterior que
+     dependía del canvas extremo. */
+  --hk-toggle-track-off: var(--gray-6);
+  --hk-toggle-track-on: var(--accent);
+  --hk-toggle-thumb: #fff;
+
+  /* ── Chip / segmented control ───────────────────────────────────────── */
+  --hk-chip-bg: transparent;
+  --hk-chip-border: 1.5px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  --hk-chip-fg: var(--text-secondary);
+  --hk-chip-bg-hover: color-mix(in srgb, var(--accent) 8%, transparent);
+  --hk-chip-active-bg: var(--accent);
+  --hk-chip-active-fg: #fff;
+
+  /* ── Drag handle (reorder) — surface-elev para diferenciarse del tile */
+  --hk-handle-bg: var(--bg-surface-active);
+
+  /* ── Drag & drop feedback ───────────────────────────────────────────────
+     - dragging: el item que estás arrastrando (opacity + scale).
+     - drop-target: zona donde puedes soltar (border accent + bg tint).
+     - drop-between: línea horizontal cuando reordenas filas. */
+  --hk-drag-ghost-opacity: 0.4;
+  --hk-drag-ghost-scale: 0.96;
+  --hk-drop-target-bg: color-mix(in srgb, var(--accent) 10%, transparent);
+  --hk-drop-target-border: 2px dashed var(--accent);
+  --hk-drop-line-color: var(--accent);
+  --hk-drop-line-thickness: 3px;
+
   /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
      curva ease-out aproximada por stops. La técnica: aplicar como
      `mask-image` al pseudo-element `::before` del hero, cuyo fondo es la

@@ -12,13 +12,25 @@ import { backendService, BackendError } from './BackendService.svelte';
 import {
   PinnedPlaylistsResponseSchema,
   UserPreferencesSchema,
+  AdminUsersResponseSchema,
   type PinnedPlaylist,
-  type UserPreferences
+  type UserPreferences,
+  type AdminUser
 } from '$types/backend';
 
 export async function getUserPreferences(username: string): Promise<UserPreferences | null> {
   const path = `/api/user/${encodeURIComponent(username)}/preferences`;
   return backendService.get(path, UserPreferencesSchema);
+}
+
+/**
+ * Lista todos los usuarios del sistema con su último scrobble. Solo admins
+ * deben llamar este endpoint (el backend no fuerza guardia, pero solo el
+ * panel /housekeeping lo usa).
+ */
+export async function getAdminUsers(): Promise<AdminUser[]> {
+  const data = await backendService.get('/api/user/admin/users', AdminUsersResponseSchema);
+  return data ?? [];
 }
 
 export async function getPinnedPlaylists(username: string): Promise<PinnedPlaylist[]> {

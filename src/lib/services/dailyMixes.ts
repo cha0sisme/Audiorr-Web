@@ -10,8 +10,16 @@
  * la navegación.
  */
 
+import { z } from 'zod';
 import { backendService } from './BackendService.svelte';
-import { DailyMixesResponseSchema, type DailyMix } from '$types/backend';
+import {
+  DailyMixesResponseSchema,
+  CronStatusSchema,
+  GenerateAllDailyMixesResponseSchema,
+  type DailyMix,
+  type CronStatus,
+  type GenerateAllDailyMixesResponse
+} from '$types/backend';
 import { playlistCovers } from '$stores/playlist-covers.svelte';
 
 /**
@@ -47,4 +55,54 @@ export function getPlaylistCoverUrl(navidromeId: string): string {
   const base = backendService.fileUrl(`/api/playlists/${encodeURIComponent(navidromeId)}/cover.png`);
   const hash = playlistCovers.get(navidromeId);
   return hash ? `${base}?v=${encodeURIComponent(hash)}` : base;
+}
+
+/**
+ * Estado del cron único que regenera Daily Mixes a las 3am. Diferente al
+ * de smart playlists (que tiene varios crons, uno por key). Aquí es uno
+ * solo porque la generación de los 4 mixes ocurre en el mismo job.
+ */
+export async function getDailyMixesCronStatus(): Promise<CronStatus | null> {
+  return backendService.get('/api/daily-mixes/cron-status', CronStatusSchema);
+}
+
+/**
+ * Dispara la regeneración de Daily Mixes para TODOS los usuarios conocidos.
+ * Server-side cooldown 30s — el backend devuelve 429 con `retryAfterMs` si
+ * estás dentro de la ventana. La response trae:
+ *   - `users`: lista de usernames procesados.
+ *   - `results`: { generated, reason? } por usuario.
+ *   - `totalGenerated`: número absoluto de mixes generados.
+ */
+export async function generateAllDailyMixes(): Promise<GenerateAllDailyMixesResponse> {
+  return backendService.post(
+    '/api/daily-mixes/generate-all',
+    undefined,
+    GenerateAllDailyMixesResponseSchema
+  );
+}
+
+/**
+ * Encola la regeneración de TODAS las covers personalizadas (daily mixes,
+ * smart playlists, editoriales, "This is …"). El backend itera las
+ * playlists Navidrome, calcula el contentHash para cada una y mete jobs
+ * `low priority` en la coverQueue.
+ *
+ * Respuesta: solo necesitamos saber que arrancó — el shape completo
+ * incluye `queuedCount` y otros internos que ignoramos.
+ */
+const QueueResponseSchema = z
+  .object({
+    queuedCount: z.number().optional(),
+    status: z.string().optional()
+  })
+  .passthrough();
+
+export async function regenerateAllCovers(): Promise<{ queuedCount?: number | undefined }> {
+  const data = await backendService.post(
+    '/api/playlists/regenerate-all',
+    undefined,
+    QueueResponseSchema
+  );
+  return { queuedCount: data.queuedCount };
 }

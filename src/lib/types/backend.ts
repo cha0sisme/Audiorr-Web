@@ -132,6 +132,147 @@ export const SmartPlaylistsResponseSchema = z.object({
   playlists: z.array(SmartPlaylistSchema)
 });
 
+/** Estado de un cron job interno del backend (smart playlists, daily mixes).
+    `lastRun` y `nextRun` llegan serializados como ISO strings. */
+export const CronStatusSchema = z.object({
+  status: z.enum(['idle', 'running', 'error', 'success']),
+  lastRun: z.string().optional(),
+  nextRun: z.string().optional(),
+  lastError: z.string().optional()
+});
+export type CronStatus = z.infer<typeof CronStatusSchema>;
+
+/** El smart playlists service mantiene un cron por cada playlist key
+    (en_bucle diario, tiempo_atras semanal, radar_novedades semanal). */
+export const SmartPlaylistsCronStatusSchema = z.record(z.string(), CronStatusSchema);
+export type SmartPlaylistsCronStatus = z.infer<typeof SmartPlaylistsCronStatusSchema>;
+
+/** Respuesta de POST /api/daily-mixes/generate-all — lista de usuarios
+    procesados y resumen por usuario + total. */
+export const GenerateAllDailyMixesResponseSchema = z.object({
+  users: z.array(z.string()),
+  results: z.record(
+    z.string(),
+    z.object({
+      generated: z.number(),
+      reason: z.string().optional()
+    })
+  ),
+  totalGenerated: z.number()
+});
+export type GenerateAllDailyMixesResponse = z.infer<typeof GenerateAllDailyMixesResponseSchema>;
+
+/** Respuesta de POST /api/smart-playlists/generate-all — el shape exacto de
+    `results` depende del service (puede variar por release del backend),
+    así que dejamos `unknown` y el caller decide si lo usa. */
+export const GenerateAllSmartPlaylistsResponseSchema = z.object({
+  results: z.unknown()
+});
+export type GenerateAllSmartPlaylistsResponse = z.infer<
+  typeof GenerateAllSmartPlaylistsResponseSchema
+>;
+
+// ============================================================================
+// Spotify Sync — /api/sync/*
+// ============================================================================
+
+/** Playlist de Spotify sincronizada hacia Navidrome. */
+export const SyncedPlaylistSchema = z.object({
+  spotifyId: z.string(),
+  navidromeId: z.string().nullable(),
+  name: z.string(),
+  lastSync: z.string().nullable(),
+  trackCount: z.number(),
+  matchCount: z.number(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type SyncedPlaylist = z.infer<typeof SyncedPlaylistSchema>;
+export const SyncedPlaylistsArraySchema = z.array(SyncedPlaylistSchema);
+
+/** Track de Spotify dentro de un preview. */
+export const SpotifyTrackSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  artist: z.string(),
+  album: z.string(),
+  duration_ms: z.number()
+});
+export type SpotifyTrack = z.infer<typeof SpotifyTrackSchema>;
+
+/** Resultado del preview — % de coincidencias antes de sincronizar de verdad. */
+export const SyncPreviewSchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  trackCount: z.number(),
+  matchCount: z.number(),
+  percentage: z.number(),
+  tracks: z.array(
+    z.object({
+      spotify: SpotifyTrackSchema,
+      found: z.boolean(),
+      navidromeId: z.string().optional(),
+      isManual: z.boolean().optional()
+    })
+  )
+});
+export type SyncPreview = z.infer<typeof SyncPreviewSchema>;
+
+/** Confirmación genérica del backend (`{ status: 'ok' }`). */
+export const StatusOkSchema = z.object({
+  status: z.string()
+});
+
+// ============================================================================
+// Admin: usuarios del sistema — /api/user/admin/users
+// ============================================================================
+
+/** Item de la lista admin de usuarios — incluye el último scrobble si lo
+    hay (cross-join con wrapped.db). */
+export const AdminUserSchema = z.object({
+  username: z.string(),
+  avatarUrl: z.string().nullable().optional(),
+  createdAt: z.string().nullable().optional(),
+  updatedAt: z.string().nullable().optional(),
+  lastScrobble: z
+    .object({
+      title: z.string(),
+      artist: z.string(),
+      album: z.string().nullable().optional(),
+      playedAt: z.string()
+    })
+    .nullable()
+    .optional()
+});
+export type AdminUser = z.infer<typeof AdminUserSchema>;
+export const AdminUsersResponseSchema = z.array(AdminUserSchema);
+
+// ============================================================================
+// Canvas — /api/spotify/canvas + /api/canvas
+// ============================================================================
+
+/** Item del array `canvasesList` que devuelve `/api/spotify/canvas`. */
+export const SpotifyCanvasItemSchema = z.object({
+  id: z.string(),
+  canvasUrl: z.string(),
+  trackUri: z.string(),
+  canvasUri: z.string().optional(),
+  artist: z
+    .object({
+      artistUri: z.string().optional(),
+      artistName: z.string().optional(),
+      artistImgUrl: z.string().optional()
+    })
+    .optional()
+});
+export type SpotifyCanvasItem = z.infer<typeof SpotifyCanvasItemSchema>;
+
+export const SpotifyCanvasResponseSchema = z.object({
+  canvasesList: z.array(SpotifyCanvasItemSchema)
+});
+export type SpotifyCanvasResponse = z.infer<typeof SpotifyCanvasResponseSchema>;
+
 // ============================================================================
 // Playlist Sections — `homepage_layout` global setting
 // ============================================================================

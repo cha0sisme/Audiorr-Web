@@ -1,6 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { User, Gear, SignOut, CaretUp } from 'phosphor-svelte';
+  import { User, Gear, SignOut, CaretUp, Wrench } from 'phosphor-svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { credentials } from '$stores/credentials.svelte';
   import * as nav from '$services/NavidromeService';
@@ -54,6 +54,10 @@
   function handleProfile() {
     close();
     goto('/profile');
+  }
+  function handleHousekeeping() {
+    close();
+    goto('/housekeeping');
   }
   function handleSettings() {
     close();
@@ -118,6 +122,12 @@
         <User size={16} weight="regular" />
         <span>Perfil</span>
       </button>
+      {#if isAdmin}
+        <button type="button" role="menuitem" class="item" onclick={handleHousekeeping}>
+          <Wrench size={16} weight="regular" />
+          <span>Housekeeping</span>
+        </button>
+      {/if}
       <button type="button" role="menuitem" class="item" onclick={handleSettings}>
         <Gear size={16} weight="regular" />
         <span>Ajustes</span>

@@ -60,6 +60,86 @@ class BackendServiceImpl {
     return schema.parse(json);
   }
 
+  /**
+   * PUT tipado con body JSON. Usado para mutations de settings/preferences
+   * (admin). 4xx → BackendError con el statusText; 5xx idem. La response
+   * se parsea con el schema dado, igual que `get`.
+   */
+  async put<T>(
+    path: string,
+    body: unknown,
+    schema: z.ZodSchema<T>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      credentials: 'omit',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(headers ?? {})
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
+    }
+    const json = await res.json();
+    return schema.parse(json);
+  }
+
+  /**
+   * POST tipado. Body opcional (algunas mutations admin no lo necesitan,
+   * ej. `/api/smart-playlists/generate-all`). Si el server responde 429
+   * (rate-limit/cooldown), `BackendError.status === 429` y el caller puede
+   * leer el `retryAfterMs` del body si parsea.
+   */
+  async post<T>(
+    path: string,
+    body: unknown | undefined,
+    schema: z.ZodSchema<T>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const init: RequestInit = {
+      method: 'POST',
+      credentials: 'omit',
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(headers ?? {})
+      }
+    };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const res = await fetch(url, init);
+    if (!res.ok) {
+      throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
+    }
+    const json = await res.json();
+    return schema.parse(json);
+  }
+
+  /**
+   * DELETE — para mutations que eliminan recursos. Devuelve el body parseado
+   * con el schema dado (algunos endpoints devuelven `{ status: 'ok' }`).
+   */
+  async delete<T>(
+    path: string,
+    schema: z.ZodSchema<T>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      credentials: 'omit',
+      ...(headers ? { headers } : {})
+    });
+    if (!res.ok) {
+      throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
+    }
+    const json = await res.json();
+    return schema.parse(json);
+  }
+
   /** URL absoluta a un asset estático del backend (mp4, etc). */
   fileUrl(path: string): string {
     const clean = path.startsWith('/') ? path : `/${path}`;

@@ -290,6 +290,27 @@ export async function getUser(username: string) {
   return data.user;
 }
 
+/**
+ * Subsonic `updatePlaylist` — solo cambios de metadata (name/comment/public).
+ * No exponemos songIdsToAdd / songIndexesToRemove aún (no hace falta para
+ * el flow Editorial: ahí solo togglemos el comment con `[Editorial]`).
+ *
+ * Requiere admin O ser el owner. En el panel /housekeeping solo entran
+ * admins, así que cualquier playlist es modificable.
+ */
+export async function updatePlaylist(
+  playlistId: string,
+  options: { name?: string; comment?: string; public?: boolean }
+): Promise<void> {
+  const creds = requireCreds();
+  const params: Record<string, string | number | boolean> = { playlistId };
+  if (options.name !== undefined) params.name = options.name;
+  if (options.comment !== undefined) params.comment = options.comment;
+  if (options.public !== undefined) params.public = options.public;
+  // Subsonic devuelve solo status="ok" sin payload — usamos el envelope crudo.
+  await call(creds, 'updatePlaylist', params);
+}
+
 export async function getPlaylist(id: string) {
   const creds = requireCreds();
   const data = await call(creds, 'getPlaylist', { id }, PlaylistResponseSchema);
