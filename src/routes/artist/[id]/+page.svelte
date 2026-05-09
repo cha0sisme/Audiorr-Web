@@ -1,9 +1,11 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { User, DotsThree, Plus, ListPlus } from 'phosphor-svelte';
+  import { User, DotsThree, Plus, ListPlus, Shuffle, Play } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
+  import SmartMixButton from '$components/shared/SmartMixButton.svelte';
+  import { smartMixManager } from '$services/SmartMixManager.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
@@ -183,6 +185,7 @@
 
   async function playArtist() {
     if (!artist) return;
+    if (queueManager.shuffleMode) queueManager.toggleShuffle();
     if (allTopSongs.length > 0) {
       player.context = { type: 'artist', id: artist.id };
       queueManager.play(allTopSongs, 0);
@@ -197,6 +200,33 @@
     player.context = { type: 'artist', id: artist.id };
     queueManager.play(albumSongs, 0);
   }
+
+  async function shuffleArtist() {
+    if (!artist) return;
+    if (!queueManager.shuffleMode) queueManager.toggleShuffle();
+    if (allTopSongs.length > 0) {
+      player.context = { type: 'artist', id: artist.id };
+      queueManager.play(allTopSongs, 0);
+      return;
+    }
+    const firstAlbum = albums[0];
+    if (!firstAlbum) return;
+    const alb = await nav.getAlbum(firstAlbum.id);
+    const albumSongs = alb.song ?? [];
+    if (albumSongs.length === 0) return;
+    player.context = { type: 'artist', id: artist.id };
+    queueManager.play(albumSongs, 0);
+  }
+
+  // ─── SmartMix hand-off ─────────────────────────────────────────────────
+  // Para artist usamos top songs como tracks del SmartMix (mejor señal que
+  // primer álbum: top songs = lo que el listener realmente conoce).
+  const smartMixSongs = $derived(allTopSongs);
+  const smartMixReady = $derived(
+    smartMixManager.playlistId === artistId && smartMixManager.status === 'ready'
+  );
+  const isSmartMixContext = $derived(player.isSmartMixContext(artistId));
+  const collapsePlay = $derived(smartMixReady || isSmartMixContext);
 
   // Context menu (3-dots).
   let menuOpen = $state(false);
@@ -269,13 +299,38 @@
         {/if}
 
         <div class="actions">
-          <HeroPlayButton
+          {#if collapsePlay}
+            <HeroCircleButton
+              bgColor={playBg}
+              onclick={playArtist}
+              disabled={albums.length === 0 && allTopSongs.length === 0}
+              aria-label="Reproducir"
+            >
+              <Play size={15} weight="fill" />
+            </HeroCircleButton>
+          {:else}
+            <HeroPlayButton
+              bgColor={playBg}
+              onclick={playArtist}
+              disabled={albums.length === 0 && allTopSongs.length === 0}
+            >
+              Reproducir
+            </HeroPlayButton>
+          {/if}
+          <HeroCircleButton
             bgColor={playBg}
-            onclick={playArtist}
+            onclick={shuffleArtist}
             disabled={albums.length === 0 && allTopSongs.length === 0}
+            aria-label="Shuffle"
           >
-            Reproducir
-          </HeroPlayButton>
+            <Shuffle size={15} weight="bold" />
+          </HeroCircleButton>
+          <SmartMixButton
+            bgColor={playBg}
+            playlistId={artistId}
+            songs={smartMixSongs}
+            disabled={smartMixSongs.length === 0}
+          />
           <div class="menu-anchor">
             <HeroCircleButton
               bgColor={playBg}

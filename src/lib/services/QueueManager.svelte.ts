@@ -162,6 +162,14 @@ class QueueManager {
   /** Inhibe la próxima llamada a player.load() — usado cuando solo queremos
       sincronizar estado UI sin disparar playback (ej. restoreState/loadRemoteQueue). */
   private suppressLoadOnce = false;
+  /** Modo de la cola activa. Mirror del iOS PlaybackMode. Se propaga a
+      `player.load()` en cada `playCurrentSong()`. Para SmartMix: `'dj'`. */
+  private playbackMode: 'normal' | 'dj' = 'normal';
+  /** URI canónico del contexto de la cola. Esquemas: `playlist:<id>`,
+      `album:<id>`, `artist:<id>`, `smartmix:<id>`, `null` para cola libre.
+      Se propaga al player para que SmartMixButton distinga el SmartMix de
+      la misma playlist en modo normal. */
+  private contextUri: string | null = null;
 
   constructor() {
     if (browser) {
@@ -181,21 +189,34 @@ class QueueManager {
    * playback. Si shuffle está activo, pinea el track de startIndex al slot
    * startIndex y baraja el resto.
    */
-  play(songs: NavidromeSong[], startIndex = 0): void {
+  play(
+    songs: NavidromeSong[],
+    startIndex = 0,
+    options: { playbackMode?: 'normal' | 'dj'; contextUri?: string | null } = {}
+  ): void {
     if (songs.length === 0) return;
     const persistable = songs.map(navidromeSongToPersistable);
-    this.playPersistable(persistable, startIndex);
+    this.playPersistable(persistable, startIndex, options);
   }
 
   /** Variante que acepta PersistableSong (ej. cuando ya las construimos a
-      partir de SongListItem). */
-  playPersistable(songs: PersistableSong[], startIndex = 0): void {
+      partir de SongListItem). `options.playbackMode` y `options.contextUri`
+      se memorizan en el manager y se propagan a `player.load()` en cada
+      `playCurrentSong()` — así el modo (normal / dj) y el URI canónico
+      (`smartmix:<id>`) sobreviven a skips entre tracks. */
+  playPersistable(
+    songs: PersistableSong[],
+    startIndex = 0,
+    options: { playbackMode?: 'normal' | 'dj'; contextUri?: string | null } = {}
+  ): void {
     if (songs.length === 0) return;
     const idx = Math.max(0, Math.min(startIndex, songs.length - 1));
     this.queue = [...songs];
     this.originalQueue = [...songs];
     this.currentIndex = idx;
     this.pendingResumePosition = 0;
+    this.playbackMode = options.playbackMode ?? 'normal';
+    this.contextUri = options.contextUri ?? null;
 
     if (this.shuffleMode) this.applyShuffle(true);
 
@@ -677,7 +698,10 @@ class QueueManager {
 
     // El player.load() actual no acepta startAt — lo aplicamos via seek post-play.
     // Limpia esto cuando AudioEngine exponga loadAtPosition.
-    player.load(persistableToPlayerSong(cur), ctx);
+    player.load(persistableToPlayerSong(cur), ctx, {
+      playbackMode: this.playbackMode,
+      contextUri: this.contextUri
+    });
     if (startAt > 0 && cur.duration > 0 && startAt < cur.duration - 5) {
       // Espera mínima para que el media element tenga metadata; el seek de
       // AudioEngine es tolerante a llamadas pre-metadata pero queremos asegurar

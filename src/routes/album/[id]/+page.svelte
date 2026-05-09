@@ -2,9 +2,11 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
-  import { MusicNote, Shuffle, DotsThree, Plus, ListPlus, User } from 'phosphor-svelte';
+  import { MusicNote, Shuffle, DotsThree, Plus, ListPlus, User, Play } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
+  import SmartMixButton from '$components/shared/SmartMixButton.svelte';
+  import { smartMixManager } from '$services/SmartMixManager.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import SongList from '$components/shared/SongList.svelte';
   import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
@@ -126,6 +128,16 @@
     queueManager.play(songs, 0);
   }
 
+  // ─── SmartMix hand-off (mirror iOS PlaylistDetailView lines 420-475) ───
+  // Cuando el SmartMix de este album está `ready` o ya está sonando como
+  // contexto activo, el botón Play colapsa a círculo y SmartMix expande a
+  // cápsula — clean visual hand-off de la prominencia.
+  const smartMixReady = $derived(
+    smartMixManager.playlistId === albumId && smartMixManager.status === 'ready'
+  );
+  const isSmartMixContext = $derived(player.isSmartMixContext(albumId));
+  const collapsePlay = $derived(smartMixReady || isSmartMixContext);
+
   // Context menu (3-dots).
   let menuOpen = $state(false);
 
@@ -223,13 +235,24 @@
         </p>
 
         <div class="actions">
-          <HeroPlayButton
-            bgColor={playBg}
-            onclick={playAll}
-            disabled={tracks.length === 0}
-          >
-            Reproducir
-          </HeroPlayButton>
+          {#if collapsePlay}
+            <HeroCircleButton
+              bgColor={playBg}
+              onclick={playAll}
+              disabled={tracks.length === 0}
+              aria-label="Reproducir"
+            >
+              <Play size={15} weight="fill" />
+            </HeroCircleButton>
+          {:else}
+            <HeroPlayButton
+              bgColor={playBg}
+              onclick={playAll}
+              disabled={tracks.length === 0}
+            >
+              Reproducir
+            </HeroPlayButton>
+          {/if}
           <HeroCircleButton
             bgColor={playBg}
             onclick={shuffleAll}
@@ -238,6 +261,12 @@
           >
             <Shuffle size={15} weight="bold" />
           </HeroCircleButton>
+          <SmartMixButton
+            bgColor={playBg}
+            playlistId={albumId}
+            {songs}
+            disabled={tracks.length === 0}
+          />
           <div class="menu-anchor">
             <HeroCircleButton
               bgColor={playBg}

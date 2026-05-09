@@ -57,6 +57,21 @@ class PlayerStore {
   /** De dónde se inició el playback (album X, playlist Y, etc). */
   context = $state<PlaybackContext>(null);
 
+  /** Modo de playback global. Mirror del iOS PlaybackMode:
+      - `normal`: reproducción tal cual, crossfade equal-power genérico.
+      - `dj`: contenedor SmartMix activo. Activado cuando el caller llama a
+        `player.load(song, ctx, { playbackMode: 'dj', contextUri: 'smartmix:<id>' })`.
+      Cuando el DJ Mixing algorithm esté portado, será el AudioEngine quien
+      observe este flag y aplique el crossfade DJ-grade. Hoy es UI-only. */
+  playbackMode = $state<'normal' | 'dj'>('normal');
+
+  /** Identificador canónico del contexto activo. Mirror del iOS
+      NowPlayingState.contextUri. Esquemas válidos:
+      - `playlist:<id>`, `album:<id>`, `artist:<id>`: playback normal.
+      - `smartmix:<id>`: cola SmartMix de la playlist `<id>`. Distingue el
+        SmartMix de esa playlist del playback normal de la misma. */
+  contextUri = $state<string | null>(null);
+
   /** True si hay algo cargado y el mini player debe mostrarse. */
   hasSong = $derived(this.currentSong !== null);
 
@@ -121,10 +136,20 @@ class PlayerStore {
   /**
    * Carga una canción y empieza a reproducir. La URL del stream se resuelve
    * desde NavidromeService usando song.id.
+   *
+   * `options.playbackMode` (default `'normal'`) y `options.contextUri` se
+   * publican al store para que los Detail views distingan el SmartMix de
+   * la misma playlist en modo normal — mirror del iOS NowPlayingState.
    */
-  load(song: Song, context: PlaybackContext = null) {
+  load(
+    song: Song,
+    context: PlaybackContext = null,
+    options: { playbackMode?: 'normal' | 'dj'; contextUri?: string | null } = {}
+  ) {
     this.currentSong = song;
     this.context = context;
+    this.playbackMode = options.playbackMode ?? 'normal';
+    this.contextUri = options.contextUri ?? null;
     this.progress = 0;
     this.positionSec = 0;
     // Optimismo: marcamos isPlaying=true para que el mini player aparezca al
@@ -151,6 +176,13 @@ class PlayerStore {
       ArtistCard, QuickAccessCard para decidir si renderizan el equalizer. */
   isPlayingFrom(type: NonNullable<PlaybackContext>['type'], id: string): boolean {
     return this.context?.type === type && this.context?.id === id;
+  }
+
+  /** ¿La cola activa es el SmartMix de esta playlist concreta? Mirror exacto
+      del iOS `nowPlaying.contextUri == "smartmix:<id>"`. Lo usa SmartMixButton
+      para decidir si toggle play/pause vs disparar generate/playSmartMix. */
+  isSmartMixContext(playlistId: string): boolean {
+    return this.contextUri === `smartmix:${playlistId}`;
   }
 
   toggle() {
