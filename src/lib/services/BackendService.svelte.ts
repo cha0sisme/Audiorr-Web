@@ -140,6 +140,51 @@ class BackendServiceImpl {
     return schema.parse(json);
   }
 
+  /**
+   * DELETE sin body en la respuesta (HTTP 204) — algunos endpoints como
+   * `/api/diagnostics/transitions/:id/comment` no devuelven payload. No-op
+   * silencioso si OK; tira `BackendError` si !ok.
+   */
+  async deleteVoid(path: string, headers?: Record<string, string>): Promise<void> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: 'DELETE',
+      credentials: 'omit',
+      ...(headers ? { headers } : {})
+    });
+    if (!res.ok) {
+      throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
+    }
+  }
+
+  /**
+   * PATCH tipado — usado por mutations parciales (ej. ratear una
+   * transición sin tocar el resto del record). Body JSON, response parseada
+   * con el schema dado. Mismo error handling que put/post.
+   */
+  async patch<T>(
+    path: string,
+    body: unknown,
+    schema: z.ZodSchema<T>,
+    headers?: Record<string, string>
+  ): Promise<T> {
+    const url = `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      credentials: 'omit',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(headers ?? {})
+      },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
+    }
+    const json = await res.json();
+    return schema.parse(json);
+  }
+
   /** URL absoluta a un asset estático del backend (mp4, etc). */
   fileUrl(path: string): string {
     const clean = path.startsWith('/') ? path : `/${path}`;
