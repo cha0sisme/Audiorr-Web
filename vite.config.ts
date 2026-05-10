@@ -16,10 +16,19 @@ export default defineConfig(({ mode }) => {
       strictPort: false,
       // Proxy /api/* al backend Audiorr en dev — evita CORS del browser.
       // En prod el frontend va detrás del mismo dominio (Docker/reverse proxy).
+      // /socket.io/* con ws:true para que el ConnectService alcance al hub
+      // Audiorr — sin esto, socket.io-client conecta contra localhost (vacío)
+      // y la web nunca ve a iOS / otras pestañas que sí están en el backend
+      // real.
       proxy: {
         '/api': {
           target: backendTarget,
           changeOrigin: true
+        },
+        '/socket.io': {
+          target: backendTarget,
+          changeOrigin: true,
+          ws: true
         }
       }
     }
