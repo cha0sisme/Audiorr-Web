@@ -1,7 +1,7 @@
 # Audiorr Web
 
 Web frontend for [Audiorr](https://github.com/cha0sisme/Audiorr-Frontend) — an audiophile-grade music streaming client.
-Connects to a self-hosted [Navidrome](https://www.navidrome.org) server and, optionally, the Audiorr Backend for advanced features (DJ-mixing engine, Smart Mixes, Daily Mixes, Canvas, multi-device sync).
+SvelteKit client for a self-hosted [Navidrome](https://www.navidrome.org) library, with optional integration against the private Audiorr Backend for advanced features (DJ-grade mixing, Smart Mix, Daily Mixes, Canvas, multi-device sync).
 
 ![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)
 ![SvelteKit](https://img.shields.io/badge/SvelteKit-2-FF3E00?logo=svelte&logoColor=white)
@@ -14,19 +14,44 @@ Connects to a self-hosted [Navidrome](https://www.navidrome.org) server and, opt
 
 ---
 
+## ⚠️ Status: backend-coupled today, standalone mode planned
+
+Audiorr Web currently requires the **Audiorr Backend** (private, not yet released) running on the same network. Without it, most features will fail to load — Smart Mix, Daily Mixes, Canvas, Connect, listening stats and the home feed all fetch from backend endpoints.
+
+A standalone mode that gates backend-dependent features behind an `isBackendAvailable` flag (mirroring the iOS app's behaviour) is planned for Q2 2026. The goal: someone with only a Navidrome instance should be able to clone this repo and have a fully usable client, with backend-powered features lighting up automatically when the backend is reachable.
+
+If you only have Navidrome and want a working Audiorr client today, the iOS app is the right entry point — it ships with this exact dual-mode design from day one.
+
+---
+
 ## Features
 
-- **Gapless playback** with dual-chain audio engine (HTMLAudioElement + Web Audio API nodes)
-- **Automatic DJ crossfades** — port of the iOS DJMixingService algorithm (in progress)
-- **Biquad DSP via AudioWorklet** — 4-stage cascaded filter (highpass, lowpass, shelf, notch sweeps) processed off the main thread
+### Available with Navidrome alone (current implementation)
+
+These are technically wired but partially gated by the home feed and other backend-dependent flows. Until the standalone gate lands, expect rough edges on first-launch with no backend.
+
+- **Gapless playback** with a dual-chain audio engine (HTMLAudioElement + Web Audio API)
+- **Biquad DSP via AudioWorklet** — 4-stage cascaded filter (highpass, lowpass, shelf, notch) processed off the main thread
 - **Full library browsing** — albums, artists, playlists, search
-- **Home feed** — Jump Back In, Daily Mixes, Smart Playlists, New Releases, Recently Added, Top Played
 - **Queue management** with IndexedDB persistence across sessions
+- **Synchronized lyrics** via [LRCLib](https://lrclib.net)
 - **Album art color theming** — dominant color extraction with OKLCH (culori + node-vibrant)
-- **Dark / light themes** — iOS 26 Liquid Glass aesthetic; FOUC-free via SvelteKit SSR hook
+- **Dark / light themes** — iOS 26 Liquid Glass aesthetic, FOUC-free via SvelteKit SSR hook
 - **Wide-gamut color** — P3 OKLCH primitives with hex fallback
-- **Responsive layout** — sidebar on desktop, tab bar on mobile (in progress)
-- **Self-hosted, no cloud dependency** — works entirely on your local network
+- **Self-hosted, no cloud dependency** for what's already wired
+
+### Requires Audiorr Backend (private)
+
+- **Audiorr Connect** — Spotify-Connect-style multi-device control over Socket.io (transfer playback, remote control, receiver-only mode)
+- **DJ-grade crossfades** — port of the iOS `DJMixingService` algorithm (in progress; ~6,000 LOC from Swift to TypeScript, deferred until iOS v13 stabilises)
+- **Smart Mix** — playlist reordering by Camelot harmonic compatibility, energy arc, BPM progression, vocal-trainwreck avoidance
+- **Smart Playlists** — three rotating playlists generated server-side: *Tiempo Atrás*, *En Bucle*, *Radar de Novedades*
+- **Daily Mixes** — up to five personalised mixes generated nightly
+- **Canvas** — looping video or still per song (sourced from Spotify, requires Spotify credentials configured server-side)
+- **Listening stats / Wrapped** — weekly Top 10 and yearly summaries from the backend's local SQLite store
+- **Home feed** — Jump Back In, dynamic rows, editorial sections from the backend's `homepage_layout`
+- **Last.fm scrobbling** via the backend's Socket.io channel
+- **Housekeeping admin panel** for the backend operator
 
 ---
 
@@ -34,7 +59,7 @@ Connects to a self-hosted [Navidrome](https://www.navidrome.org) server and, opt
 
 ### System overview
 
-Audiorr is a multi-platform product with three main pieces:
+Audiorr is a multi-platform product with three pieces:
 
 ```
 ┌───────────────────────────────────────────────────────────┐
@@ -44,7 +69,6 @@ Audiorr is a multi-platform product with three main pieces:
 │  │ librosa +   │  │ daily mixes  │  │ multi-device     │ │
 │  │ Essentia    │  │ playlists    │  │ Connect          │ │
 │  └──────┬──────┘  └──────┬───────┘  └────────┬─────────┘ │
-│         │                │                   │           │
 │         └────────────────┴───────────────────┘           │
 │                     REST API  /api/*                      │
 └──────────────────────────┬────────────────────────────────┘
@@ -66,49 +90,29 @@ Audiorr is a multi-platform product with three main pieces:
 ```
 
 **Navidrome** is always required — it handles auth, library, and audio streaming URLs.
-**Audiorr Backend** is optional but unlocks the DJ engine and Smart Mix features. It runs in the same Docker Compose stack as the web app.
+**Audiorr Backend** is currently coupled — making it optional is the next major architectural milestone for this repo (see status note above).
 
-### Audiorr Backend
+### DJ Mixing Engine (planned, not yet ported)
 
-Private Node.js + TypeScript service (not in this repo). Provides:
+The core algorithmic feature of Audiorr. iOS (Swift / AVAudioEngine) is the canonical implementation; the web port to TypeScript + Web Audio API is on the roadmap but **not yet present in the codebase** beyond the audio engine skeleton.
 
-- Audio analysis pipeline (BPM, key, energy, structure, vocal segments, intro/outro detection) via **librosa + Essentia** (Python worker)
-- Cache layer (SQLite) with content-hash invalidation
-- REST endpoints: `/api/analysis/<id>`, `/api/labels/...`, `/api/daily-mixes`, `/api/smart-playlists`, `/api/playlists/<id>/cover.png`, `/api/stats/...`
-- Socket.io server for multi-device real-time sync (Audiorr Connect)
+What's live today in `src/lib/audio/`: an `AudioEngine` dual-chain (HTMLAudioElement + Web Audio nodes) with an equal-power crossfade and an `AudioWorkletProcessor` running four cascaded biquad stages (`worklets/biquad-processor.js`). No decision layer, no transition-type classifier, no per-type gain curves.
 
-### DJ Mixing Engine
+What's planned (intentionally deferred): a `DJMixingService.ts` decision layer that classifies each A→B pair into one of eleven transition types (`CROSSFADE`, `EQ_MIX`, `BEAT_MATCH_BLEND`, `NATURAL_BLEND`, `CUT`, `CUT_A_FADE_IN_B`, `FADE_OUT_A_CUT_B`, `STEM_MIX`, `DROP_MIX`, `CLEAN_HANDOFF`, `VINYL_STOP`) using BPM ratio, key compatibility, energy delta, danceability, structure segments and vocal density; plus a `CrossfadeExecutor.ts` execution layer wiring decisions to the existing audio engine with per-type gain curves and biquad sweeps.
 
-The core algorithmic feature of Audiorr. The iOS app (Swift/AVAudioEngine) is the canonical implementation; the web is porting it to TypeScript + Web Audio API.
+The port is held back on purpose: the iOS Swift implementation is still iterating week to week. Porting it before the algorithm stabilises means re-porting every iteration. When iOS lands a version we're willing to call "v13 final", the web gets the port in one focused pass (~6,000 LOC from Swift, estimated 35-50h of work).
 
-**Decision layer** (`DJMixingService.ts`) — pure logic, no audio context:
-- Classifies each A→B pair into one of 12 transition types: `NATURAL_BLEND`, `BEAT_MATCH_BLEND`, `DROP_MIX`, `CUT`, `CLEAN_HANDOFF`, `EQ_MIX`, `CROSSFADE`, `SMOOTH`, `FADE_OUT_A_CUT_B`, `CUT_A_FADE_IN_B`, `HALF_TIME_BRIDGE`, `VINYL_STOP`
-- Decision factors: BPM ratio, key compatibility, energy delta, danceability, structure segments (intro/outro/chorus), vocal density
-- **Tier 4 / earlyBlend**: advances B's entry to the first kick in its instrumental intro when A is in a reliable instrumental outro
-- **B→A communication**: A adjusts its fade curve by reading three flags from B (intro bars, immediate impact, harmonic clash level)
-- **Chill recipe**: five-belt guard disables automations when both tracks are chill-energy
-- **aNaturalDecay**: B skips its initial ramp when A decays naturally to silence; 10% easing to avoid thump
-
-**Execution layer** (`CrossfadeExecutor.ts`) — wires decisions to Web Audio:
-- Dual audio chain (A/B) with `AudioWorkletNode` carrying 4 cascaded biquad stages
-- Biquad sweeps during crossfades: highpass/lowpass on A and B independently, low-shelf boosts, notch for frequency clash regions, dynamic Q resonance
-- Gain curves vary by transition type (not uniform equal-power)
-- Beat-aligned time-stretch when BPMs are close
-- Anticipation tease: brief B preview ("teasing") before full swap
-
-**Platform differences vs iOS** (documented in `CLAUDE.md`):
+**Platform differences vs iOS** (relevant when the port lands):
 - `BiquadFilterNode` (Web Audio) instead of `AVAudioUnitEQ` — same filter types, different coefficient path
 - Web Audio latency is higher and less predictable than CoreAudio; lookahead is more generous
 - Autoplay policy: `AudioContext` requires a user gesture before first play
-- Backend is always co-located in Docker — no `isBackendAvailable` probing needed on web
-
-**Current status**: AudioEngine dual-chain skeleton with equal-power crossfade is live. Full `DJMixingService` port (~6,000 LOC from Swift) is pending.
 
 ### Client architecture
 
 ```
 src/lib/
-├── audio/           AudioEngine, CrossfadeExecutor, DJMixingService, BiquadCoefficients
+├── audio/           AudioEngine + biquad coefficient helpers (CrossfadeExecutor and
+│                    DJMixingService not yet ported — see status above)
 │   └── worklets/    biquad-processor.js (AudioWorkletProcessor, 4 cascaded biquads)
 ├── components/      Shared UI components (AlbumCard, PlaylistCard, SongList, MiniPlayer, …)
 ├── services/        NavidromeService, BackendService, QueueManager, ColorExtractor, …
@@ -126,6 +130,7 @@ src/routes/          SvelteKit file-based routing
 ├── /search
 ├── /settings
 ├── /profile         Wrapped-lite stats
+├── /housekeeping    Admin panel (backend operator only)
 └── /design-system   Internal token + component reference
 ```
 
@@ -136,7 +141,7 @@ Two-layer CSS token system — no Tailwind, no CSS-in-JS:
 - **Primitives** (`primitives.css`): raw scales (color via Radix Colors seeded at `#0097fe`, spacing, type, motion). P3 OKLCH overrides alongside hex fallbacks.
 - **Semantic** (`semantic.css`): functional tokens consumed by components (`--text-primary`, `--bg-surface`, `--accent`, …). Components never reference primitives directly.
 
-Aesthetic: iOS 26 Liquid Glass approximated with `backdrop-filter: blur() saturate()` + inset edge highlights. Glass reserved for floating chrome only (mini player, tab bar, sheets).
+Aesthetic: iOS 26 Liquid Glass approximated with `backdrop-filter: blur() saturate()` and inset edge highlights. Glass reserved for floating chrome only (mini player, tab bar, sheets).
 
 ---
 
@@ -167,12 +172,13 @@ Aesthetic: iOS 26 Liquid Glass approximated with `backdrop-filter: blur() satura
 - [Node.js](https://nodejs.org) ≥ 20
 - [pnpm](https://pnpm.io) ≥ 9 (`npm install -g pnpm`)
 - A running [Navidrome](https://www.navidrome.org) instance accessible from your browser
+- Access to an Audiorr Backend instance for the full feature set (private, not yet released — limits the usefulness of standalone clones until the standalone-gate work lands)
 
 ### Local development
 
 ```bash
-git clone https://github.com/cha0sisme/audiorr-web.git
-cd audiorr-web
+git clone https://github.com/cha0sisme/Audiorr-web.git
+cd Audiorr-web
 pnpm install
 pnpm dev        # Vite dev server → http://localhost:5173
 ```
@@ -189,7 +195,14 @@ pnpm preview    # Preview production build locally
 
 ### Docker (production)
 
-The app is designed to run alongside the Audiorr Backend in the same Docker Compose stack. Refer to the backend deployment docs for the full compose configuration.
+The app is designed to run alongside the Audiorr Backend in the same Docker Compose stack. The deployment recipe is currently private to the project's maintainer; whether it ships in this repo or in a separate deployment repo is an open decision tied to the eventual public-release plan of the backend.
+
+---
+
+## Companion projects
+
+- **[Audiorr](https://github.com/cha0sisme/Audiorr-Frontend)** — native iOS app. Standalone-first design; runs on your iPhone with just Navidrome. Currently the most complete surface of the product.
+- **Audiorr Backend** — Node.js + TypeScript service. Private repository. Powers Smart Mix, AutoMix, Daily Mixes, Connect, Canvas, listening stats. Public release plan TBD.
 
 ---
 
@@ -197,7 +210,7 @@ The app is designed to run alongside the Audiorr Backend in the same Docker Comp
 
 This is a personal project and not open to external contributions at this time. The codebase is published for reference and transparency.
 
-Before making any non-trivial change, read `CLAUDE.md` — it documents all conventions, architecture decisions, and the iOS behavioral spec to mirror.
+Before making any non-trivial change, read `CLAUDE.md` — it documents conventions, architecture decisions, and the iOS behavioural spec to mirror.
 
 ---
 
