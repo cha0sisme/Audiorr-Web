@@ -271,6 +271,55 @@ export const TopSongsResponseSchema = z.object({
 });
 
 // ============================================================================
+// LYRICS — dos endpoints distintos del Subsonic ecosystem:
+//
+//   - getLyricsBySongId (OpenSubsonic, 1.16.1+): devuelve letras EMBEDDED del
+//     archivo (ID3 USLT/SYLT) o del .lrc al lado del archivo. Reemplaza la
+//     necesidad de leer ID3 desde el cliente. Acepta `id` (songId).
+//     Response shape: lyricsList.structuredLyrics[] con `synced: bool` y
+//     `line[]` con `start` (ms) si synced.
+//
+//   - getLyrics (Subsonic legacy 1.2.0+): busca letras por title+artist en
+//     el plugin Last.fm del server. Plain text único (no synced). Útil como
+//     último fallback cuando el archivo no tiene letras embedded ni LRCLib
+//     responde.
+// ============================================================================
+
+export const LyricsLineSchema = z.object({
+  /** Tiempo en milisegundos. Solo presente si la pista es synced. */
+  start: z.number().optional(),
+  value: z.string()
+});
+
+export const StructuredLyricsSchema = z.object({
+  lang: z.string().optional(),
+  synced: z.boolean().optional(),
+  displayArtist: z.string().optional(),
+  displayTitle: z.string().optional(),
+  line: z.array(LyricsLineSchema).default([])
+});
+
+export type StructuredLyrics = z.infer<typeof StructuredLyricsSchema>;
+
+export const LyricsBySongIdResponseSchema = z.object({
+  lyricsList: z
+    .object({
+      structuredLyrics: z.array(StructuredLyricsSchema).default([])
+    })
+    .optional()
+});
+
+export const LyricsLegacyResponseSchema = z.object({
+  lyrics: z
+    .object({
+      artist: z.string().optional(),
+      title: z.string().optional(),
+      value: z.string().optional()
+    })
+    .optional()
+});
+
+// ============================================================================
 // AlbumList2 con artistId — Subsonic permite filtrar getAlbumList2 por
 // byArtist + artistId para traer todos los álbumes en los que aparece un
 // artista (incluyendo collabs donde no es el albumArtist). Reutilizamos

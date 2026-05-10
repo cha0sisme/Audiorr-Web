@@ -50,6 +50,7 @@
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
+  import { lyricsService, EMPTY_LYRICS, type LyricsResult } from '$services/LyricsService.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
@@ -86,11 +87,104 @@
   });
 
   const hasCanvas = $derived(canvas.videoUrl !== null);
-  /** Hoy el LyricsService no está portado — placeholder honesto. Cuando
-      llegue, se reemplaza por el fetched result. Mantengo la API: array de
-      líneas con `time` (0 = no synced) y `text`. */
-  const lyricsLines = $state<{ time: number; text: string }[]>([]);
-  const hasLyrics = $derived(lyricsLines.length > 0);
+
+  // ─── Lyrics fetch ──────────────────────────────────────────────────────
+  // Cadena getLyricsBySongId (embedded ID3/.lrc) → LRCLib → getLyrics legacy.
+  // Detalle en LyricsService.svelte.ts; aquí solo el wiring + render.
+  let lyrics = $state<LyricsResult>(EMPTY_LYRICS);
+  let lastLyricsSongId = '';
+  $effect(() => {
+    const sId = song?.id ?? '';
+    const title = song?.title ?? '';
+    const artist = song?.artist ?? '';
+    if (!sId || sId === lastLyricsSongId) return;
+    lastLyricsSongId = sId;
+    lyrics = EMPTY_LYRICS;
+    void lyricsService.fetch(sId, title, artist).then((r) => {
+      // Race-guard: la canción puede haber cambiado mientras LRCLib/Navidrome
+      // resolvían (común en SmartMix con tracks cortos).
+      if (sId !== lastLyricsSongId) return;
+      lyrics = r;
+    });
+  });
+  const hasLyrics = $derived(lyrics.lines.length > 0);
+
+  /** Índice de la línea activa según `player.positionSec`. Solo aplica a
+      letras synced — para plain devolvemos null y todas las líneas se
+      renderizan al mismo nivel de opacidad. Mismo algoritmo que iOS
+      LyricsView.activeLineId (linea binaria-greedy: la última con
+      `time <= progress`). */
+  const activeLineId = $derived.by(() => {
+    if (!lyrics.isSynced) return null;
+    const t = player.positionSec;
+    let best: number | null = null;
+    for (const line of lyrics.lines) {
+      if (line.time <= t) best = line.id;
+      else break;
+    }
+    return best;
+  });
+
+  function lineOpacity(distance: number): number {
+    switch (distance) {
+      case 0: return 1.0;
+      case 1: return 0.48;
+      case 2: return 0.22;
+      case 3: return 0.1;
+      default: return 0.04;
+    }
+  }
+
+  /** Click en una línea synced → seek a su tiempo. Para plain no hay tiempo
+      asociado y el handler es no-op (el cursor queda default). */
+  function onLyricClick(line: { time: number }) {
+    if (!lyrics.isSynced || line.time < 0) return;
+    const dur = song?.durationSec ?? 0;
+    if (dur <= 0) return;
+    player.seek(line.time / dur);
+  }
+
+  // Auto-scroll a la línea activa. iOS pausa el auto-scroll 3s tras un drag
+  // del usuario para que pueda explorar. Replicamos.
+  let lyricsListEl: HTMLUListElement | undefined = $state();
+  let userIsScrolling = $state(false);
+  let scrollResumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scrollActiveIntoView() {
+    if (!lyricsListEl || activeLineId === null) return;
+    const el = lyricsListEl.querySelector<HTMLElement>(
+      `[data-line-id="${activeLineId}"]`
+    );
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  $effect(() => {
+    // Re-trigger scroll cuando cambia la línea activa Y el usuario no está
+    // explorando manualmente.
+    activeLineId; // dependency tracking
+    if (!userIsScrolling) {
+      // Pequeño delay para que el DOM termine de renderizar (LazyVStack-equiv).
+      setTimeout(scrollActiveIntoView, 50);
+    }
+  });
+
+  $effect(() => {
+    // Reset al cambiar de canción: vuelve al activo de la nueva canción
+    // sin esperar a que el lock se rompa.
+    lyrics; // dep
+    if (scrollResumeTimer) clearTimeout(scrollResumeTimer);
+    userIsScrolling = false;
+    setTimeout(scrollActiveIntoView, 60);
+  });
+
+  function onLyricsWheel() {
+    userIsScrolling = true;
+    if (scrollResumeTimer) clearTimeout(scrollResumeTimer);
+    scrollResumeTimer = setTimeout(() => {
+      userIsScrolling = false;
+    }, 3000);
+  }
 
   // ─── Color extraction ──────────────────────────────────────────────────
   let palette = $state<CoverPalette | null>(null);
@@ -572,16 +666,47 @@
           </div>
 
           {#if hasLyrics}
-            <ul class="np-lyrics-list np-no-drag">
-              {#each lyricsLines as line, i (i)}
-                <li class="np-lyric-line">{line.text}</li>
+            <ul
+              bind:this={lyricsListEl}
+              class="np-lyrics-list np-no-drag"
+              class:synced={lyrics.isSynced}
+              onwheel={onLyricsWheel}
+              ontouchmove={onLyricsWheel}
+            >
+              {#each lyrics.lines as line (line.id)}
+                {@const isActive = line.id === activeLineId}
+                {@const dist =
+                  activeLineId === null ? 0 : Math.abs(line.id - activeLineId)}
+                {@const clickable = lyrics.isSynced && line.time >= 0}
+                <li data-line-id={line.id} class="np-lyric-row">
+                  {#if clickable}
+                    <button
+                      type="button"
+                      class="np-lyric-line clickable"
+                      class:active={isActive}
+                      style:opacity={isActive ? 1 : lineOpacity(dist)}
+                      onclick={() => onLyricClick(line)}
+                    >
+                      {line.text}
+                    </button>
+                  {:else}
+                    <span
+                      class="np-lyric-line"
+                      class:active={isActive}
+                      style:opacity={isActive ? 1 : lineOpacity(dist)}
+                    >
+                      {line.text}
+                    </span>
+                  {/if}
+                </li>
               {/each}
             </ul>
           {:else}
             <div class="np-lyrics-empty">
               <p class="np-empty-title">Letras no disponibles</p>
               <p class="np-empty-sub">
-                Esta canción aún no tiene letras sincronizadas en LRCLib.
+                No hemos encontrado letras para esta canción ni en el archivo
+                ni en LRCLib.
               </p>
             </div>
           {/if}
@@ -1106,13 +1231,54 @@
             mask-image: linear-gradient(180deg,
       transparent 0%, #000 8%, #000 88%, transparent 100%);
   }
+  /* Wrapper <li> de cada línea — solo carries el data-line-id para scroll. */
+  .np-lyric-row {
+    display: block;
+  }
+  /* Línea de lyrics. Por defecto secondary weight + scale 0.96. La activa
+     se enciende a weight 700 + scale 1.0 + color #fff con transición suave.
+     Cuando es clickable (synced + time válido) la línea es un <button>;
+     si no, un <span>. CSS aplica a ambos sin distinción. */
   .np-lyric-line {
+    display: block;
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
+    font-family: inherit;
     font-size: var(--text-2xl);
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.35;
     letter-spacing: var(--tracking-display);
-    color: rgba(255, 255, 255, 0.45);
-    padding: var(--space-2) 0;
+    color: rgba(255, 255, 255, 0.92);
+    padding: var(--space-2) var(--space-1);
+    border-radius: var(--radius-sm);
+    transform: scale(0.96);
+    transform-origin: left center;
+    transition:
+      opacity 320ms var(--ease-ios-default),
+      transform 320ms var(--ease-ios-default),
+      color 320ms var(--ease-ios-default),
+      background 150ms var(--ease-ios-default);
+    will-change: opacity, transform;
+    user-select: text;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .np-lyric-line.active {
+    color: #fff;
+    font-weight: 700;
+    transform: scale(1);
+  }
+  .np-lyric-line.clickable {
+    cursor: pointer;
+  }
+  .np-lyric-line.clickable:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .np-lyric-line.clickable:focus-visible {
+    outline: none;
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
   }
   .np-lyrics-empty {
     display: grid;

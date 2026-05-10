@@ -26,13 +26,16 @@ import {
   ArtistInfoResponseSchema,
   TopSongsResponseSchema,
   Search3ResponseSchema,
+  LyricsBySongIdResponseSchema,
+  LyricsLegacyResponseSchema,
   type NavidromeAlbum,
   type NavidromeArtist,
   type NavidromePlaylist,
   type NavidromeAlbumInfo,
   type NavidromeArtistInfo,
   type NavidromeSong,
-  type Search3Result
+  type Search3Result,
+  type StructuredLyrics
 } from '$types/navidrome';
 import { credentials, type NavidromeCredentials } from '$stores/credentials.svelte';
 
@@ -478,6 +481,54 @@ export async function search3(
 // ============================================================================
 // URL builders — para componentes que necesitan src URLs (img, audio)
 // ============================================================================
+
+/**
+ * OpenSubsonic getLyricsBySongId — devuelve letras embedded en el archivo
+ * (ID3 USLT/SYLT) o letras de un .lrc al lado del archivo, ya parseadas
+ * server-side a structuredLyrics. Es el reemplazo moderno de getLyrics
+ * (que solo busca por title+artist en plugins externos como Last.fm).
+ *
+ * Retorna un array de variantes (típicamente 1: la principal). Cada variante
+ * tiene `synced: bool` y `line[]` con `start` (ms) si synced. Si el archivo
+ * no tiene letras, el array viene vacío.
+ *
+ * Mirror del path "embedded" del iOS LyricsService — allí AVAsset.metadata
+ * lee USLT del archivo cacheado/streaming. En web delegamos al server,
+ * que ya tiene acceso al fichero original.
+ */
+export async function getLyricsBySongId(songId: string): Promise<StructuredLyrics[]> {
+  const creds = requireCreds();
+  const data = await call(
+    creds,
+    'getLyricsBySongId',
+    { id: songId },
+    LyricsBySongIdResponseSchema
+  );
+  return data.lyricsList?.structuredLyrics ?? [];
+}
+
+/**
+ * Subsonic legacy getLyrics — busca letras por title+artist en el plugin
+ * Last.fm del server. Plain text único, no synced. Último fallback cuando
+ * el archivo no tiene letras embedded ni LRCLib responde.
+ *
+ * Devuelve string vacío si no hay letras (en lugar de tirar) — el caller
+ * decide si queda como "no lyrics" o sigue probando.
+ */
+export async function getLyricsByQuery(artist: string, title: string): Promise<string> {
+  const creds = requireCreds();
+  try {
+    const data = await call(
+      creds,
+      'getLyrics',
+      { artist, title },
+      LyricsLegacyResponseSchema
+    );
+    return data.lyrics?.value ?? '';
+  } catch {
+    return '';
+  }
+}
 
 /** URL del cover art (img.src). Tamaño en px. */
 export function getCoverArtUrl(coverArtId: string, size = 300): string {
