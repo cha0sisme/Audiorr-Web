@@ -346,24 +346,87 @@ export async function getUser(username: string) {
 }
 
 /**
- * Subsonic `updatePlaylist` — solo cambios de metadata (name/comment/public).
- * No exponemos songIdsToAdd / songIndexesToRemove aún (no hace falta para
- * el flow Editorial: ahí solo togglemos el comment con `[Editorial]`).
+ * Subsonic `updatePlaylist` — cambios de metadata (name/comment/public)
+ * y/o mutaciones del contenido (songIdsToAdd / songIndexesToRemove).
  *
- * Requiere admin O ser el owner. En el panel /housekeeping solo entran
- * admins, así que cualquier playlist es modificable.
+ * Requiere admin O ser el owner. Para playlists del usuario actual creadas
+ * desde la web (siempre con owner=current), el current user puede mutar
+ * sin restricción.
  */
 export async function updatePlaylist(
   playlistId: string,
-  options: { name?: string; comment?: string; public?: boolean }
+  options: {
+    name?: string;
+    comment?: string;
+    public?: boolean;
+    /** IDs de canciones a añadir al final de la playlist. */
+    songIdsToAdd?: string[];
+    /** Índices de canciones a quitar (Subsonic acepta el parámetro repetido). */
+    songIndexesToRemove?: number[];
+  }
 ): Promise<void> {
   const creds = requireCreds();
-  const params: Record<string, string | number | boolean> = { playlistId };
-  if (options.name !== undefined) params.name = options.name;
-  if (options.comment !== undefined) params.comment = options.comment;
-  if (options.public !== undefined) params.public = options.public;
-  // Subsonic devuelve solo status="ok" sin payload — usamos el envelope crudo.
-  await call(creds, 'updatePlaylist', params);
+  const params = buildAuthParams(creds);
+  params.set('playlistId', playlistId);
+  if (options.name !== undefined) params.set('name', options.name);
+  if (options.comment !== undefined) params.set('comment', options.comment);
+  if (options.public !== undefined) params.set('public', String(options.public));
+  for (const id of options.songIdsToAdd ?? []) params.append('songIdToAdd', id);
+  for (const idx of options.songIndexesToRemove ?? []) {
+    params.append('songIndexToRemove', String(idx));
+  }
+  // Subsonic devuelve solo status="ok" sin payload — fetch directo.
+  const url = `${creds.serverUrl}/rest/updatePlaylist.view?${params}`;
+  const res = await fetch(url, { credentials: 'omit' });
+  if (!res.ok) {
+    throw new NavidromeError(res.status, `updatePlaylist ${res.status}`);
+  }
+  const json = (await res.json()) as { 'subsonic-response'?: { status?: string; error?: { message?: string } } };
+  const env = json['subsonic-response'];
+  if (env?.status === 'failed') {
+    throw new NavidromeError(0, env.error?.message ?? 'updatePlaylist failed');
+  }
+}
+
+/**
+ * Subsonic `createPlaylist` — crea una playlist nueva con `name`. Opcionalmente
+ * acepta `songIds` para popularla en la creación. La playlist queda asociada
+ * al usuario que llama (owner=current). Devuelve la playlist completa con su
+ * id ya asignado (lo necesitamos para refrescar el cache local sin re-fetch
+ * pesado del server).
+ *
+ * Subsonic CREATE/REPLACE: si pasas `playlistId` reemplaza; si pasas `name`
+ * crea nueva. Aquí solo exponemos el path de creación. Para editar usar
+ * `updatePlaylist`.
+ */
+export async function createPlaylist(
+  name: string,
+  songIds: string[] = []
+): Promise<NavidromePlaylist> {
+  const creds = requireCreds();
+  const params = buildAuthParams(creds);
+  params.set('name', name);
+  for (const id of songIds) params.append('songId', id);
+  const url = `${creds.serverUrl}/rest/createPlaylist.view?${params}`;
+  const res = await fetch(url, { credentials: 'omit' });
+  if (!res.ok) {
+    throw new NavidromeError(res.status, `createPlaylist ${res.status}`);
+  }
+  const json = (await res.json()) as {
+    'subsonic-response'?: {
+      status?: string;
+      error?: { message?: string };
+      playlist?: NavidromePlaylist;
+    };
+  };
+  const env = json['subsonic-response'];
+  if (env?.status === 'failed') {
+    throw new NavidromeError(0, env.error?.message ?? 'createPlaylist failed');
+  }
+  if (!env?.playlist) {
+    throw new NavidromeError(0, 'createPlaylist: respuesta sin playlist');
+  }
+  return env.playlist;
 }
 
 export async function getPlaylist(id: string) {

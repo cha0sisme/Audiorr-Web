@@ -7,15 +7,21 @@
     title: string;
     /** Determina las columnas: album/playlist = 2-5 col flex, artist = 3-7 col más chico. */
     kind: Kind;
+    /** Snippet opcional renderizado a la derecha del título — para acciones
+        como "Crear playlist" en la vista de playlists del usuario. */
+    headerAction?: Snippet | undefined;
     children: Snippet;
   };
 
-  let { title, kind, children }: Props = $props();
+  let { title, kind, headerAction, children }: Props = $props();
 </script>
 
 <div class="page">
   <header>
     <h1>{title}</h1>
+    {#if headerAction}
+      <div class="actions">{@render headerAction()}</div>
+    {/if}
   </header>
 
   <div class="grid" data-kind={kind}>
@@ -30,12 +36,24 @@
     gap: var(--space-6);
   }
 
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
   header h1 {
     font-size: var(--text-3xl);
     font-weight: 700;
     letter-spacing: var(--tracking-display-lg);
     margin: 0;
     line-height: 1.1;
+  }
+  .actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
   }
 
   .grid {

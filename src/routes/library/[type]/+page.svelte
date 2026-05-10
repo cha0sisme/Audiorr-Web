@@ -20,6 +20,8 @@
     filterMyPlaylists
   } from '$utils/playlist-section-mappers';
   import { credentials } from '$stores/credentials.svelte';
+  import { createPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
+  import { Plus } from 'phosphor-svelte';
 
   type LibraryType =
     | 'recent'
@@ -141,7 +143,25 @@
   <title>{title} · Audiorr</title>
 </svelte:head>
 
-<SeeAllGrid {title} {kind}>
+{#snippet createPlaylistAction()}
+  <button
+    type="button"
+    class="lib-create-btn"
+    onclick={() => createPlaylistUI.open()}
+    aria-label="Crear nueva playlist"
+  >
+    <Plus size={14} weight="bold" />
+    <span>Crear playlist</span>
+  </button>
+{/snippet}
+
+<SeeAllGrid
+  {title}
+  {kind}
+  headerAction={type === 'playlists' || type === 'my-playlists'
+    ? createPlaylistAction
+    : undefined}
+>
   {#if kind === 'album'}
     {#if albumsQ.data}
       {#each albumsQ.data as a (a.id)}
@@ -187,3 +207,40 @@
     {/if}
   {/if}
 </SeeAllGrid>
+
+<style>
+  /* Botón "Crear playlist" — pill alineado a la derecha del título de
+     SeeAllGrid. Estilo cuasi-CTA: bg accent suave + border-radius full,
+     mismo lenguaje que los chips del Diagnostics y el botón "Crear" del
+     dialog. Compacto para no robar protagonismo al título. */
+  .lib-create-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      border-color var(--duration-fast) var(--ease-ios-default),
+      transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .lib-create-btn:hover {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .lib-create-btn:active {
+    transform: scale(0.97);
+    transition-duration: var(--duration-instant);
+  }
+  .lib-create-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+</style>

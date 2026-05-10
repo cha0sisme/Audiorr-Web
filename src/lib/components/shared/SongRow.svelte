@@ -7,6 +7,7 @@
   import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
   import { player, type PlaybackContext } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
+  import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
   import { formatTime } from '$utils/format';
   import type { SongListItem } from '$utils/navidrome-mappers';
 
@@ -63,7 +64,7 @@
         label: 'Añadir a Playlist',
         icon: ListPlus,
         action: () => {
-          // TODO: abrir picker de playlists
+          addToPlaylistUI.open([track.id]);
         }
       }
     ];

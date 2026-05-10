@@ -13,6 +13,8 @@
   import CanvasPanel from '$components/now-playing/CanvasPanel.svelte';
   import QueuePanel from '$components/now-playing/QueuePanel.svelte';
   import NowPlayingFullscreen from '$components/now-playing/NowPlayingFullscreen.svelte';
+  import AddToPlaylistSheet from '$components/shared/AddToPlaylistSheet.svelte';
+  import CreatePlaylistDialog from '$components/shared/CreatePlaylistDialog.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { queueUI } from '$stores/queue-ui.svelte';
@@ -407,6 +409,14 @@
         <NowPlayingFullscreen />
       {/if}
     </div>
+  {/if}
+
+  <!-- Sheets globales (mutaciones de playlists) — invocables desde
+       cualquier vista vía addToPlaylistUI / createPlaylistUI stores.
+       Solo se montan dentro del shell con auth (no /login). -->
+  {#if !isBareRoute && credentials.isConfigured}
+    <AddToPlaylistSheet />
+    <CreatePlaylistDialog />
   {/if}
 
   <!-- ToastViewport siempre montado, también en /login -->

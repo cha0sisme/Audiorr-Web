@@ -44,13 +44,14 @@
   import {
     CaretDown, DotsThree, MusicNote, Heart, SkipForward, SkipBack,
     Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast, MicrophoneStage,
-    Queue as QueueIcon, FilmStrip, Image as ImageIcon
+    Queue as QueueIcon, FilmStrip, Image as ImageIcon, ListPlus
   } from 'phosphor-svelte';
 
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { lyricsService, EMPTY_LYRICS, type LyricsResult } from '$services/LyricsService.svelte';
+  import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
@@ -525,6 +526,19 @@
               <button class="np-menu-item" role="menuitem" onclick={navigateArtist}>
                 <Broadcast size={16} weight="regular" />
                 <span>Buscar artista</span>
+              </button>
+            {/if}
+            {#if song?.id}
+              <button
+                class="np-menu-item"
+                role="menuitem"
+                onclick={() => {
+                  menuOpen = false;
+                  if (song?.id) addToPlaylistUI.open([song.id]);
+                }}
+              >
+                <ListPlus size={16} weight="regular" />
+                <span>Añadir a playlist</span>
               </button>
             {/if}
             <button class="np-menu-item" role="menuitem" onclick={() => { menuOpen = false; toggleQueueSheet(); }}>
