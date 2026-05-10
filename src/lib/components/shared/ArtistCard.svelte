@@ -43,7 +43,7 @@
   {...rest}
 >
   <div bind:this={coverEl} class="cover">
-    <CoverImage src={coverUrl} alt="" shape="circle">
+    <CoverImage src={coverUrl} alt="" shape="circle" priority="low" width={300} height={300}>
       {#snippet fallback()}
         <User size="100%" weight="regular" />
       {/snippet}

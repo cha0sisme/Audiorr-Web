@@ -145,7 +145,7 @@
 >
   <div class="cover-wrap">
     <div bind:this={coverEl} class="cover">
-      <CoverImage src={coverUrl} alt="">
+      <CoverImage src={coverUrl} alt="" priority="low" width={300} height={300}>
         {#snippet fallback()}
           <Queue size="100%" weight="regular" />
         {/snippet}

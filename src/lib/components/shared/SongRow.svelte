@@ -127,7 +127,7 @@
 >
   {#if showCover}
     <span class="cover-slot" aria-hidden="true">
-      <CoverImage src={coverUrl} alt="">
+      <CoverImage src={coverUrl} alt="" priority="low" width={120} height={120}>
         {#snippet fallback()}
           <MusicNote size="100%" weight="regular" />
         {/snippet}
