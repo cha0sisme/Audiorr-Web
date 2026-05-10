@@ -43,7 +43,7 @@
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import {
     CaretDown, DotsThree, MusicNote, Heart, SkipForward, SkipBack,
-    Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast, TextAlignLeft,
+    Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast, MicrophoneStage,
     Queue as QueueIcon, FilmStrip, Image as ImageIcon
   } from 'phosphor-svelte';
 
@@ -225,6 +225,13 @@
   }
 
   // ─── Mode switching helpers ─────────────────────────────────────────────
+  /** Cambio de modo con shared-element transition del cover. El hero (mode
+      cover) y el thumb del lyrics comparten `view-transition-name: 'np-cover'`
+      asignado dinámicamente solo al elemento del modo activo, así que el
+      browser captura OLD/NEW del MISMO name y morphea automáticamente: el
+      cover hace "zoom-out" cuando vas de cover→lyrics y "zoom-in" en el
+      camino inverso. Los browsers sin VT caen al cross-fade entre panes
+      (ya implementado vía opacity+scale+blur). */
   function setMode(m: 'cover' | 'canvas' | 'lyrics') {
     if (m === 'canvas' && !hasCanvas) return;
     if (m === 'lyrics' && !hasLyrics) {
@@ -232,7 +239,14 @@
       // un placeholder honesto. Mirror del UX iOS donde el botón está visible
       // pero abre una vista vacía si no hay sync.
     }
-    nowPlayingUI.setMode(m);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      document.startViewTransition(async () => {
+        nowPlayingUI.setMode(m);
+        await tick();
+      });
+    } else {
+      nowPlayingUI.setMode(m);
+    }
   }
   function toggleQueueSheet() {
     nowPlayingUI.toggleInnerQueue();
@@ -374,42 +388,28 @@
     onpointerup={onPointerUp}
     onpointercancel={onPointerUp}
   >
-    <!-- ============================================ BACKDROP -->
+    <!-- ============================================ BACKDROP
+         Cover blurreado + tinte SIEMPRE (incluido modo canvas). El video del
+         canvas vive en su propio pane centrado con aspect-ratio 9:16 nativo
+         — los Spotify Canvas son verticales para móvil, deformarlos a full-
+         bleed wide se ve mal. Continuidad visual entre modos: solo cambia el
+         contenido central, el fondo se mantiene tinted con la palette. -->
     <div class="np-backdrop" aria-hidden="true">
-      {#if mode === 'canvas' && hasCanvas && canvas.videoUrl}
-        <video
-          bind:this={videoEl}
-          class="np-bg-video"
-          src={canvas.videoUrl}
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="auto"
-          disablePictureInPicture
-        ></video>
-        <div class="np-canvas-gradient"></div>
-      {:else}
-        <!-- {#key} cross-fade del backdrop blur cuando cambia la canción —
-             mismo Dynamic-Island vibe que el hero artwork pero solo opacity
-             (el blur 45px del backdrop ya es masivo, otro blur extra sería
-             redundante y costoso). -->
-        {#key song?.id ?? heroCoverUrl ?? '__placeholder__'}
-          {#if heroCoverUrl}
-            <img
-              class="np-bg-cover"
-              src={heroCoverUrl}
-              alt=""
-              loading="eager"
-              decoding="async"
-              in:fade={{ duration: 360 }}
-              out:fade={{ duration: 280 }}
-            />
-          {/if}
-        {/key}
-        <div class="np-bg-tint"></div>
-        <div class="np-bg-scrim"></div>
-      {/if}
+      {#key song?.id ?? heroCoverUrl ?? '__placeholder__'}
+        {#if heroCoverUrl}
+          <img
+            class="np-bg-cover"
+            src={heroCoverUrl}
+            alt=""
+            loading="eager"
+            decoding="async"
+            in:fade={{ duration: 360 }}
+            out:fade={{ duration: 280 }}
+          />
+        {/if}
+      {/key}
+      <div class="np-bg-tint"></div>
+      <div class="np-bg-scrim"></div>
     </div>
 
     <!-- ============================================ TOP BAR -->
@@ -525,14 +525,41 @@
         </div>
       </section>
 
-      <!-- ─── Modo CANVAS ──────────────────────────────────────────────── -->
+      <!-- ─── Modo CANVAS ────────────────────────────────────────────────
+           Phone-frame centrado con aspect-ratio 9:16 nativo del Canvas (los
+           videos de Spotify Canvas están renderizados para vertical mobile).
+           Mostrarlo full-bleed deforma a wide. Aquí lo presentamos como un
+           "device portrait" elegante con border-radius xl + shadow profundo,
+           sobre el backdrop cover blurreado. -->
       <section
         class="np-pane np-pane-canvas"
         class:active={mode === 'canvas'}
         aria-hidden={mode !== 'canvas'}
       >
-        <!-- Vacío intencionalmente: el video vive en el backdrop. La info
-             del canvas mode se renderiza en la barra inferior glass. -->
+        {#if hasCanvas && canvas.videoUrl}
+          <div class="np-canvas-stage">
+            <video
+              bind:this={videoEl}
+              class="np-canvas-video"
+              src={canvas.videoUrl}
+              autoplay
+              muted
+              loop
+              playsinline
+              preload="auto"
+              disablePictureInPicture
+            ></video>
+          </div>
+          <div class="np-canvas-meta">
+            <h2 class="np-canvas-title">
+              <span>{song.title}</span>
+              {#if song.explicit}
+                <ExplicitBadge size="14px" />
+              {/if}
+            </h2>
+            <p class="np-canvas-artist">{song.artist}</p>
+          </div>
+        {/if}
       </section>
 
       <!-- ─── Modo LYRICS ──────────────────────────────────────────────── -->
@@ -543,10 +570,18 @@
         aria-hidden={mode !== 'lyrics'}
       >
         {#if splitLyrics}
-          <!-- Wide layout: artwork pequeño izq + lyrics derecha -->
+          <!-- Wide layout: artwork pequeño izq + lyrics derecha. El img
+               lleva el view-transition-name "np-cover" cuando este pane
+               está activo, así VT API morphea desde el hero al cambiar
+               de modo (zoom-out del cover hacia su nueva posición). -->
           <div class="np-split-art">
             {#if heroCoverUrl}
-              <img class="np-split-art-img" src={heroCoverUrl} alt="" />
+              <img
+                class="np-split-art-img"
+                src={heroCoverUrl}
+                alt=""
+                style:view-transition-name={mode === 'lyrics' ? 'np-cover' : undefined}
+              />
             {/if}
             <div class="np-split-info">
               <h2 class="np-split-title">
@@ -562,10 +597,17 @@
 
         <div class="np-lyrics-wrap" class:full={!splitLyrics}>
           {#if !splitLyrics}
-            <!-- Header compacto narrow: cover 48px + título + artista -->
+            <!-- Header compacto narrow: cover 48px + título + artista. El
+                 thumb hereda el VT name para que el morph zoom-out llegue
+                 a esta posición esquina superior izquierda. -->
             <div class="np-lyrics-header">
               {#if heroCoverUrl}
-                <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
+                <img
+                  class="np-lyrics-thumb"
+                  src={heroCoverUrl}
+                  alt=""
+                  style:view-transition-name={mode === 'lyrics' ? 'np-cover' : undefined}
+                />
               {/if}
               <div class="np-lyrics-meta">
                 <p class="np-lyrics-title">
@@ -598,21 +640,7 @@
     </main>
 
     <!-- ============================================ TRANSPORT (siempre) -->
-    <div class="np-transport np-no-drag" class:glass={mode === 'canvas'}>
-      {#if mode === 'canvas'}
-        <!-- En canvas mode, info se renderiza pegada a los controles para
-             agrupar todo en un único panel inferior glass. -->
-        <div class="np-canvas-info">
-          <h1 class="np-title">
-            <span class="np-title-name">{song.title}</span>
-            {#if song.explicit}
-              <ExplicitBadge size="18px" />
-            {/if}
-          </h1>
-          <p class="np-artist">{song.artist}</p>
-        </div>
-      {/if}
-
+    <div class="np-transport np-no-drag">
       <!-- Scrubber + AutoMix subscript (mirror iOS ProgressBarView).
            El indicador AutoMix vive PEGADO al scrubber, justo debajo del
            track, igual que en MiniPlayer .hint. Altura reservada (12px)
@@ -712,7 +740,7 @@
             aria-pressed={mode === 'lyrics'}
             onclick={() => setMode(mode === 'lyrics' ? 'cover' : 'lyrics')}
           >
-            <TextAlignLeft size={20} weight="regular" />
+            <MicrophoneStage size={20} weight="fill" />
           </button>
           {#if hasCanvas}
             <button
@@ -867,27 +895,9 @@
         rgba(0,0,0,0.7) 100%
       );
   }
-  /* Canvas video y su gradient (mirror canvasGradient iOS líneas 305-318). */
-  .np-bg-video {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .np-canvas-gradient {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      180deg,
-      rgba(0,0,0,0.18) 0%,
-      rgba(0,0,0,0) 18%,
-      rgba(0,0,0,0) 35%,
-      rgba(0,0,0,0.55) 60%,
-      rgba(0,0,0,0.88) 78%,
-      rgba(0,0,0,0.97) 100%
-    );
-  }
+  /* (Antes había aquí np-bg-video + np-canvas-gradient para video full-bleed.
+     Eliminados — el canvas vive ahora como phone-frame centrado en el pane
+     dedicado, no como backdrop deformado.) */
 
   /* ============================================================================
      TOP BAR
@@ -1229,23 +1239,58 @@
     margin: 0 auto;
     box-sizing: border-box;
   }
-  /* Cuando estamos en canvas mode, el transport se vuelve panel glass para
-     destacar sobre el video. */
-  .np-transport.glass {
-    max-width: none;
+  /* Canvas mode pane: phone-frame centrado + meta debajo. */
+  .np-pane-canvas {
+    grid-template-rows: 1fr auto;
+    align-content: center;
+    gap: var(--space-5);
+    width: 100%;
+  }
+  /* "Phone frame": aspect 9:16 (formato nativo Spotify Canvas). El height
+     manda; width sale de aspect-ratio. min(72vh, 640px) para que entre en
+     screens razonables. Border-radius xl + shadow profundo simula la
+     sensación de "device portrait" flotando sobre el backdrop. */
+  .np-canvas-stage {
+    height: min(72vh, 640px);
+    aspect-ratio: 9 / 16;
+    max-width: calc(100vw - 80px);
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    background: #000;
+    box-shadow:
+      0 28px 80px rgba(0, 0, 0, 0.65),
+      0 8px 28px rgba(0, 0, 0, 0.4);
+    isolation: isolate;
+  }
+  .np-canvas-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  /* Meta del canvas mode: título + artista debajo del phone-frame. Tipografía
+     algo menor que el hero del modo cover (queremos protagonismo del video). */
+  .np-canvas-meta {
+    text-align: center;
+    max-width: min(560px, calc(100vw - 80px));
+  }
+  .np-canvas-title {
     margin: 0;
-    background: rgba(0, 0, 0, 0.32);
-    backdrop-filter: blur(28px) saturate(1.6);
-    -webkit-backdrop-filter: blur(28px) saturate(1.6);
-  }
-  .np-canvas-info {
-    margin-bottom: var(--space-2);
-  }
-  .np-canvas-info .np-title {
+    font-family: var(--font-sans);
     font-size: var(--text-xl);
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: var(--tracking-display);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  .np-canvas-info .np-artist {
+  .np-canvas-artist {
+    margin: 4px 0 0;
     font-size: var(--text-base);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.65);
   }
 
   .np-scrubber-row {
@@ -1553,5 +1598,17 @@
     .np-play {
       transition-duration: 0ms !important;
     }
+  }
+
+  /* View Transitions API — el cover comparte view-transition-name "np-cover"
+     entre Hero (mode cover) y Thumb (mode lyrics). La default duration es
+     250ms; aquí la subimos a 480ms con la curva iOS para que el zoom-out se
+     sienta natural y premium (mismo timing que el morph de SmartMix). Solo
+     aplica al elemento "np-cover", el resto del fullscreen sigue con la
+     cross-fade default que el browser provee. */
+  :global(::view-transition-old(np-cover)),
+  :global(::view-transition-new(np-cover)) {
+    animation-duration: 480ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
   }
 </style>
