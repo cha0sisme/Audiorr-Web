@@ -21,7 +21,7 @@
   import { cubicOut, cubicIn } from 'svelte/easing';
   import {
     ArrowsClockwise, MagnifyingGlass, X, Star, Diamond,
-    ChartBar, CheckCircle
+    ChartBar, CheckCircle, ChatTeardrop
   } from 'phosphor-svelte';
   import { diagnosticsService } from '$services/DiagnosticsService.svelte';
   import { connectService } from '$services/ConnectService.svelte';
@@ -82,18 +82,51 @@
   let lastSeenCreatedTick = 0;
   let lastSeenUpdatedTick = 0;
   let lastSeenDeletedTick = 0;
-  /** Set de ids que entraron via socket post-firstFetch — usados para
-      aplicar `.is-new` con animación premium en el render. La clase se
-      retira tras 700ms para que la animación corra una vez. */
-  let newRowIds = $state(new Set<string>());
+  /** Sets de ids con efecto temporal: cada uno corresponde a una animación
+      premium distinta. Recreamos el Set con `new Set(...)` tras mutate
+      para forzar la reactividad de Svelte (los Sets no son trackeados
+      profundamente).
 
-  function markRowAsNew(id: string) {
-    newRowIds.add(id);
-    newRowIds = new Set(newRowIds);
+      - `newRowIds` → row entera (.is-new): blur + scale + slide + tinte.
+      - `justRatedIds` → estrella del rating (.just-rated): pop spring +
+        halo radial accent.
+      - `justCommentedIds` → badge de comentario (.just-flashed): pop
+        spring + halo radial. */
+  let newRowIds = $state(new Set<string>());
+  let justRatedIds = $state(new Set<string>());
+  let justCommentedIds = $state(new Set<string>());
+
+  function flash(setRef: Set<string>, id: string, ms: number, update: (s: Set<string>) => void) {
+    setRef.add(id);
+    update(new Set(setRef));
     setTimeout(() => {
-      newRowIds.delete(id);
-      newRowIds = new Set(newRowIds);
-    }, 700);
+      setRef.delete(id);
+      update(new Set(setRef));
+    }, ms);
+  }
+  function markRowAsNew(id: string) {
+    flash(newRowIds, id, 700, (s) => (newRowIds = s));
+  }
+  function flashRated(id: string) {
+    flash(justRatedIds, id, 1000, (s) => (justRatedIds = s));
+  }
+  function flashCommented(id: string) {
+    flash(justCommentedIds, id, 1000, (s) => (justCommentedIds = s));
+  }
+
+  /** Detecta transiciones de estado entre el record anterior y el nuevo
+      para disparar las animaciones correspondientes. Usado tanto desde el
+      $effect del bus como desde commitRating local. */
+  function detectAndFlash(prev: TransitionRecord | undefined, next: TransitionRecord) {
+    if (!prev) return;
+    if (prev.userRating == null && next.userRating != null) {
+      flashRated(next.id);
+    }
+    const prevHasComment = (prev.userComment ?? '').length > 0;
+    const nextHasComment = (next.userComment ?? '').length > 0;
+    if (!prevHasComment && nextHasComment) {
+      flashCommented(next.id);
+    }
   }
 
   $effect(() => {
@@ -112,10 +145,16 @@
     const tick = diagnosticsBus.tick;
     if (!updated || tick === lastSeenUpdatedTick) return;
     lastSeenUpdatedTick = tick;
+    const prev = records.find((r) => r.id === updated.id);
     records = records.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
     if (selectedRecord?.id === updated.id) {
       selectedRecord = { ...selectedRecord, ...updated };
     }
+    // Si el record ya estaba en local (echo de nuestra propia mutación),
+    // prev refleja el estado post-update y detectAndFlash no dispara nada.
+    // Si viene de fuera (otra sesión iOS/web), prev es el estado anterior
+    // y dispara las animaciones correspondientes.
+    detectAndFlash(prev, updated);
   });
 
   $effect(() => {
@@ -408,6 +447,7 @@
     id: string,
     payload: { userRating?: number | null; userComment?: string | null }
   ) {
+    const prev = records.find((r) => r.id === id);
     try {
       const updated = await diagnosticsService.rateTransition(id, payload);
       // Replace in records y selectedRecord para reflejar cambios.
@@ -415,6 +455,10 @@
       if (selectedRecord?.id === id) {
         selectedRecord = { ...selectedRecord, ...updated };
       }
+      // Animaciones premium: si esta es la primera valoración o el primer
+      // comentario, dispara los efectos. detectAndFlash es idempotente —
+      // si el echo socket llega después con prev ya actualizado, no re-anima.
+      detectAndFlash(prev, updated);
     } catch (err) {
       console.error('[diagnostics] rate failed', err);
     }
@@ -633,7 +677,10 @@
                       class:is-new={newRowIds.has(r.id)}
                       onclick={() => (selectedRecord = r)}
                     >
-                      <span class="dg-row-rating">
+                      <span
+                        class="dg-row-rating"
+                        class:just-rated={justRatedIds.has(r.id)}
+                      >
                         {#if r.userRating != null}
                           <Star size={14} weight="fill" />
                           <span>{r.userRating}</span>
@@ -645,6 +692,16 @@
                         <span class="dg-row-title">{r.fromTitle}</span>
                         <span class="dg-row-arrow">→</span>
                         <span class="dg-row-title">{r.toTitle}</span>
+                        {#if (r.userComment ?? '').length > 0}
+                          <span
+                            class="dg-comment-badge"
+                            class:just-flashed={justCommentedIds.has(r.id)}
+                            title="Esta transición tiene comentario"
+                            aria-label="Tiene comentario"
+                          >
+                            <ChatTeardrop size={11} weight="fill" />
+                          </span>
+                        {/if}
                       </span>
                       <span
                         class="dg-row-type"
@@ -1056,6 +1113,7 @@
     .dg-row.is-new { animation: none; }
   }
   .dg-row-rating {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1066,6 +1124,81 @@
   }
   .dg-row-rating-empty {
     color: var(--text-quaternary);
+  }
+  /* ─── Animación premium "just rated" ──────────────────────────────────
+     Cuando el director valora una transición por primera vez (sea desde
+     web o sincronizado vía socket desde iOS), la estrella hace un pop
+     spring + halo radial accent que se desvanece. iOS Apple-Music style.
+     Halo se monta como ::after absolute alrededor de la rating box.
+     prefers-reduced-motion neutraliza ambos. */
+  .dg-row-rating.just-rated > :global(svg) {
+    animation: dg-rate-pop 700ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform-origin: center;
+  }
+  .dg-row-rating.just-rated::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: var(--radius-full);
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--accent) 55%, transparent) 0%,
+      transparent 65%
+    );
+    pointer-events: none;
+    animation: dg-rate-halo 800ms var(--ease-out-expo);
+  }
+  @keyframes dg-rate-pop {
+    0%   { transform: scale(0.55) rotate(-12deg); }
+    45%  { transform: scale(1.45) rotate(8deg); }
+    75%  { transform: scale(0.96) rotate(-2deg); }
+    100% { transform: scale(1) rotate(0); }
+  }
+  @keyframes dg-rate-halo {
+    0%   { transform: scale(0.5); opacity: 0.95; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dg-row-rating.just-rated > :global(svg) { animation: none; }
+    .dg-row-rating.just-rated::after { animation: none; opacity: 0; }
+  }
+
+  /* ─── Badge "tiene comentario" + animación "just commented" ──────────
+     Bocadillo Phosphor ChatTeardrop pequeño junto al título. Color accent
+     muted permanente para indicar "hay comentario aquí". Cuando el comment
+     se acaba de añadir, anima con el mismo lenguaje pop+halo que el rating
+     (continuidad visual). */
+  .dg-comment-badge {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .dg-comment-badge.just-flashed {
+    animation: dg-rate-pop 700ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform-origin: center;
+  }
+  .dg-comment-badge.just-flashed::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    border-radius: var(--radius-full);
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--accent) 55%, transparent) 0%,
+      transparent 65%
+    );
+    pointer-events: none;
+    animation: dg-rate-halo 800ms var(--ease-out-expo);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dg-comment-badge.just-flashed { animation: none; }
+    .dg-comment-badge.just-flashed::after { animation: none; opacity: 0; }
   }
   .dg-row-titles {
     display: inline-flex;
