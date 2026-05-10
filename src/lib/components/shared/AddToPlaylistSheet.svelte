@@ -1,20 +1,24 @@
 <script lang="ts">
   /**
-   * AddToPlaylistSheet — sheet derecho mirror del iOS AddToPlaylistView
-   * (NowPlaying/AddToPlaylistView.swift).
+   * AddToPlaylistSheet — modal centrado mirror iOS sheet de
+   * AddToPlaylistView (NowPlaying/AddToPlaylistView.swift). Apple lo
+   * presenta como sheet flotante con presentationDetents medium/large,
+   * NUNCA como side panel (los side panels son chrome persistente:
+   * Queue, DevicePicker). Aquí lo replicamos como modal centrado, scrim
+   * oscuro, animación scale-in — mismo lenguaje que el CreatePlaylistDialog
+   * con el que comparte el flow.
    *
    * Carga `getPlaylists()` y filtra con `filterMyPlaylists()` — solo
    * playlists privadas del usuario actual (sin daily mix, smart playlist,
    * editorial, ni Spotify-synced). Click en una row → updatePlaylist con
-   * `songIdsToAdd` → checkmark verde + auto-dismiss tras 1s.
+   * `songIdsToAdd` → checkmark verde + auto-dismiss tras 900ms.
    *
    * Botón "Crear nueva playlist" arriba abre el dialog de creación
    * pasando los songIds actuales — flow encadenado: el director quería
    * añadir una canción a algo que aún no existe, lo crea de paso con
    * la canción ya dentro.
    */
-  import { fade } from 'svelte/transition';
-  import { cubicOut, cubicIn } from 'svelte/easing';
+  import { fade, scale } from 'svelte/transition';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     X, MusicNote, Plus, CheckCircle, Queue as QueueIcon
@@ -88,28 +92,6 @@
     addToPlaylistUI.close();
   }
 
-  // Custom transition slide-in derecho (mismo patrón QueuePanel).
-  function sheetIn(_n: HTMLElement) {
-    return {
-      duration: 320,
-      easing: cubicOut,
-      css: (t: number) => `
-        transform: translateX(${(1 - t) * 100}%);
-        opacity: ${t};
-      `
-    };
-  }
-  function sheetOut(_n: HTMLElement) {
-    return {
-      duration: 240,
-      easing: cubicIn,
-      css: (t: number) => `
-        transform: translateX(${(1 - t) * 100}%);
-        opacity: ${t};
-      `
-    };
-  }
-
   // ESC cierra
   $effect(() => {
     if (!addToPlaylistUI.isOpen) return;
@@ -135,10 +117,21 @@
 </script>
 
 {#if addToPlaylistUI.isOpen}
-  <div in:fade={{ duration: 160 }} out:fade={{ duration: 120 }}>
-    <button type="button" class="atp-scrim" aria-label="Cerrar" onclick={close}></button>
-  </div>
-  <aside in:sheetIn out:sheetOut class="atp-panel" aria-label="Añadir a playlist">
+  <div
+    class="atp-scrim"
+    role="presentation"
+    onclick={close}
+    in:fade={{ duration: 160 }}
+    out:fade={{ duration: 120 }}
+  ></div>
+  <div
+    class="atp-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Añadir a playlist"
+    in:scale={{ duration: 240, start: 0.94, opacity: 0 }}
+    out:scale={{ duration: 160, start: 0.96, opacity: 0 }}
+  >
     <header class="atp-header">
       <h2 class="atp-title">Añadir a playlist</h2>
       <button type="button" class="atp-close" aria-label="Cerrar" onclick={close}>
@@ -202,36 +195,44 @@
         </ul>
       {/if}
     </div>
-  </aside>
+  </div>
 {/if}
 
 <style>
+  /* Scrim oscuro full-viewport — click cierra. Mismo token --scrim que el
+     resto de modales (CreatePlaylistDialog comparte). */
   .atp-scrim {
     position: fixed;
     inset: 0;
     background: var(--scrim);
-    border: none;
+    z-index: var(--z-sticky);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    z-index: var(--z-sticky);
   }
 
-  .atp-panel {
+  /* Modal centrado — patrón Apple iOS sheet (presentationDetents medium).
+     Width contenido (no ancho fijo de panel), max-height 70vh para que
+     no monopolice la pantalla. Border-radius lg + shadow profunda + bg
+     surface elevated (no glass — los modales centrados son sólidos en
+     iOS para que el contenido se lea limpio sin compita con el fondo). */
+  .atp-modal {
     position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: min(420px, 100vw);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     z-index: calc(var(--z-sticky) + 1);
+    width: min(440px, calc(100vw - 32px));
+    max-height: min(70vh, 720px);
     display: flex;
     flex-direction: column;
-    background: var(--bg-glass-solid);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border-left: 1px solid var(--border-subtle);
-    box-shadow: -8px 0 32px var(--shadow-color-lg);
-    isolation: isolate;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      0 20px 60px var(--shadow-color-xl),
+      0 6px 20px var(--shadow-color-lg);
     color: var(--text-primary);
+    overflow: hidden;
   }
 
   .atp-header {

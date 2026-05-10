@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
-  import { ArrowsClockwise, CaretRight } from 'phosphor-svelte';
+  import { ArrowsClockwise, CaretRight, Plus } from 'phosphor-svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
@@ -28,6 +28,7 @@
     isSmartPlaylistName
   } from '$utils/playlist-section-mappers';
   import { credentials } from '$stores/credentials.svelte';
+  import { createPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
   import type { PlaylistSection } from '$types/backend';
   import type { NavidromePlaylist } from '$types/navidrome';
 
@@ -388,7 +389,20 @@
 
 <div class="library">
   <header class="header">
-    <h1>Tu librería</h1>
+    <div class="title-row">
+      <h1>Tu librería</h1>
+      {#if currentTab === 'playlists'}
+        <button
+          type="button"
+          class="lib-create-btn"
+          onclick={() => createPlaylistUI.open()}
+          aria-label="Crear nueva playlist"
+        >
+          <Plus size={14} weight="bold" />
+          <span>Crear playlist</span>
+        </button>
+      {/if}
+    </div>
     <div class="controls">
       <SegmentedControl
         items={TABS}
@@ -576,12 +590,52 @@
   }
 
   .header { display: grid; gap: var(--space-4); }
+  /* Title row: h1 + acción contextual (Crear playlist en tab Playlists). */
+  .title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
   .header h1 {
     font-size: var(--text-3xl);
     font-weight: 700;
     letter-spacing: var(--tracking-display-lg);
     margin: 0;
     line-height: 1.1;
+  }
+  /* Botón "Crear playlist" — pill accent, mismo lenguaje que el de
+     library/[type] page header. Solo visible cuando tab === 'playlists'. */
+  .lib-create-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      border-color var(--duration-fast) var(--ease-ios-default),
+      transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .lib-create-btn:hover {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .lib-create-btn:active {
+    transform: scale(0.97);
+    transition-duration: var(--duration-instant);
+  }
+  .lib-create-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
   .controls {
     display: flex;
