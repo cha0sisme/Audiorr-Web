@@ -4,6 +4,7 @@
     MusicNote, Heart, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple,
     Broadcast
   } from 'phosphor-svelte';
+  import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import { formatTime } from '$utils/format';
   import WaveText from '$components/shared/WaveText.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
@@ -97,6 +98,7 @@
 <div
   class="player"
   class:compact
+  class:remote={player.isRemote}
   role="region"
   aria-label="Reproductor"
   onmouseenter={() => onHoverChange(true)}
@@ -104,7 +106,8 @@
 >
   <!-- Hairline progress: visible siempre como anchor visual durante el morph.
        En expanded queda detrás de la UI (no se ve), en compact es la única
-       indicación de progreso. -->
+       indicación de progreso. En remote, el fill cambia a verde para dar
+       continuidad con el dot del DevicePicker y el texto del status. -->
   <div class="hairline" aria-hidden="true">
     <div class="hairline-fill" style:width="{pct}%"></div>
   </div>
@@ -120,13 +123,17 @@
         onclick={onExpand}
         style:view-transition-name={!compact ? 'np-cover' : undefined}
       >
-        {#if coverUrl}
-          <img src={coverUrl} alt="" loading="lazy" decoding="async" />
-        {:else}
-          <div class="cover-placeholder" aria-hidden="true">
-            <MusicNote size="55%" weight="regular" />
+        {#key coverUrl ?? '__placeholder__'}
+          <div class="cover-img-wrap" in:coverBlurIn out:coverBlurOut>
+            {#if coverUrl}
+              <img src={coverUrl} alt="" loading="lazy" decoding="async" />
+            {:else}
+              <div class="cover-placeholder" aria-hidden="true">
+                <MusicNote size="55%" weight="regular" />
+              </div>
+            {/if}
           </div>
-        {/if}
+        {/key}
       </button>
       <div class="meta">
         <p class="title">
@@ -290,13 +297,17 @@
       onclick={onExpand}
       style:view-transition-name={compact ? 'np-cover' : undefined}
     >
-      {#if coverUrl}
-        <img src={coverUrl} alt="" loading="lazy" decoding="async" />
-      {:else}
-        <div class="cover-placeholder" aria-hidden="true">
-          <MusicNote size="55%" weight="regular" />
+      {#key coverUrl ?? '__placeholder__'}
+        <div class="cover-img-wrap" in:coverBlurIn out:coverBlurOut>
+          {#if coverUrl}
+            <img src={coverUrl} alt="" loading="lazy" decoding="async" />
+          {:else}
+            <div class="cover-placeholder" aria-hidden="true">
+              <MusicNote size="55%" weight="regular" />
+            </div>
+          {/if}
         </div>
-      {/if}
+      {/key}
     </button>
 
     <div class="meta-compact">
@@ -407,7 +418,20 @@
   .hairline-fill {
     height: 100%;
     background: var(--text-primary);
-    transition: width var(--duration-fast) var(--ease-linear);
+    transition:
+      width var(--duration-fast) var(--ease-linear),
+      background var(--duration-normal) var(--ease-ios-default);
+  }
+  /* Remote mode: hairline + scrubber fill toman el verde del status-success
+     (mismo verde que el dot del DevicePicker activo). Coherencia visual. */
+  .player.remote .hairline-fill,
+  .player.remote .scrubber .track-fill {
+    background: var(--player-progress-fill-remote);
+  }
+  /* En remote, hover del scrubber NO sobrescribe el verde con accent — el
+     usuario sigue viendo el indicador remoto durante el seek. */
+  .player.remote .scrubber:hover .track-fill {
+    background: var(--player-progress-fill-remote);
   }
 
   /* ==========================================================================
@@ -652,6 +676,16 @@
   .cover-btn:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring), var(--shadow-sm);
+  }
+  /* cover-img-wrap: contenedor absoluto para que OLD y NEW puedan coexistir
+     superpuestos durante el cross-fade del cambio de canción ({#key coverUrl}).
+     Sin position: absolute, ambos ocuparían altura y el botón "saltaría" durante
+     la transición. */
+  .cover-img-wrap {
+    position: absolute;
+    inset: 0;
+    display: block;
+    will-change: opacity, filter, transform;
   }
   .cover img,
   .cover-placeholder {

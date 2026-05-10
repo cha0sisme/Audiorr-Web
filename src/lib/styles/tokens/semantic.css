@@ -256,6 +256,11 @@
   --player-progress-bg: var(--gray-a4);
   --player-progress-fill: var(--text-primary);
   --player-progress-buffer: var(--gray-a7);
+  /* Variante remote: cuando el playback se está espejando desde otro device
+     (Audiorr Connect), el scrubber adopta el verde del status-success para
+     dar continuidad visual con el dot del DeviceButton y el texto
+     "Reproduciendo en {device}". Patrón Apple Music con AirPlay. */
+  --player-progress-fill-remote: var(--status-success);
 
   /* Now playing indicator — el dot/bars que aparecen al lado de la canción
      que está sonando, en listas y mini player. Accent (brand) por convención. */

@@ -40,6 +40,7 @@
   import { fade } from 'svelte/transition';
   import { cubicOut, cubicIn } from 'svelte/easing';
   import { goto } from '$app/navigation';
+  import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import {
     CaretDown, DotsThree, MusicNote, Heart, SkipForward, SkipBack,
     Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast, TextAlignLeft,
@@ -68,10 +69,19 @@
   const song = $derived(player.currentSong);
   const qmCurrent = $derived(queueManager.currentSong);
   /** Cover en alta resolución para el hero. Preferimos el coverArt id raw
-      del queueManager (1200px → re-tile vía getCoverArtUrl). Si no está,
-      fallback a `song.coverUrl` (que viene a 300px del PersistableSong). */
+      del queueManager (1200px → re-tile vía getCoverArtUrl) — pero SOLO si
+      el id del queueManager coincide con el song actual del player.
+
+      En modo remoto el `player.currentSong` refleja la canción del device
+      que controla el playback, mientras que `queueManager.currentSong` se
+      queda con la última pista local (que ya no suena). Sin este check, el
+      hero quedaba con el cover stale del local mientras escuchamos remoto.
+      Con el check, caemos a `song.coverUrl` que viene del remote payload
+      a 600px y siempre está al día. */
   const heroCoverUrl = $derived.by(() => {
-    if (qmCurrent?.coverArt) return getCoverArtUrl(qmCurrent.coverArt, 1200);
+    if (qmCurrent?.coverArt && qmCurrent.id === song?.id) {
+      return getCoverArtUrl(qmCurrent.coverArt, 1200);
+    }
     return song?.coverUrl ?? null;
   });
 
@@ -349,6 +359,7 @@
   <div
     class="np-root"
     class:dragging
+    class:remote={player.isRemote}
     class:has-canvas-active={hasCanvas && mode === 'canvas'}
     style:--np-drag-offset="{dragOffset}px"
     style:--np-tint={tintGradient}
@@ -379,15 +390,23 @@
         ></video>
         <div class="np-canvas-gradient"></div>
       {:else}
-        {#if heroCoverUrl}
-          <img
-            class="np-bg-cover"
-            src={heroCoverUrl}
-            alt=""
-            loading="eager"
-            decoding="async"
-          />
-        {/if}
+        <!-- {#key} cross-fade del backdrop blur cuando cambia la canción —
+             mismo Dynamic-Island vibe que el hero artwork pero solo opacity
+             (el blur 45px del backdrop ya es masivo, otro blur extra sería
+             redundante y costoso). -->
+        {#key heroCoverUrl ?? '__placeholder__'}
+          {#if heroCoverUrl}
+            <img
+              class="np-bg-cover"
+              src={heroCoverUrl}
+              alt=""
+              loading="eager"
+              decoding="async"
+              in:fade={{ duration: 360 }}
+              out:fade={{ duration: 280 }}
+            />
+          {/if}
+        {/key}
         <div class="np-bg-tint"></div>
         <div class="np-bg-scrim"></div>
       {/if}
@@ -450,22 +469,34 @@
         class:active={mode === 'cover'}
         aria-hidden={mode !== 'cover'}
       >
-        <div class="np-artwork-wrap">
-          {#if heroCoverUrl}
-            <img
-              class="np-artwork"
-              class:paused={!player.isPlaying}
-              src={heroCoverUrl}
-              alt=""
-              loading="eager"
-              decoding="async"
-              style:view-transition-name={mode === 'cover' ? 'np-cover' : undefined}
-            />
-          {:else}
-            <div class="np-artwork np-artwork-placeholder">
-              <MusicNote size="40%" weight="regular" />
+        <!-- Artwork hero: el wrapper lleva el view-transition-name (no la
+             img directamente) para que cuando coverUrl cambia y se haga el
+             cross-fade entre OLD y NEW, no haya dos elementos con el mismo
+             VT name simultáneamente. El wrapper también soporta el efecto
+             paused (scale 0.88) sin pelearse con el blur de la transition
+             interna — el scale lo aplica el wrapper, el blur el cover-img. -->
+        <div
+          class="np-artwork np-artwork-frame"
+          class:paused={!player.isPlaying}
+          style:view-transition-name={mode === 'cover' ? 'np-cover' : undefined}
+        >
+          {#key heroCoverUrl ?? '__placeholder__'}
+            <div class="np-artwork-img" in:coverBlurIn out:coverBlurOut>
+              {#if heroCoverUrl}
+                <img
+                  class="np-artwork-bitmap"
+                  src={heroCoverUrl}
+                  alt=""
+                  loading="eager"
+                  decoding="async"
+                />
+              {:else}
+                <div class="np-artwork-bitmap np-artwork-placeholder">
+                  <MusicNote size="40%" weight="regular" />
+                </div>
+              {/if}
             </div>
-          {/if}
+          {/key}
         </div>
 
         <div class="np-info">
@@ -942,27 +973,39 @@
     gap: var(--space-6);
     width: 100%;
   }
-  .np-artwork-wrap {
-    display: grid;
-    place-items: center;
-    width: 100%;
-    min-height: 0;
-  }
   /* Cover hero: hasta 480px o 60vh (lo más restrictivo). aspect-ratio 1:1
-     garantizado. scale(0.88) cuando paused (mirror iOS animation .spring). */
-  .np-artwork {
+     garantizado. scale(0.88) cuando paused (mirror iOS animation .spring).
+
+     Estructura: frame (tamaño + shadow + radius + scale paused) → img-wrap
+     (absolute fill + transitions in/out por {#key coverUrl}) → bitmap (img
+     o placeholder). Esta separación permite que el cambio de canción haga
+     blur cross-fade INTERNO sin pelearse con el scale paused del frame. */
+  .np-artwork-frame {
+    position: relative;
     width: min(60vh, 480px, calc(100vw - 80px));
     aspect-ratio: 1 / 1;
-    object-fit: cover;
     border-radius: var(--radius-lg);
+    overflow: hidden;
     box-shadow:
       0 20px 60px rgba(0, 0, 0, 0.55),
       0 8px 20px rgba(0, 0, 0, 0.35);
     transform: scale(1);
     transition: transform 550ms var(--ease-spring-soft);
   }
-  .np-artwork.paused {
+  .np-artwork-frame.paused {
     transform: scale(0.88);
+  }
+  .np-artwork-img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    will-change: opacity, filter, transform;
+  }
+  .np-artwork-bitmap {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .np-artwork-placeholder {
     background: rgba(255, 255, 255, 0.06);
@@ -1235,7 +1278,15 @@
     height: 100%;
     background: rgba(255, 255, 255, 0.92);
     border-radius: inherit;
-    transition: width 80ms linear;
+    transition:
+      width 80ms linear,
+      background var(--duration-normal) var(--ease-ios-default);
+  }
+  /* Remote mode: el scrubber de playback (NO el de volumen) cambia a verde
+     status-success, en sintonía con el dot/banner "Reproduciendo en {device}".
+     El selector excluye .np-vol-slider para que el volumen siga siendo blanco. */
+  .np-root.remote .np-scrubber-row .np-track-fill {
+    background: var(--status-success);
   }
   .np-scrubber:hover .np-track {
     height: 6px;
