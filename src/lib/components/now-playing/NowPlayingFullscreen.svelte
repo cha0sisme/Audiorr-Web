@@ -92,11 +92,6 @@
   const lyricsLines = $state<{ time: number; text: string }[]>([]);
   const hasLyrics = $derived(lyricsLines.length > 0);
 
-  /** Wide screen detector — split layout en mode lyrics. */
-  let viewportW = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
-  const isWide = $derived(viewportW >= 1280);
-  const splitLyrics = $derived(mode === 'lyrics' && isWide);
-
   // ─── Color extraction ──────────────────────────────────────────────────
   let palette = $state<CoverPalette | null>(null);
   let lastPaletteSongId = '';
@@ -156,15 +151,6 @@
       document.body.style.overflow = prevOverflow;
     };
   });
-  $effect(() => {
-    if (typeof window === 'undefined') return;
-    function onResize() {
-      viewportW = window.innerWidth;
-    }
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  });
-
   // ─── Video element para canvas mode ─────────────────────────────────────
   let videoEl: HTMLVideoElement | undefined = $state();
   $effect(() => {
@@ -457,7 +443,7 @@
     </header>
 
     <!-- ============================================ CONTENT (modo activo) -->
-    <main class="np-content" class:split={splitLyrics}>
+    <main class="np-content">
       <!-- ─── Modo COVER ────────────────────────────────────────────────── -->
       <section
         class="np-pane np-pane-cover"
@@ -557,49 +543,33 @@
         {/if}
       </section>
 
-      <!-- ─── Modo LYRICS ──────────────────────────────────────────────── -->
+      <!-- ─── Modo LYRICS ────────────────────────────────────────────────
+           Mirror exacto de iOS NowPlayingViewerView.lyricsHeader (líneas
+           392-437): cover pequeño 48px arriba a la izquierda + título +
+           artista, lyrics centradas debajo. SIN split en wide screens —
+           es la misma vista en cualquier viewport (Apple Music desktop
+           y mobile usan el mismo layout). -->
       <section
         class="np-pane np-pane-lyrics"
         class:active={mode === 'lyrics'}
-        class:split={splitLyrics}
         aria-hidden={mode !== 'lyrics'}
       >
-        {#if splitLyrics}
-          <!-- Wide layout: artwork pequeño izq + lyrics derecha. -->
-          <div class="np-split-art">
+        <div class="np-lyrics-wrap">
+          <!-- Header iOS-style: cover small esquina sup-izq + meta -->
+          <div class="np-lyrics-header">
             {#if heroCoverUrl}
-              <img class="np-split-art-img" src={heroCoverUrl} alt="" />
+              <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
             {/if}
-            <div class="np-split-info">
-              <h2 class="np-split-title">
+            <div class="np-lyrics-meta">
+              <p class="np-lyrics-title">
                 <span>{song.title}</span>
                 {#if song.explicit}
-                  <ExplicitBadge size="14px" />
+                  <ExplicitBadge size="13px" />
                 {/if}
-              </h2>
-              <p class="np-split-artist">{song.artist}</p>
+              </p>
+              <p class="np-lyrics-artist">{song.artist}</p>
             </div>
           </div>
-        {/if}
-
-        <div class="np-lyrics-wrap" class:full={!splitLyrics}>
-          {#if !splitLyrics}
-            <!-- Header compacto narrow: cover 48px + título + artista. -->
-            <div class="np-lyrics-header">
-              {#if heroCoverUrl}
-                <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
-              {/if}
-              <div class="np-lyrics-meta">
-                <p class="np-lyrics-title">
-                  <span>{song.title}</span>
-                  {#if song.explicit}
-                    <ExplicitBadge size="13px" />
-                  {/if}
-                </p>
-                <p class="np-lyrics-artist">{song.artist}</p>
-              </div>
-            </div>
-          {/if}
 
           {#if hasLyrics}
             <ul class="np-lyrics-list np-no-drag">
@@ -1067,7 +1037,10 @@
   }
 
   /* ============================================================================
-     LYRICS MODE
+     LYRICS MODE — Mirror iOS NowPlayingViewerView.lyricsHeader (líneas 392-437):
+     header con cover small esquina sup-izq + título/artista, lyrics centradas
+     debajo. Layout único independiente del viewport — Apple Music desktop y
+     mobile usan exactamente la misma estructura en este modo.
      ============================================================================ */
   /* Override del .np-pane place-items: lyrics necesita stretch para que el
      scroll del wrap llene la altura disponible. */
@@ -1076,54 +1049,13 @@
     width: 100%;
     height: 100%;
   }
-  .np-pane-lyrics.split {
-    grid-template-columns: 320px minmax(0, 1fr);
-    gap: var(--space-8);
-    align-items: center;
-  }
-  .np-split-art {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    align-items: center;
-    justify-content: center;
-  }
-  .np-split-art-img {
-    width: 320px;
-    height: 320px;
-    object-fit: cover;
-    border-radius: var(--radius-lg);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  }
-  .np-split-info {
-    text-align: center;
-    width: 320px;
-  }
-  .np-split-title {
-    margin: 0;
-    font-size: var(--text-lg);
-    font-weight: 700;
-    color: #fff;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    line-height: 1.2;
-  }
-  .np-split-artist {
-    margin: 4px 0 0;
-    font-size: var(--text-sm);
-    color: rgba(255, 255, 255, 0.6);
-  }
-
   .np-lyrics-wrap {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-5);
     height: 100%;
     min-height: 0;
     width: 100%;
-  }
-  .np-lyrics-wrap.full {
     max-width: 720px;
     margin: 0 auto;
   }
