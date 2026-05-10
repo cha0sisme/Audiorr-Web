@@ -89,6 +89,31 @@ class CanvasStore {
     this.visible = true;
     this.dismissedSongId = null;
   }
+
+  /** Snapshot de visible al entrar en un overlay (ej. NowPlaying fullscreen)
+      para poder restaurar el state al cerrarlo. NO toca dismissedSongId — la
+      idea es ocultar el panel del shell sin perder la información de que
+      el canvas SIGUE disponible para esta canción. */
+  private wasVisibleBeforeOverlay = false;
+
+  /** Llamar al abrir un overlay (NowPlaying viewer) que necesita el real
+      estate completo. Oculta el panel canvas del shell sin marcar la
+      canción como dismissed (mantenemos `videoUrl` intacto para que el
+      botón canvas del MiniPlayer siga habilitado al volver). */
+  suspendForOverlay(): void {
+    this.wasVisibleBeforeOverlay = this.visible;
+    this.visible = false;
+  }
+
+  /** Llamar al cerrar el overlay. Si el panel estaba visible antes y
+      seguimos teniendo videoUrl, lo volvemos a abrir — el usuario recupera
+      exactamente lo que tenía. */
+  resumeAfterOverlay(): void {
+    if (this.wasVisibleBeforeOverlay && this.videoUrl) {
+      this.visible = true;
+    }
+    this.wasVisibleBeforeOverlay = false;
+  }
 }
 
 export const canvas = new CanvasStore();

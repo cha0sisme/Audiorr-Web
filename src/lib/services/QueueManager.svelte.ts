@@ -225,6 +225,16 @@ class QueueManager {
    * Reemplaza la queue actual con `songs`, comienza en `startIndex` y arranca
    * playback. Si shuffle está activo, pinea el track de startIndex al slot
    * startIndex y baraja el resto.
+   *
+   * Routing remote-aware: si estamos viendo un device remoto (`player.isRemote`)
+   * cuando el usuario pulsa play, mandamos la nueva cola al device origen vía
+   * `playPlaylist` remote_command — el receiver recoge la cola, reproduce el
+   * track elegido y nos lo retransmite por broadcast. Sin esto, el play del
+   * SongList rompía el modo remoto silenciosamente (audio local + sin update
+   * en el otro device).
+   *
+   * Caso casteando (activeDeviceId set, !isRemote): no rutea aquí — el
+   * `broadcastPlaybackState` ya replica el cambio de cola al receiver.
    */
   play(
     songs: NavidromeSong[],
@@ -233,7 +243,57 @@ class QueueManager {
   ): void {
     if (songs.length === 0) return;
     const persistable = songs.map(navidromeSongToPersistable);
-    this.playPersistable(persistable, startIndex, options);
+
+    // Fast path: caso 100% local (cero overhead de microtask).
+    if (!player.isRemote) {
+      this.playPersistable(persistable, startIndex, options);
+      return;
+    }
+
+    // Viendo remoto: mandar la nueva cola al device origen vía playPlaylist.
+    // Reflejamos también la cola localmente para que MiniPlayer/QueuePanel
+    // muestren lo que está sonando — el playback_state_update echo terminará
+    // de sincronizar (positionSec, isPlaying).
+    const target = startIndex >= 0 && startIndex < persistable.length
+      ? persistable[startIndex]
+      : persistable[0];
+    if (!target) return;
+
+    this.queue = [...persistable];
+    this.originalQueue = [...persistable];
+    this.currentIndex = startIndex;
+    this.playbackMode = options.playbackMode ?? 'normal';
+    this.contextUri = options.contextUri ?? null;
+    this.persistState();
+
+    // Optimismo UI: reflejar la canción en el player store para que el
+    // MiniPlayer cambie al instante (el cover blur in/out ahora dispara).
+    player.currentSong = {
+      id: target.id,
+      title: target.title,
+      artist: target.artist,
+      ...(target.album !== undefined && { album: target.album }),
+      ...(target.coverArt && { coverUrl: getCoverArtUrl(target.coverArt, 300) }),
+      durationSec: target.duration,
+      explicit: target.explicitStatus === 'explicit'
+    };
+
+    void import('$services/ConnectService.svelte').then(({ connectService }) => {
+      const remoteSongs = persistable.map((s) => ({
+        id: s.id,
+        title: s.title,
+        artist: s.artist,
+        album: s.album ?? '',
+        ...(s.albumId ? { albumId: s.albumId } : {}),
+        coverArt: s.coverArt ?? '',
+        duration: s.duration ?? 0
+      }));
+      // Sin targetDeviceId → broadcast a todos los devices del usuario;
+      // el handler del device origen ejecuta `playPlaylist` y el resto
+      // (incluido nosotros como controller) lo ignora gracias al filtro
+      // `if (player.isRemote) return` del handleRemoteCommand.
+      connectService.sendRemotePlaylist(remoteSongs, startIndex);
+    });
   }
 
   /** Variante que acepta PersistableSong (ej. cuando ya las construimos a

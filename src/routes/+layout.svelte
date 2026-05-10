@@ -277,7 +277,11 @@
       overlay (cubicOut 380ms) sigue dando sensación de modal. */
   function openNowPlaying(initialMode: 'cover' | 'canvas' | 'lyrics' = 'cover') {
     if (queueUI.isOpen) queueUI.close();
-    if (canvas.visible) canvas.dismiss(player.currentSong?.id ?? null);
+    // Canvas: no usamos `dismiss` aquí porque marca la canción como dismissed
+    // y el botón canvas del MiniPlayer queda inactivo al volver. El effect
+    // que watcha `nowPlayingUI.isOpen` (más abajo) llama `suspendForOverlay`
+    // y `resumeAfterOverlay` para que el panel se oculte/restaure sin perder
+    // estado.
     if (typeof document !== 'undefined' && 'startViewTransition' in document) {
       document.startViewTransition(async () => {
         nowPlayingUI.open(initialMode);
@@ -287,6 +291,20 @@
       nowPlayingUI.open(initialMode);
     }
   }
+
+  /** Mutex Canvas ↔ NowPlaying overlay. El viewer fullscreen usa el real
+      estate completo, así que el panel canvas del shell se suspende mientras
+      el NP esté abierto y se restaura al cerrarlo. NO usa `dismiss` para
+      preservar `dismissedSongId` y `videoUrl` — el botón Canvas del
+      MiniPlayer queda habilitado al volver. Mirror del comportamiento de
+      Apple Music con el mini player vs Now Playing fullscreen. */
+  $effect(() => {
+    if (nowPlayingUI.isOpen) {
+      canvas.suspendForOverlay();
+    } else {
+      canvas.resumeAfterOverlay();
+    }
+  });
 
   // Custom transition iOS — slide desde la derecha + fade.
   // Enter usa cubicOut (deceleración suave), exit cubicIn (acelera al salir).

@@ -44,7 +44,11 @@ class PlayerStore {
   positionSec = $state(0);
   /** Volumen 0..1 — el setter propaga al AudioEngine.setVolume() para que el
       slider del MiniPlayer funcione realmente. Sin ese bridge, mover el
-      slider solo cambia el state visual sin tocar el masterGain. */
+      slider solo cambia el state visual sin tocar el masterGain.
+
+      En modo remoto: el setter manda `setVolume` al hub en vez de tocar el
+      audio local (no estamos reproduciendo aquí — el audio sale del otro
+      device). El slider sigue actualizándose visualmente para feedback. */
   private _volume = $state(1);
   get volume() {
     return this._volume;
@@ -52,7 +56,12 @@ class PlayerStore {
   set volume(v: number) {
     const clamped = Math.max(0, Math.min(1, v));
     this._volume = clamped;
-    if (browser) audioEngine.setVolume(clamped);
+    if (!browser) return;
+    if (this.isRemote) {
+      void this.sendRemote('setVolume', clamped);
+    } else {
+      audioEngine.setVolume(clamped);
+    }
   }
   /** De dónde se inició el playback (album X, playlist Y, etc). */
   context = $state<PlaybackContext>(null);
@@ -227,13 +236,32 @@ class PlayerStore {
     return this.contextUri === `smartmix:${playlistId}`;
   }
 
+  /** Helper privado — manda un remote_command al hub vía ConnectService.
+      Lazy import para evitar el ciclo player ↔ connectService. */
+  private async sendRemote(action: string, value?: unknown): Promise<void> {
+    const { connectService } = await import('$services/ConnectService.svelte');
+    connectService.sendRemoteCommand(action, value);
+  }
+
   toggle() {
+    if (this.isRemote) {
+      // Optimismo: actualizamos el state local para que el botón cambie al
+      // toque; el playback_state_update echo desde el remoto reconcilia.
+      this.isPlaying = !this.isPlaying;
+      void this.sendRemote('togglePlayPause');
+      return;
+    }
     if (!this.currentSong) return;
     if (this.isPlaying) this.pause();
     else this.play();
   }
 
   play() {
+    if (this.isRemote) {
+      this.isPlaying = true;
+      void this.sendRemote('play');
+      return;
+    }
     if (!this.currentSong) return;
     // Cold-restore path: tenemos metadata pero el AudioEngine nunca recibió
     // un load(). audioEngine.play() retornaría silencioso (chainA.hasMedia
@@ -250,17 +278,30 @@ class PlayerStore {
   }
 
   pause() {
+    if (this.isRemote) {
+      this.isPlaying = false;
+      void this.sendRemote('pause');
+      return;
+    }
     this.isPlaying = false;
     if (browser) audioEngine.pause();
   }
 
   next() {
+    if (this.isRemote) {
+      void this.sendRemote('next');
+      return;
+    }
     void import('$services/QueueManager.svelte').then(({ queueManager }) => {
       queueManager.skipNext();
     });
   }
 
   previous() {
+    if (this.isRemote) {
+      void this.sendRemote('previous');
+      return;
+    }
     void import('$services/QueueManager.svelte').then(({ queueManager }) => {
       queueManager.skipPrevious();
     });
@@ -274,6 +315,10 @@ class PlayerStore {
     if (dur <= 0) return;
     const sec = p * dur;
     this.positionSec = sec;
+    if (this.isRemote) {
+      void this.sendRemote('seekTo', sec);
+      return;
+    }
     if (browser) audioEngine.seek(sec);
   }
 }
