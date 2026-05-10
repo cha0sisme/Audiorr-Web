@@ -225,13 +225,15 @@
   }
 
   // ─── Mode switching helpers ─────────────────────────────────────────────
-  /** Cambio de modo con shared-element transition del cover. El hero (mode
-      cover) y el thumb del lyrics comparten `view-transition-name: 'np-cover'`
-      asignado dinámicamente solo al elemento del modo activo, así que el
-      browser captura OLD/NEW del MISMO name y morphea automáticamente: el
-      cover hace "zoom-out" cuando vas de cover→lyrics y "zoom-in" en el
-      camino inverso. Los browsers sin VT caen al cross-fade entre panes
-      (ya implementado vía opacity+scale+blur). */
+  /** Cambio de modo. El cross-fade entre panes (.np-pane.active) ya da el
+      switch suave con opacity + scale + blur (ver `--morph-*` tokens).
+
+      NOTA: probamos un shared-element morph del cover via View Transitions
+      API (name "np-cover" entre hero y thumb), pero VT toma snapshot del
+      documento entero — durante la animación se filtraba el contenido del
+      shell debajo (la playlist o vista que hubiera abierta) por el "agujero"
+      del cover extraído. Para hacerlo correctamente sin contaminar haría
+      falta FLIP manual midiendo getBoundingClientRect. Diferido. */
   function setMode(m: 'cover' | 'canvas' | 'lyrics') {
     if (m === 'canvas' && !hasCanvas) return;
     if (m === 'lyrics' && !hasLyrics) {
@@ -239,14 +241,7 @@
       // un placeholder honesto. Mirror del UX iOS donde el botón está visible
       // pero abre una vista vacía si no hay sync.
     }
-    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-      document.startViewTransition(async () => {
-        nowPlayingUI.setMode(m);
-        await tick();
-      });
-    } else {
-      nowPlayingUI.setMode(m);
-    }
+    nowPlayingUI.setMode(m);
   }
   function toggleQueueSheet() {
     nowPlayingUI.toggleInnerQueue();
@@ -570,18 +565,10 @@
         aria-hidden={mode !== 'lyrics'}
       >
         {#if splitLyrics}
-          <!-- Wide layout: artwork pequeño izq + lyrics derecha. El img
-               lleva el view-transition-name "np-cover" cuando este pane
-               está activo, así VT API morphea desde el hero al cambiar
-               de modo (zoom-out del cover hacia su nueva posición). -->
+          <!-- Wide layout: artwork pequeño izq + lyrics derecha. -->
           <div class="np-split-art">
             {#if heroCoverUrl}
-              <img
-                class="np-split-art-img"
-                src={heroCoverUrl}
-                alt=""
-                style:view-transition-name={mode === 'lyrics' ? 'np-cover' : undefined}
-              />
+              <img class="np-split-art-img" src={heroCoverUrl} alt="" />
             {/if}
             <div class="np-split-info">
               <h2 class="np-split-title">
@@ -597,17 +584,10 @@
 
         <div class="np-lyrics-wrap" class:full={!splitLyrics}>
           {#if !splitLyrics}
-            <!-- Header compacto narrow: cover 48px + título + artista. El
-                 thumb hereda el VT name para que el morph zoom-out llegue
-                 a esta posición esquina superior izquierda. -->
+            <!-- Header compacto narrow: cover 48px + título + artista. -->
             <div class="np-lyrics-header">
               {#if heroCoverUrl}
-                <img
-                  class="np-lyrics-thumb"
-                  src={heroCoverUrl}
-                  alt=""
-                  style:view-transition-name={mode === 'lyrics' ? 'np-cover' : undefined}
-                />
+                <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
               {/if}
               <div class="np-lyrics-meta">
                 <p class="np-lyrics-title">

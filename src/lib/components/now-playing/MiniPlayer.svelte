@@ -51,6 +51,12 @@
         el player expandido mientras el ratón está dentro del contenedor (la
         zona de hover sigue al tamaño del contenedor: compact ≠ expanded). */
     onHoverChange?: ((hovering: boolean) => void) | undefined;
+    /** Notificación cuando el DevicePicker se abre/cierra. El layout lo usa
+        para mantener el player expandido mientras el picker esté abierto —
+        sin esto, mover el ratón al popover (que vive en top-layer fuera del
+        contenedor del player) cuenta como hover-leave y el player se contrae
+        dejando el picker huérfano. */
+    onDevicePickerOpenChange?: ((open: boolean) => void) | undefined;
   };
 
   let {
@@ -76,7 +82,8 @@
     canvasOpen = false,
     canvasAvailable = false,
     onExpand = () => {},
-    onHoverChange = () => {}
+    onHoverChange = () => {},
+    onDevicePickerOpenChange = () => {}
   }: Props = $props();
 
   const pct = $derived(Math.max(0, Math.min(1, progress)) * 100);
@@ -223,7 +230,10 @@
           aria-haspopup="menu"
           aria-expanded={devicePickerOpen}
           tabindex={compact ? -1 : 0}
-          onclick={() => (devicePickerOpen = !devicePickerOpen)}
+          onclick={() => {
+            devicePickerOpen = !devicePickerOpen;
+            onDevicePickerOpenChange(devicePickerOpen);
+          }}
         >
           <Broadcast size={18} weight="regular" />
           {#if deviceActive}
@@ -233,7 +243,10 @@
         <DevicePicker
           open={devicePickerOpen}
           triggerEl={deviceBtnEl}
-          onClose={() => (devicePickerOpen = false)}
+          onClose={() => {
+            devicePickerOpen = false;
+            onDevicePickerOpenChange(false);
+          }}
         />
       {/if}
       <button

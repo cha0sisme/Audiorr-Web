@@ -113,7 +113,12 @@
   let mainEl = $state<HTMLElement | undefined>();
   let isAtTop = $state(true);
   let isHoveringPlayer = $state(false);
-  const isPlayerCompact = $derived(!isAtTop && !isHoveringPlayer);
+  /** True mientras el DevicePicker del MiniPlayer está abierto. El picker
+      vive en top-layer (popover API) fuera del contenedor del player; mover
+      el ratón hacia él cuenta como hover-leave y contraería el player con
+      el picker huérfano. Lo bloqueamos como otra señal de "mantén expanded". */
+  let isDevicePickerOpen = $state(false);
+  const isPlayerCompact = $derived(!isAtTop && !isHoveringPlayer && !isDevicePickerOpen);
 
   // Context para virtualización: cualquier componente descendiente puede pedir
   // el scroll element actual (ej. VirtualGrid) sin prop drilling. Devolvemos
@@ -378,6 +383,7 @@
             onCanvas={toggleCanvasPanel}
             onExpand={() => openNowPlaying('cover')}
             onHoverChange={(h) => (isHoveringPlayer = h)}
+            onDevicePickerOpenChange={(o) => (isDevicePickerOpen = o)}
           />
         </div>
       {/if}
