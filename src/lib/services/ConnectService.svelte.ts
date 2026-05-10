@@ -23,6 +23,7 @@ import { credentials } from '$stores/credentials.svelte';
 import { backendService } from '$services/BackendService.svelte';
 import { player, type Song } from '$stores/player.svelte';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
+import { getCoverArtUrl } from '$services/NavidromeService';
 
 // ============================================================================
 // Types
@@ -258,11 +259,13 @@ class ConnectService {
     const url = buildStreamUrl(player.currentSong.id);
     if (!url) return;
 
+    // Mismo criterio que `broadcastPlaybackState`: el receptor LAN espera
+    // un id Subsonic, no una URL completa con nuestras credenciales.
     const metadata = {
       title: player.currentSong.title,
       artist: player.currentSong.artist,
       album: player.currentSong.album ?? '',
-      coverArt: player.currentSong.coverUrl ?? '',
+      coverArt: this.currentSongCoverArtId(),
       duration: player.currentSong.durationSec ?? 0
     };
 
@@ -324,11 +327,20 @@ class ConnectService {
     const cur = player.currentSong;
     if (!cur) return;
 
+    // CRITICO: el broadcast lleva el `coverArt` como id Subsonic crudo (ej.
+    // "al-1234"), NO la URL completa. El receptor (iOS / otra pestaña web)
+    // construye la URL con sus propias credenciales — mandar la nuestra
+    // (con token+salt + dominio Navidrome) leakea auth y rompe en clientes
+    // que tienen otro Navidrome configurado. `player.currentSong.coverUrl`
+    // ya es la URL final, así que tomamos el id desde el QueueManager
+    // (PersistableSong.coverArt). Si el módulo aún no está cargado en cache,
+    // fallback a string vacío y el próximo broadcast lo tendrá.
+    const coverArtId = this.currentSongCoverArtId();
     const metadata = {
       title: cur.title,
       artist: cur.artist,
       album: cur.album ?? '',
-      coverArt: cur.coverUrl ?? '',
+      coverArt: coverArtId,
       duration: cur.durationSec ?? 0
     };
 
@@ -558,12 +570,23 @@ class ConnectService {
     const meta = dict.metadata ?? {};
     const remoteName = this.knownDevices.get(remoteDeviceId) ?? remoteDeviceId;
 
+    // El emisor manda el coverArt como id Subsonic crudo. Lo resolvemos a
+    // URL completa con NUESTRAS credenciales — Navidrome es el mismo backend
+    // (LAN homelab) pero los tokens son per-user. Si nos llega ya como URL
+    // (cliente legacy), la usamos tal cual.
+    const coverArtRaw = meta.coverArt ?? '';
+    const coverUrl = coverArtRaw
+      ? coverArtRaw.includes('://')
+        ? coverArtRaw
+        : getCoverArtUrl(coverArtRaw, 600)
+      : undefined;
+
     const remoteSong: Song = {
       id: trackId,
       title: meta.title ?? '',
       artist: meta.artist ?? '',
       album: meta.album ?? '',
-      coverUrl: undefined, // se resolvería con NavidromeService.getCoverArtUrl si quisiéramos
+      coverUrl,
       durationSec: meta.duration ?? 0
     };
 
@@ -770,6 +793,19 @@ class ConnectService {
       tick en resolver, después es instantáneo. */
   private cachedQueueModule: typeof import('$services/QueueManager.svelte') | null =
     null;
+
+  /** Lee el coverArt id (Subsonic raw, ej. "al-1234") de la canción actual.
+      Si el módulo aún no se cargó, devuelve '' y el próximo broadcast lo
+      tendrá. Mismo lifecycle que `snapshotQueueForBroadcast`. */
+  private currentSongCoverArtId(): string {
+    if (!this.cachedQueueModule) {
+      void import('$services/QueueManager.svelte').then((m) => {
+        this.cachedQueueModule = m;
+      });
+      return '';
+    }
+    return this.cachedQueueModule.queueManager.currentSong?.coverArt ?? '';
+  }
 
   private snapshotQueueForBroadcast(): unknown[] {
     // Si todavía no resolvimos el módulo, kickoff y devolvemos []. El próximo
