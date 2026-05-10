@@ -5,16 +5,18 @@
   import { onNavigate, afterNavigate, beforeNavigate, goto } from '$app/navigation';
   import { cubicOut, cubicIn } from 'svelte/easing';
 
-  import { setContext } from 'svelte';
+  import { setContext, tick } from 'svelte';
   import { page } from '$app/state';
   import Sidebar from '$components/shell/Sidebar.svelte';
   import ToastViewport from '$components/shared/ToastViewport.svelte';
   import MiniPlayer from '$components/now-playing/MiniPlayer.svelte';
   import CanvasPanel from '$components/now-playing/CanvasPanel.svelte';
   import QueuePanel from '$components/now-playing/QueuePanel.svelte';
+  import NowPlayingFullscreen from '$components/now-playing/NowPlayingFullscreen.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { queueUI } from '$stores/queue-ui.svelte';
+  import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -261,6 +263,31 @@
     canvas.restore();
   }
 
+  /** Abrir el Now Playing fullscreen. Cierra shell panels (queue/canvas) para
+      que el viewer cubra todo limpio. El canvas mode del fullscreen reutiliza
+      `canvas.videoUrl` así que el video sigue disponible — solo cerramos el
+      panel del shell, no el state.
+
+      Acepta el modo inicial — default 'cover'.
+
+      View Transitions: si el browser soporta `document.startViewTransition`,
+      envolvemos el toggle para que el cover del MiniPlayer (view-transition-
+      name "np-cover") morphee al artwork hero del fullscreen (mismo name) —
+      efecto premium iOS-grade. Fallback browser sin VT: el slide-up del
+      overlay (cubicOut 380ms) sigue dando sensación de modal. */
+  function openNowPlaying(initialMode: 'cover' | 'canvas' | 'lyrics' = 'cover') {
+    if (queueUI.isOpen) queueUI.close();
+    if (canvas.visible) canvas.dismiss(player.currentSong?.id ?? null);
+    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+      document.startViewTransition(async () => {
+        nowPlayingUI.open(initialMode);
+        await tick();
+      });
+    } else {
+      nowPlayingUI.open(initialMode);
+    }
+  }
+
   // Custom transition iOS — slide desde la derecha + fade.
   // Enter usa cubicOut (deceleración suave), exit cubicIn (acelera al salir).
   function panelEnter(_node: HTMLElement) {
@@ -304,7 +331,7 @@
         {@render children()}
       </main>
 
-      {#if player.hasSong && player.currentSong}
+      {#if player.hasSong && player.currentSong && !nowPlayingUI.isOpen}
         <div
           class="player-dock"
           class:side-panel-open={canvasShown || queueUI.isOpen}
@@ -330,6 +357,7 @@
             onSeek={(p) => player.seek(p)}
             onQueue={toggleQueuePanel}
             onCanvas={toggleCanvasPanel}
+            onExpand={() => openNowPlaying('cover')}
             onHoverChange={(h) => (isHoveringPlayer = h)}
           />
         </div>
@@ -346,6 +374,12 @@
         <div in:panelEnter out:panelExit>
           <QueuePanel />
         </div>
+      {/if}
+
+      <!-- Now Playing fullscreen — overlay sobre todo. Su propio mount/unmount
+           con transición slide-up + scale. Cubre sidebar, main, panels. -->
+      {#if player.currentSong}
+        <NowPlayingFullscreen />
       {/if}
     </div>
   {/if}

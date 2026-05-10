@@ -39,6 +39,9 @@
     /** Disabled en el botón de canvas si no hay video disponible para la
         canción actual (no se ha podido fetchear o no existe). */
     canvasAvailable?: boolean;
+    /** Abre el Now Playing fullscreen viewer. Disparado por el botón
+        ArrowsOutSimple en expanded y por click en el cover. */
+    onExpand?: (() => void) | undefined;
     /** Notificación de hover sobre el player. El layout lo usa para mantener
         el player expandido mientras el ratón está dentro del contenedor (la
         zona de hover sigue al tamaño del contenedor: compact ≠ expanded). */
@@ -66,6 +69,7 @@
     onCanvas = () => {},
     canvasOpen = false,
     canvasAvailable = false,
+    onExpand = () => {},
     onHoverChange = () => {}
   }: Props = $props();
 
@@ -108,7 +112,14 @@
   <!-- ============================================ EXPANDED LAYER -->
   <div class="layer expanded-layer" aria-hidden={compact}>
     <div class="track">
-      <div class="cover cover-expanded">
+      <button
+        type="button"
+        class="cover cover-expanded cover-btn"
+        aria-label="Abrir reproducción a pantalla completa"
+        tabindex={compact ? -1 : 0}
+        onclick={onExpand}
+        style:view-transition-name={!compact ? 'np-cover' : undefined}
+      >
         {#if coverUrl}
           <img src={coverUrl} alt="" loading="lazy" decoding="async" />
         {:else}
@@ -116,7 +127,7 @@
             <MusicNote size="55%" weight="regular" />
           </div>
         {/if}
-      </div>
+      </button>
       <div class="meta">
         <p class="title">
           <span class="title-name">{title}</span>
@@ -257,7 +268,13 @@
           </div>
         </div>
       </div>
-      <button type="button" class="icon-btn" aria-label="Pantalla completa" tabindex={compact ? -1 : 0}>
+      <button
+        type="button"
+        class="icon-btn"
+        aria-label="Pantalla completa"
+        tabindex={compact ? -1 : 0}
+        onclick={onExpand}
+      >
         <ArrowsOutSimple size={18} weight="regular" />
       </button>
     </div>
@@ -265,7 +282,14 @@
 
   <!-- ============================================ COMPACT LAYER -->
   <div class="layer compact-layer" aria-hidden={!compact}>
-    <div class="cover cover-compact">
+    <button
+      type="button"
+      class="cover cover-compact cover-btn"
+      aria-label="Abrir reproducción a pantalla completa"
+      tabindex={compact ? 0 : -1}
+      onclick={onExpand}
+      style:view-transition-name={compact ? 'np-cover' : undefined}
+    >
       {#if coverUrl}
         <img src={coverUrl} alt="" loading="lazy" decoding="async" />
       {:else}
@@ -273,7 +297,7 @@
           <MusicNote size="55%" weight="regular" />
         </div>
       {/if}
-    </div>
+    </button>
 
     <div class="meta-compact">
       <p class="title">
@@ -596,6 +620,8 @@
 
   /* ==========================================================================
      COVER (compartido entre layouts; tamaño se setea por modificador)
+     Es un <button> ahora (clickable → expand a fullscreen). Reset de border/
+     padding y cursor pointer; el resto sigue siendo el cover de siempre.
      ========================================================================== */
   .cover {
     border-radius: var(--radius-sm);
@@ -605,7 +631,27 @@
     flex-shrink: 0;
     transition:
       width var(--duration-normal) var(--ease-ios-default),
-      height var(--duration-normal) var(--ease-ios-default);
+      height var(--duration-normal) var(--ease-ios-default),
+      transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .cover-btn {
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: inherit;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+  }
+  .cover-btn:hover {
+    transform: scale(1.04);
+  }
+  .cover-btn:active {
+    transform: scale(0.96);
+    transition-duration: var(--duration-instant);
+  }
+  .cover-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring), var(--shadow-sm);
   }
   .cover img,
   .cover-placeholder {
