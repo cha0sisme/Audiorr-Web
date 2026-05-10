@@ -22,12 +22,14 @@
   import { onMount } from 'svelte';
   import { MusicNoteSimple, CaretDown, Play, MusicNote } from 'phosphor-svelte';
   import { canvas, CANVAS_MIN_WIDTH, CANVAS_MAX_WIDTH } from '$stores/canvas.svelte';
+  import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import {
     getArtist,
     getArtistInfo2,
     getTopSongs,
-    getCoverArtUrl
+    getCoverArtUrl,
+    search3
   } from '$services/NavidromeService';
   import type {
     NavidromeArtist,
@@ -43,10 +45,30 @@
     function onVisibility() {
       if (!videoEl) return;
       if (document.hidden) videoEl.pause();
-      else videoEl.play().catch(() => {});
+      else if (player.isPlaying) videoEl.play().catch(() => {});
     }
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
+  });
+
+  /** Sincroniza el video con el estado de playback. Si el director pausa
+      la canción (sea local o desde Audiorr Connect — el broadcast
+      `playback_state_update` actualiza `player.isPlaying`), el canvas
+      también se pausa para que la animación no siga sola sobre audio
+      mute. Resume cuando vuelve a play. document.hidden tiene prioridad
+      (no reproducir si la pestaña está oculta aunque isPlaying=true). */
+  $effect(() => {
+    if (!videoEl) return;
+    const playing = player.isPlaying;
+    if (typeof document !== 'undefined' && document.hidden) {
+      videoEl.pause();
+      return;
+    }
+    if (playing) {
+      videoEl.play().catch(() => {});
+    } else {
+      videoEl.pause();
+    }
   });
 
   // ─── Drag-to-resize del borde izquierdo ────────────────────────────────
@@ -78,18 +100,61 @@
   }
 
   // ─── Artist info fetch ─────────────────────────────────────────────────
+  // Funciona en 3 modos:
+  //   1) Local: queueManager.currentSong.artistId está poblado → uso directo.
+  //   2) Local sin artistId (raro, restore lossy): fallback a search por nombre.
+  //   3) Audiorr Connect: el remote payload no incluye artistId, solo el name
+  //      via player.currentSong.artist. Resolvemos con search3 → match exacto
+  //      case-insensitive sobre el name → primer artist.id.
+  // El "song" canónico para nombres viene de queueManager si existe, sino
+  // del player (cubre el caso remoto donde queueManager no se actualiza).
   const qmCurrent = $derived(queueManager.currentSong);
-  const artistId = $derived(qmCurrent?.artistId ?? '');
-  const artistName = $derived(qmCurrent?.artist ?? '');
+  const playerSong = $derived(player.currentSong);
+  const artistName = $derived(qmCurrent?.artist ?? playerSong?.artist ?? '');
+  const directArtistId = $derived(qmCurrent?.artistId ?? '');
 
   let artist = $state<NavidromeArtist | null>(null);
   let artistInfo = $state<NavidromeArtistInfo | null>(null);
   let topSongs = $state<NavidromeSong[]>([]);
+  /** Cache simple en componente para no resolver el mismo name dos veces. */
+  let resolvedArtistId = $state('');
+  /** Guards para no re-fetch cuando los effects se re-disparan. */
   let lastFetchedArtistId = '';
   let lastFetchedArtistName = '';
+  let lastResolvedFromName = '';
+
+  /** Resolve cadena: si tenemos artistId directo del queueManager, lo usamos.
+      Si no, miramos `lastResolvedFromName` (cache) y si no, hacemos
+      search3 con el name. Solo busca cuando el name cambió. */
+  $effect(() => {
+    if (directArtistId) {
+      resolvedArtistId = directArtistId;
+      return;
+    }
+    const name = artistName;
+    if (!name) {
+      resolvedArtistId = '';
+      return;
+    }
+    if (name === lastResolvedFromName) return;
+    lastResolvedFromName = name;
+    // Cap a artistCount=3 — búsqueda barata, suficiente para encontrar
+    // match exacto. Si Subsonic no devuelve nada, queda en cadena vacía
+    // (el efecto de fetch no disparará y no se renderiza la sección).
+    void search3(name, { artistCount: 3, albumCount: 0, songCount: 0 })
+      .then((res) => {
+        if (name !== lastResolvedFromName) return;
+        const exact = res.artists.find(
+          (a) => a.name.toLowerCase() === name.toLowerCase()
+        );
+        const chosen = exact ?? res.artists[0];
+        if (chosen) resolvedArtistId = chosen.id;
+      })
+      .catch(() => {});
+  });
 
   $effect(() => {
-    const id = artistId;
+    const id = resolvedArtistId;
     const name = artistName;
     if (!id || id === lastFetchedArtistId) return;
     lastFetchedArtistId = id;
