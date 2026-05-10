@@ -338,6 +338,7 @@
         >
           <MiniPlayer
             compact={isPlayerCompact}
+            songId={player.currentSong.id}
             title={player.currentSong.title}
             artist={player.currentSong.artist}
             coverUrl={player.currentSong.coverUrl}
@@ -346,7 +347,7 @@
             progress={player.progress}
             isPlaying={player.isPlaying}
             volume={player.volume}
-            autoMixActive={false}
+            autoMixActive={player.playbackMode === 'dj'}
             queueOpen={queueUI.isOpen}
             canvasOpen={canvasShown}
             canvasAvailable={canvas.videoUrl !== null || canvas.demoMode}

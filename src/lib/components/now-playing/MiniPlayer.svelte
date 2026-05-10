@@ -15,6 +15,10 @@
   type Props = {
     /** True = mini pill compacto. False = wide bar (default). */
     compact?: boolean;
+    /** Id único de la canción actual. Sirve como key del cross-fade del cover
+        ({#key songId}) — más robusto que keyear por coverUrl porque dos
+        canciones del mismo álbum comparten URL y no dispararían animación. */
+    songId?: string | undefined;
     title: string;
     artist: string;
     coverUrl?: string | undefined;
@@ -51,6 +55,7 @@
 
   let {
     compact = false,
+    songId,
     title,
     artist,
     coverUrl,
@@ -123,7 +128,7 @@
         onclick={onExpand}
         style:view-transition-name={!compact ? 'np-cover' : undefined}
       >
-        {#key coverUrl ?? '__placeholder__'}
+        {#key songId ?? coverUrl ?? '__placeholder__'}
           <div class="cover-img-wrap" in:coverBlurIn out:coverBlurOut>
             {#if coverUrl}
               <img src={coverUrl} alt="" loading="lazy" decoding="async" />
@@ -297,7 +302,7 @@
       onclick={onExpand}
       style:view-transition-name={compact ? 'np-cover' : undefined}
     >
-      {#key coverUrl ?? '__placeholder__'}
+      {#key songId ?? coverUrl ?? '__placeholder__'}
         <div class="cover-img-wrap" in:coverBlurIn out:coverBlurOut>
           {#if coverUrl}
             <img src={coverUrl} alt="" loading="lazy" decoding="async" />

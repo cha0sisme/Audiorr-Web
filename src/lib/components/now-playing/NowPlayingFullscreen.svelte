@@ -394,7 +394,7 @@
              mismo Dynamic-Island vibe que el hero artwork pero solo opacity
              (el blur 45px del backdrop ya es masivo, otro blur extra sería
              redundante y costoso). -->
-        {#key heroCoverUrl ?? '__placeholder__'}
+        {#key song?.id ?? heroCoverUrl ?? '__placeholder__'}
           {#if heroCoverUrl}
             <img
               class="np-bg-cover"
@@ -480,7 +480,7 @@
           class:paused={!player.isPlaying}
           style:view-transition-name={mode === 'cover' ? 'np-cover' : undefined}
         >
-          {#key heroCoverUrl ?? '__placeholder__'}
+          {#key song?.id ?? heroCoverUrl ?? '__placeholder__'}
             <div class="np-artwork-img" in:coverBlurIn out:coverBlurOut>
               {#if heroCoverUrl}
                 <img
@@ -613,7 +613,10 @@
         </div>
       {/if}
 
-      <!-- Scrubber -->
+      <!-- Scrubber + AutoMix subscript (mirror iOS ProgressBarView).
+           El indicador AutoMix vive PEGADO al scrubber, justo debajo del
+           track, igual que en MiniPlayer .hint. Altura reservada (12px)
+           para que el layout no salte cuando aparece/desaparece. -->
       <div class="np-scrubber-row">
         <span class="np-time">{formatTime(positionSec)}</span>
         <div class="np-scrubber">
@@ -632,6 +635,13 @@
           </div>
         </div>
         <span class="np-time">−{formatTime(Math.max(0, durationSec - positionSec))}</span>
+      </div>
+      <div
+        class="np-automix-hint"
+        class:visible={player.playbackMode === 'dj'}
+        aria-hidden={player.playbackMode !== 'dj'}
+      >
+        <WaveText text="AutoMix" />
       </div>
 
       <!-- Controls grandes -->
@@ -760,11 +770,6 @@
       </div>
     </div>
 
-    {#if player.playbackMode === 'dj'}
-      <div class="np-automix np-no-drag" aria-hidden="false">
-        <WaveText text="AutoMix" />
-      </div>
-    {/if}
   </div>
 
   <!-- ============================================ INNER QUEUE SHEET -->
@@ -1462,22 +1467,28 @@
     box-shadow: var(--focus-ring);
   }
 
-  /* AutoMix indicator floating top-center */
-  .np-automix {
-    position: absolute;
-    top: max(var(--space-12), calc(env(safe-area-inset-top) + 64px));
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 4;
-    padding: 6px 14px;
-    border-radius: var(--radius-full);
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(18px) saturate(1.6);
-    -webkit-backdrop-filter: blur(18px) saturate(1.6);
-    color: #fff;
+  /* AutoMix subscript del scrubber (mirror iOS ProgressBarView).
+     Espejo del .hint del MiniPlayer: altura reservada para que el layout no
+     salte al mostrar/ocultar; transición fade suave; texto centrado y
+     posicionado bajo el track. WaveText del componente shared aporta el
+     shimmer animado. */
+  .np-automix-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 14px;
+    margin-top: -2px;
     font-size: var(--text-xs);
     font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-ios-default);
+    user-select: none;
     pointer-events: none;
+  }
+  .np-automix-hint.visible {
+    opacity: 1;
   }
 
   /* ============================================================================
