@@ -1,27 +1,34 @@
 <script lang="ts">
   /**
-   * /diagnostics — viewer admin del histórico de TransitionRecord.
+   * /housekeeping/diagnostics — viewer admin del histórico de TransitionRecord.
    *
-   * Mirror del iOS Settings>Diagnostics:
+   * Mirror del iOS Settings>Diagnostics + extras web:
+   *   - KPI strip con cards estilo HKInfoCard (pattern + tone) + delta vs
+   *     período anterior + mini-sparkline trend (estilo Binance + dashboard).
    *   - Search bar + filter chips (Todas, Sin valorar, 1-3, 4-6, 7-10, 💎).
-   *   - Lista agrupada por día → sesión, con sub-header de sesión (mean,
-   *     count, duration, diamonds).
+   *   - Lista agrupada por día → sesión.
    *   - Tap en row → TransitionDetailPanel (rate + comment + mecanismos +
    *     telemetría).
+   *   - LIVE updates vía socket.io: cuando el backend emite
+   *     `diagnostic_transition_*` la página reacciona en tiempo real (sin
+   *     polling). Las nuevas rows entran con animación premium tipo SmartMix.
    *
-   * Carga `?limit=200` + `/sessions` en una sola tanda — backend recomienda
-   * client-side hasta ~300 records (estamos en 45 hoy). Cuando crezca,
-   * añadir paginación scroll-based.
-   *
-   * Charts diferidos a Fase 2 — esta página solo entrega listing + rate.
+   * Carga inicial `?limit=200` + `/sessions`. Después solo se mueven cosas
+   * por bus reactivo — sin re-fetch por defecto.
    */
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { cubicOut, cubicIn } from 'svelte/easing';
-  import { ArrowsClockwise, MagnifyingGlass, X, Star, Diamond } from 'phosphor-svelte';
+  import {
+    ArrowsClockwise, MagnifyingGlass, X, Star, Diamond,
+    ChartBar, CheckCircle
+  } from 'phosphor-svelte';
   import { diagnosticsService } from '$services/DiagnosticsService.svelte';
+  import { connectService } from '$services/ConnectService.svelte';
+  import { diagnosticsBus } from '$stores/diagnostics-bus.svelte';
   import type { TransitionRecord, SessionSummary } from '$types/diagnostics';
   import TransitionDetailPanel from '$components/diagnostics/TransitionDetailPanel.svelte';
+  import DiagnosticsKPI from '$components/diagnostics/DiagnosticsKPI.svelte';
 
   type Filter = 'all' | 'unrated' | 'low' | 'mid' | 'high' | 'diamonds';
   const FILTERS: { id: Filter; label: string; emoji?: string }[] = [
@@ -67,6 +74,66 @@
   onMount(() => {
     void refresh();
   });
+
+  // ─── Live updates vía diagnostics-bus (socket.io) ──────────────────────
+  // Tres effects aislados, uno por evento. Cada uno usa un guard de tick
+  // para no procesar el mismo payload dos veces (race / re-mount).
+  let lastSeenCreatedTick = 0;
+  let lastSeenUpdatedTick = 0;
+  let lastSeenDeletedTick = 0;
+  /** Set de ids que entraron via socket post-firstFetch — usados para
+      aplicar `.is-new` con animación premium en el render. La clase se
+      retira tras 700ms para que la animación corra una vez. */
+  let newRowIds = $state(new Set<string>());
+
+  function markRowAsNew(id: string) {
+    newRowIds.add(id);
+    newRowIds = new Set(newRowIds);
+    setTimeout(() => {
+      newRowIds.delete(id);
+      newRowIds = new Set(newRowIds);
+    }, 700);
+  }
+
+  $effect(() => {
+    const created = diagnosticsBus.lastCreated;
+    const tick = diagnosticsBus.tick;
+    if (!created || tick === lastSeenCreatedTick) return;
+    lastSeenCreatedTick = tick;
+    // Skip si ya está en records (defensa contra echo).
+    if (records.some((r) => r.id === created.id)) return;
+    records = [created, ...records];
+    markRowAsNew(created.id);
+  });
+
+  $effect(() => {
+    const updated = diagnosticsBus.lastUpdated;
+    const tick = diagnosticsBus.tick;
+    if (!updated || tick === lastSeenUpdatedTick) return;
+    lastSeenUpdatedTick = tick;
+    records = records.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
+    if (selectedRecord?.id === updated.id) {
+      selectedRecord = { ...selectedRecord, ...updated };
+    }
+  });
+
+  $effect(() => {
+    const deleted = diagnosticsBus.lastDeleted;
+    const tick = diagnosticsBus.tick;
+    if (!deleted || tick === lastSeenDeletedTick) return;
+    lastSeenDeletedTick = tick;
+    records = records.map((r) =>
+      r.id === deleted.id ? { ...r, userComment: null, deletedAt: deleted.deletedAt } : r
+    );
+    if (selectedRecord?.id === deleted.id) {
+      selectedRecord = { ...selectedRecord, userComment: null };
+    }
+  });
+
+  /** Indicador "live" — el dot verde junto al subtitle. Verde si el socket
+      está conectado, gris si no. Sin polling: el connectService ya expone
+      `hubConnected` reactivo. */
+  const liveConnected = $derived(connectService.hubConnected);
 
   // ─── Search debounce ───────────────────────────────────────────────────
   function onSearchInput(e: Event) {
@@ -134,6 +201,98 @@
     const diamonds = records.filter((r) => r.userRating === 10).length;
     const ratedPct = total > 0 ? Math.round((ratedCount / total) * 100) : 0;
     return { total, meanRating, diamonds, ratedPct, unrated: total - ratedCount };
+  });
+
+  /** Comparativos vs período anterior (estilo Binance). Partimos los records
+      por la mediana cronológica: primer mitad = "anterior", segunda = "actual".
+      Si hay <4 records totales, no hay comparación significativa → null en
+      todos los deltas y el card muestra "—". */
+  const deltas = $derived.by(() => {
+    const sorted = [...records].sort(
+      (a, b) => +new Date(a.date) - +new Date(b.date)
+    );
+    if (sorted.length < 4) {
+      return { meanRating: null, total: null, diamonds: null, ratedPct: null };
+    }
+    const mid = Math.floor(sorted.length / 2);
+    const prev = sorted.slice(0, mid);
+    const curr = sorted.slice(mid);
+
+    function statsOf(slice: TransitionRecord[]) {
+      const rated = slice.filter((r) => r.userRating != null);
+      const mean =
+        rated.length > 0
+          ? rated.reduce((a, r) => a + (r.userRating ?? 0), 0) / rated.length
+          : 0;
+      const diamonds = slice.filter((r) => r.userRating === 10).length;
+      const ratedPct =
+        slice.length > 0 ? (rated.length / slice.length) * 100 : 0;
+      return { mean, total: slice.length, diamonds, ratedPct };
+    }
+
+    const p = statsOf(prev);
+    const c = statsOf(curr);
+    return {
+      meanRating: c.mean - p.mean,
+      total: c.total - p.total,
+      diamonds: c.diamonds - p.diamonds,
+      ratedPct: c.ratedPct - p.ratedPct
+    };
+  });
+
+  /** Series para sparklines: agrupamos records por día (last 14 days max) y
+      calculamos las métricas por día. Cada array es [día0, día1, ...,
+      díaN-1] con los días vacíos rellenados con el último valor known
+      (carry forward) para que el chart no se rompa. */
+  const sparklines = $derived.by(() => {
+    if (records.length < 2) {
+      return { meanRating: [], total: [], diamonds: [], ratedPct: [] };
+    }
+    const sorted = [...records].sort(
+      (a, b) => +new Date(a.date) - +new Date(b.date)
+    );
+    // Buckets por día (clave YYYY-MM-DD).
+    const dayKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const buckets = new Map<string, TransitionRecord[]>();
+    for (const r of sorted) {
+      const k = dayKey(new Date(r.date));
+      const arr = buckets.get(k) ?? [];
+      arr.push(r);
+      buckets.set(k, arr);
+    }
+    const days = Array.from(buckets.keys()).sort();
+    const slice = days.slice(-14); // last 14 days
+
+    const meanRating: number[] = [];
+    const totalCum: number[] = []; // cumulative count
+    const diamondsCum: number[] = [];
+    const ratedPct: number[] = [];
+
+    let runningCount = 0;
+    let runningDiamonds = 0;
+    for (const k of slice) {
+      const day = buckets.get(k) ?? [];
+      runningCount += day.length;
+      runningDiamonds += day.filter((r) => r.userRating === 10).length;
+      const rated = day.filter((r) => r.userRating != null);
+      const meanDay =
+        rated.length > 0
+          ? rated.reduce((a, r) => a + (r.userRating ?? 0), 0) / rated.length
+          : meanRating[meanRating.length - 1] ?? 0;
+      const pct = day.length > 0 ? (rated.length / day.length) * 100 : 0;
+      meanRating.push(Math.round(meanDay * 100) / 100);
+      totalCum.push(runningCount);
+      diamondsCum.push(runningDiamonds);
+      ratedPct.push(Math.round(pct));
+    }
+
+    return {
+      meanRating,
+      total: totalCum,
+      diamonds: diamondsCum,
+      ratedPct
+    };
   });
 
   // Conteo "sin valorar" para badge del filter chip.
@@ -297,49 +456,87 @@
 </script>
 
 <div class="dg-shell">
-  <!-- ─── Top bar ─────────────────────────────────────────────────────── -->
-  <header class="dg-topbar">
-    <div class="dg-titles">
-      <h1 class="dg-title">Diagnostics</h1>
+  <!-- Mini toolbar: el contexto "Diagnostics" lo da el tab del housekeeping
+       layout. Subtítulo + indicador live (verde si socket conectado, sin
+       polling) + refresh discreto como fallback. -->
+  <header class="dg-toolbar">
+    <div class="dg-toolbar-left">
       <p class="dg-subtitle">
         Histórico de transiciones · valoraciones · mecanismos
       </p>
+      <span
+        class="dg-live"
+        class:on={liveConnected}
+        title={liveConnected ? 'Live — actualizándose en tiempo real' : 'Sin socket — refresca a mano'}
+      >
+        <span class="dg-live-dot" aria-hidden="true"></span>
+        <span class="dg-live-label">{liveConnected ? 'Live' : 'Offline'}</span>
+      </span>
     </div>
     <button
       type="button"
       class="dg-refresh"
-      aria-label="Refrescar"
+      aria-label="Refrescar manualmente"
       disabled={loading}
       onclick={() => void refresh()}
+      title="Refrescar manualmente (no es necesario con socket conectado)"
     >
       <span class="dg-refresh-icon" class:spin={loading}>
-        <ArrowsClockwise size={16} weight="bold" />
+        <ArrowsClockwise size={14} weight="bold" />
       </span>
-      <span>Refrescar</span>
     </button>
   </header>
 
-  <!-- ─── KPI cards ────────────────────────────────────────────────────── -->
+  <!-- ─── KPI cards (estilo HKInfoCard: pattern + tone + delta + sparkline) -->
   <section class="dg-kpis" aria-label="Resumen">
-    <article class="dg-kpi">
-      <span class="dg-kpi-num">{kpis.meanRating === 0 ? '—' : kpis.meanRating.toFixed(2)}</span>
-      <span class="dg-kpi-label">Mean rating</span>
-    </article>
-    <article class="dg-kpi">
-      <span class="dg-kpi-num">{kpis.total}</span>
-      <span class="dg-kpi-label">Transiciones</span>
-    </article>
-    <article class="dg-kpi">
-      <span class="dg-kpi-num dg-kpi-diamond">
-        <Diamond size={20} weight="fill" />
-        {kpis.diamonds}
-      </span>
-      <span class="dg-kpi-label">Diamonds</span>
-    </article>
-    <article class="dg-kpi">
-      <span class="dg-kpi-num">{kpis.ratedPct}%</span>
-      <span class="dg-kpi-label">Valoradas · {kpis.unrated} sin valorar</span>
-    </article>
+    <DiagnosticsKPI
+      Icon={Star}
+      kicker="MEAN"
+      label="Mean rating"
+      value={kpis.meanRating === 0 ? '—' : kpis.meanRating.toFixed(2)}
+      delta={deltas.meanRating}
+      deltaSuffix="vs anterior"
+      sparkline={sparklines.meanRating}
+      pattern="waves"
+      tone="accent"
+    />
+    <DiagnosticsKPI
+      Icon={ChartBar}
+      kicker="TOTAL"
+      label="Transiciones"
+      value={String(kpis.total)}
+      delta={deltas.total}
+      deltaDecimals={0}
+      deltaSuffix="vs anterior"
+      sparkline={sparklines.total}
+      pattern="lines"
+      tone="mint"
+    />
+    <DiagnosticsKPI
+      Icon={Diamond}
+      kicker="GEMS"
+      label="Diamonds"
+      value={String(kpis.diamonds)}
+      delta={deltas.diamonds}
+      deltaDecimals={0}
+      deltaSuffix="vs anterior"
+      sparkline={sparklines.diamonds}
+      pattern="mesh"
+      tone="amber"
+    />
+    <DiagnosticsKPI
+      Icon={CheckCircle}
+      kicker="COBERTURA"
+      label={`Valoradas · ${kpis.unrated} sin valorar`}
+      value={`${kpis.ratedPct}%`}
+      delta={deltas.ratedPct}
+      deltaUnit="%"
+      deltaDecimals={1}
+      deltaSuffix="vs anterior"
+      sparkline={sparklines.ratedPct}
+      pattern="waves"
+      tone="pink"
+    />
   </section>
 
   <!-- ─── Search + filter chips ────────────────────────────────────────── -->
@@ -432,6 +629,7 @@
                       type="button"
                       class="dg-row"
                       class:selected={selectedRecord?.id === r.id}
+                      class:is-new={newRowIds.has(r.id)}
                       onclick={() => (selectedRecord = r)}
                     >
                       <span class="dg-row-rating">
@@ -486,55 +684,100 @@
 {/if}
 
 <style>
+  /* Sin padding ni max-width propios — vive dentro de `.hk-content` del
+     layout housekeeping, que ya provee el container y el padding. */
   .dg-shell {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: var(--space-6) var(--space-6) var(--space-12);
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
+    min-width: 0;
   }
 
-  /* ── Top bar */
-  .dg-topbar {
+  /* ── Toolbar: subtitle + refresh action */
+  .dg-toolbar {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
   }
-  .dg-titles { min-width: 0; }
-  .dg-title {
-    margin: 0;
-    font-family: var(--font-sans);
-    font-size: var(--text-3xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display-lg);
-    color: var(--text-primary);
+  .dg-toolbar-left {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    min-width: 0;
   }
   .dg-subtitle {
-    margin: 4px 0 0;
+    margin: 0;
     font-size: var(--text-sm);
     color: var(--text-secondary);
   }
-  .dg-refresh {
+
+  /* Live indicator: dot + label. Verde + pulse cuando socket conectado. */
+  .dg-live {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    border: 1px solid var(--border-subtle);
+    gap: 6px;
+    padding: 3px 10px;
     border-radius: var(--radius-full);
+    background: var(--bg-surface-elevated);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    transition:
+      color var(--duration-normal) var(--ease-ios-default),
+      background var(--duration-normal) var(--ease-ios-default);
+  }
+  .dg-live.on {
+    color: var(--status-success-text);
+    background: var(--status-success-bg);
+  }
+  .dg-live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-quaternary);
+    transition: background var(--duration-normal) var(--ease-ios-default);
+  }
+  .dg-live.on .dg-live-dot {
+    background: var(--status-success);
+    box-shadow: 0 0 0 0 currentColor;
+    animation: dg-live-pulse 2s ease-out infinite;
+  }
+  @keyframes dg-live-pulse {
+    0%   { box-shadow: 0 0 0 0 var(--status-success); opacity: 1; }
+    70%  { box-shadow: 0 0 0 6px transparent; opacity: 0.65; }
+    100% { box-shadow: 0 0 0 0 transparent; opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dg-live.on .dg-live-dot { animation: none; }
+  }
+
+  /* Refresh discreto — solo iconito, color tertiary. Casi invisible cuando
+     live está conectado (no necesita atención). */
+  .dg-refresh {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 50%;
     background: var(--bg-surface);
-    color: var(--text-primary);
-    font-size: var(--text-sm);
-    font-weight: 600;
+    color: var(--text-tertiary);
     cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-ios-default);
+    display: grid;
+    place-items: center;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+    flex-shrink: 0;
   }
   .dg-refresh:hover {
     background: var(--bg-surface-hover);
+    color: var(--text-primary);
   }
   .dg-refresh:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
   .dg-refresh-icon {
@@ -548,41 +791,11 @@
     to { transform: rotate(360deg); }
   }
 
-  /* ── KPIs */
+  /* ── KPIs grid (cards via DiagnosticsKPI component) */
   .dg-kpis {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: var(--space-3);
-  }
-  .dg-kpi {
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: var(--space-4);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .dg-kpi-num {
-    font-family: var(--font-sans);
-    font-size: var(--text-3xl);
-    font-weight: 700;
-    line-height: 1;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .dg-kpi-diamond {
-    color: var(--accent);
-  }
-  .dg-kpi-label {
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-label);
-    font-weight: 600;
   }
 
   /* ── Controls */
@@ -773,6 +986,39 @@
     background: var(--row-hover);
     box-shadow: inset 2px 0 0 var(--accent);
   }
+  /* Animación premium estilo SmartMix cuando llega un record nuevo via socket.
+     blur-replace + scale + slide + tinte accent que se desvanece. La clase
+     `.is-new` se añade desde JS (markRowAsNew) y se retira a los 700ms para
+     que la animación corra una sola vez. */
+  .dg-row.is-new {
+    animation: dg-row-arrive 700ms var(--ease-out-expo);
+  }
+  @keyframes dg-row-arrive {
+    0% {
+      opacity: 0;
+      transform: translateY(-14px) scale(0.97);
+      filter: blur(6px);
+      background: var(--accent-muted);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+      background: var(--accent-muted);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+      background: transparent;
+      box-shadow: inset 0 0 0 var(--accent);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dg-row.is-new { animation: none; }
+  }
   .dg-row-rating {
     display: inline-flex;
     align-items: center;
@@ -867,6 +1113,5 @@
     }
     .dg-row-time { display: none; }
     .dg-row-title { max-width: 140px; }
-    .dg-title { font-size: var(--text-2xl); }
   }
 </style>

@@ -24,6 +24,8 @@ import { backendService } from '$services/BackendService.svelte';
 import { player, type Song } from '$stores/player.svelte';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
 import { getCoverArtUrl } from '$services/NavidromeService';
+import { diagnosticsBus } from '$stores/diagnostics-bus.svelte';
+import { TransitionRecordSchema } from '$types/diagnostics';
 
 // ============================================================================
 // Types
@@ -573,6 +575,42 @@ class ConnectService {
 
     socket.on('cast_session_update', () => {
       // No-op por ahora — la UI de cast vendrá con DevicePicker (#8).
+    });
+
+    // ─── Diagnostics live events ───────────────────────────────────────
+    // El backend emite estos 3 eventos a `user:<id>` tras cada POST/PATCH/
+    // DELETE de TransitionRecord. El viewer /housekeeping/diagnostics se
+    // suscribe al diagnosticsBus y reacciona en tiempo real — sin polling.
+    // El payload se valida con el schema Zod del record para tolerar drift
+    // forward/backward del shape sin romper.
+    socket.on('diagnostic_transition_created', (data: unknown) => {
+      const parsed = TransitionRecordSchema.safeParse(data);
+      if (!parsed.success) {
+        console.warn('[Connect] diagnostic_transition_created shape inválido', parsed.error);
+        return;
+      }
+      diagnosticsBus.publishCreated(parsed.data);
+    });
+    socket.on('diagnostic_transition_updated', (data: unknown) => {
+      // Backend manda `{ record: ... }` para updated (decisión backend-guardian
+      // en el round del 2026-05-10). Tolera también el shape plano por defensa.
+      const obj = data as { record?: unknown } | unknown;
+      const candidate =
+        obj && typeof obj === 'object' && 'record' in obj
+          ? (obj as { record: unknown }).record
+          : obj;
+      const parsed = TransitionRecordSchema.safeParse(candidate);
+      if (!parsed.success) {
+        console.warn('[Connect] diagnostic_transition_updated shape inválido', parsed.error);
+        return;
+      }
+      diagnosticsBus.publishUpdated(parsed.data);
+    });
+    socket.on('diagnostic_transition_comment_deleted', (data: unknown) => {
+      if (!data || typeof data !== 'object') return;
+      const d = data as { id?: unknown; deletedAt?: unknown };
+      if (typeof d.id !== 'string' || typeof d.deletedAt !== 'string') return;
+      diagnosticsBus.publishDeleted({ id: d.id, deletedAt: d.deletedAt });
     });
   }
 
