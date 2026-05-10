@@ -243,95 +243,137 @@
     return { total, meanRating, diamonds, ratedPct, unrated: total - ratedCount };
   });
 
-  /** Comparativos vs período anterior (estilo Binance). Partimos los records
-      por la mediana cronológica: primer mitad = "anterior", segunda = "actual".
-      Si hay <4 records totales, no hay comparación significativa → null en
-      todos los deltas y el card muestra "—". */
-  const deltas = $derived.by(() => {
-    const sorted = [...records].sort(
-      (a, b) => +new Date(a.date) - +new Date(b.date)
-    );
-    if (sorted.length < 4) {
-      return { meanRating: null, total: null, diamonds: null, ratedPct: null };
-    }
-    const mid = Math.floor(sorted.length / 2);
-    const prev = sorted.slice(0, mid);
-    const curr = sorted.slice(mid);
+  /** Stats agregadas por algorithmVersion, ordenadas cronológicamente
+      (versión más antigua primero, más reciente última). Permite comparar
+      el algoritmo nuevo vs el anterior — es la dimensión que de verdad
+      cambia el rendimiento del DJ engine.
 
-    function statsOf(slice: TransitionRecord[]) {
-      const rated = slice.filter((r) => r.userRating != null);
+      Caveat: cada versión puede haberse probado con un set distinto de
+      música (Hip-Hop vs Indie, etc). El director sabe que el delta entre
+      versiones puede llevar confounders; igual es la mejor pista. */
+  type VersionStat = {
+    version: string;
+    mean: number;
+    diamonds: number;
+    count: number;
+    ratedCount: number;
+    firstDate: number;
+  };
+  const versionStats = $derived.by((): VersionStat[] => {
+    const byVersion = new Map<string, { records: TransitionRecord[]; firstDate: number }>();
+    for (const r of records) {
+      const v = r.algorithmVersion;
+      const ts = +new Date(r.date);
+      const existing = byVersion.get(v);
+      if (existing) {
+        existing.records.push(r);
+        existing.firstDate = Math.min(existing.firstDate, ts);
+      } else {
+        byVersion.set(v, { records: [r], firstDate: ts });
+      }
+    }
+    const out: VersionStat[] = [];
+    for (const [v, info] of byVersion) {
+      const rated = info.records.filter((r) => r.userRating != null);
       const mean =
         rated.length > 0
           ? rated.reduce((a, r) => a + (r.userRating ?? 0), 0) / rated.length
           : 0;
-      const diamonds = slice.filter((r) => r.userRating === 10).length;
-      const ratedPct =
-        slice.length > 0 ? (rated.length / slice.length) * 100 : 0;
-      return { mean, total: slice.length, diamonds, ratedPct };
+      out.push({
+        version: v,
+        mean,
+        diamonds: info.records.filter((r) => r.userRating === 10).length,
+        count: info.records.length,
+        ratedCount: rated.length,
+        firstDate: info.firstDate
+      });
+    }
+    out.sort((a, b) => a.firstDate - b.firstDate);
+    return out;
+  });
+
+  /** Sesiones ordenadas DESC (más recientes primero). El backend ya las
+      pre-agrega con mean, count, diamonds. */
+  const sessionsByDate = $derived.by(() =>
+    [...sessions].sort((a, b) => +new Date(b.endedAt) - +new Date(a.endedAt))
+  );
+
+  /** Comparativos por la dimensión correcta para cada KPI:
+
+        Mean rating + Diamonds: dependen del algoritmo → delta entre la
+        versión más reciente y la inmediatamente anterior. Útil para
+        verificar regresiones / mejoras al desplegar un build nuevo.
+
+        Total + % Rated: actividad / comportamiento del director → delta
+        entre la última sesión y la penúltima. Útil para "¿hoy he ido más
+        que ayer?".
+
+      Null cuando no hay datos suficientes para comparar (1 versión sola,
+      1 sesión sola). */
+  const deltas = $derived.by(() => {
+    const v = versionStats;
+    const s = sessionsByDate;
+
+    let meanRating: number | null = null;
+    let diamonds: number | null = null;
+    if (v.length >= 2) {
+      const last = v[v.length - 1]!;
+      const prev = v[v.length - 2]!;
+      meanRating = last.mean - prev.mean;
+      diamonds = last.diamonds - prev.diamonds;
     }
 
-    const p = statsOf(prev);
-    const c = statsOf(curr);
+    let total: number | null = null;
+    let ratedPct: number | null = null;
+    if (s.length >= 2) {
+      const last = s[0]!;
+      const prev = s[1]!;
+      total = last.transitionCount - prev.transitionCount;
+      const lastPct = (last.rated / Math.max(1, last.transitionCount)) * 100;
+      const prevPct = (prev.rated / Math.max(1, prev.transitionCount)) * 100;
+      ratedPct = lastPct - prevPct;
+    }
+
+    return { meanRating, total, diamonds, ratedPct };
+  });
+
+  /** Suffix dinámico para cada delta — explicita qué se compara. El
+      componente DiagnosticsKPI lo renderiza en el badge del delta. */
+  const deltaSuffix = $derived.by(() => {
+    const v = versionStats;
+    const prevVersion =
+      v.length >= 2 ? v[v.length - 2]!.version : null;
     return {
-      meanRating: c.mean - p.mean,
-      total: c.total - p.total,
-      diamonds: c.diamonds - p.diamonds,
-      ratedPct: c.ratedPct - p.ratedPct
+      meanRating: prevVersion ? `vs ${prevVersion}` : 'sin comparativo',
+      diamonds: prevVersion ? `vs ${prevVersion}` : 'sin comparativo',
+      total: 'vs sesión anterior',
+      ratedPct: 'vs sesión anterior'
     };
   });
 
-  /** Series para sparklines: agrupamos records por día (last 14 days max) y
-      calculamos las métricas por día. Cada array es [día0, día1, ...,
-      díaN-1] con los días vacíos rellenados con el último valor known
-      (carry forward) para que el chart no se rompa. */
+  /** Series para sparklines orientadas a la dimensión de cada KPI:
+
+        Mean / Diamonds: 1 punto por versión cronológica. Detecta el
+        salto al desplegar un build nuevo (visualmente: subida o bajada
+        en el último punto). Si solo hay 1 versión, no hay sparkline.
+
+        Total / % Rated: 1 punto por sesión (últimas 14 reverse). Trend
+        de actividad. */
   const sparklines = $derived.by(() => {
-    if (records.length < 2) {
-      return { meanRating: [], total: [], diamonds: [], ratedPct: [] };
-    }
-    const sorted = [...records].sort(
-      (a, b) => +new Date(a.date) - +new Date(b.date)
-    );
-    // Buckets por día (clave YYYY-MM-DD).
-    const dayKey = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const buckets = new Map<string, TransitionRecord[]>();
-    for (const r of sorted) {
-      const k = dayKey(new Date(r.date));
-      const arr = buckets.get(k) ?? [];
-      arr.push(r);
-      buckets.set(k, arr);
-    }
-    const days = Array.from(buckets.keys()).sort();
-    const slice = days.slice(-14); // last 14 days
-
-    const meanRating: number[] = [];
-    const totalCum: number[] = []; // cumulative count
-    const diamondsCum: number[] = [];
-    const ratedPct: number[] = [];
-
-    let runningCount = 0;
-    let runningDiamonds = 0;
-    for (const k of slice) {
-      const day = buckets.get(k) ?? [];
-      runningCount += day.length;
-      runningDiamonds += day.filter((r) => r.userRating === 10).length;
-      const rated = day.filter((r) => r.userRating != null);
-      const meanDay =
-        rated.length > 0
-          ? rated.reduce((a, r) => a + (r.userRating ?? 0), 0) / rated.length
-          : meanRating[meanRating.length - 1] ?? 0;
-      const pct = day.length > 0 ? (rated.length / day.length) * 100 : 0;
-      meanRating.push(Math.round(meanDay * 100) / 100);
-      totalCum.push(runningCount);
-      diamondsCum.push(runningDiamonds);
-      ratedPct.push(Math.round(pct));
-    }
+    const v = versionStats;
+    const s = sessionsByDate;
+    const lastSessions = s.slice(0, 14).reverse(); // chronological ASC
 
     return {
-      meanRating,
-      total: totalCum,
-      diamonds: diamondsCum,
-      ratedPct
+      meanRating: v.length >= 2 ? v.map((x) => Math.round(x.mean * 100) / 100) : [],
+      diamonds: v.length >= 2 ? v.map((x) => x.diamonds) : [],
+      total: lastSessions.length >= 2 ? lastSessions.map((x) => x.transitionCount) : [],
+      ratedPct:
+        lastSessions.length >= 2
+          ? lastSessions.map((x) =>
+              Math.round((x.rated / Math.max(1, x.transitionCount)) * 100)
+            )
+          : []
     };
   });
 
@@ -540,7 +582,7 @@
       label="Mean rating"
       value={kpis.meanRating === 0 ? '—' : kpis.meanRating.toFixed(2)}
       delta={deltas.meanRating}
-      deltaSuffix="vs anterior"
+      deltaSuffix={deltaSuffix.meanRating}
       sparkline={sparklines.meanRating}
       pattern="waves"
       tone="accent"
@@ -552,7 +594,7 @@
       value={String(kpis.total)}
       delta={deltas.total}
       deltaDecimals={0}
-      deltaSuffix="vs anterior"
+      deltaSuffix={deltaSuffix.total}
       sparkline={sparklines.total}
       pattern="lines"
       tone="mint"
@@ -564,7 +606,7 @@
       value={String(kpis.diamonds)}
       delta={deltas.diamonds}
       deltaDecimals={0}
-      deltaSuffix="vs anterior"
+      deltaSuffix={deltaSuffix.diamonds}
       sparkline={sparklines.diamonds}
       pattern="mesh"
       tone="amber"
@@ -577,7 +619,7 @@
       delta={deltas.ratedPct}
       deltaUnit="%"
       deltaDecimals={1}
-      deltaSuffix="vs anterior"
+      deltaSuffix={deltaSuffix.ratedPct}
       sparkline={sparklines.ratedPct}
       pattern="waves"
       tone="pink"
