@@ -359,15 +359,21 @@
 <style>
   /* Panel desplazante: grid item del shell. El scroll vive en `.cp-scroll`
      interior — el `.canvas-panel` actúa como container fijo (resize handle
-     + clip) mientras el contenido scrollea internamente. */
+     + clip) mientras el contenido scrollea internamente.
+
+     `--cp-base-bg` es el color base compartido entre el stage y la zona de
+     info para que la transición video → cards no muestre un step de color.
+     El video usa mask-image que desvanece sus 80px finales, exponiendo
+     este bg de forma uniforme en toda la franja del fade. */
   .canvas-panel {
+    --cp-base-bg: rgb(8, 10, 14);
     grid-area: canvas;
     position: relative;
     width: 100%;
     height: 100%;
     min-width: 0;
     overflow: hidden;
-    background: #000;
+    background: var(--cp-base-bg);
     box-shadow: -8px 0 32px var(--shadow-color-lg);
     isolation: isolate;
     -webkit-tap-highlight-color: transparent;
@@ -396,29 +402,52 @@
     background: transparent;
   }
 
-  /* Stage del video: ocupa min-height 100% MENOS el peek (60px) — así la
-     sección artist queda "lurking" justo debajo, visible sin scroll pero
-     invitando a explorar más. Patrón Spotify/Apple Music right-rail. */
+  /* Stage del video: altura EXACTA del viewport scroll menos el peek de
+     60px que invita al scroll-reveal. `height` (no min-height) garantiza
+     que el video pegue exactamente al top sin franja negra arriba.
+
+     Display block + position relative + media en absolute inset:0 fuerza
+     que el video llene 100% sin posibilidad de centrado vertical raro
+     que el flex+align-items podía dejar.
+
+     bg comparte el mismo color que el wrap (--cp-base-bg) para que la
+     transición video → info sea sobre fondo continuo. */
   .cp-stage {
     position: relative;
     width: 100%;
-    min-height: calc(100% - 60px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000;
+    height: calc(100% - 60px);
+    overflow: hidden;
+    background: var(--cp-base-bg);
   }
-  .cp-video {
+  /* La media (video o placeholder) se desvanece a transparente en sus
+     últimos ~80px con mask-image. El bg común del stage queda visible en
+     esa zona, fundiendo de forma natural con el wrap de info que viene
+     debajo. Resultado: ya no hay un corte recto entre el video y la zona
+     de cards — la transición es suave, casi imperceptible. */
+  .cp-video,
+  .cp-placeholder {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+    -webkit-mask-image: linear-gradient(
+      180deg,
+      #000 0%,
+      #000 calc(100% - 80px),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      180deg,
+      #000 0%,
+      #000 calc(100% - 80px),
+      transparent 100%
+    );
   }
   .cp-placeholder {
     display: grid;
     place-items: center;
-    width: 100%;
-    height: 100%;
     color: var(--text-tertiary);
     background:
       radial-gradient(circle at 30% 20%, oklch(0.5 0.12 280), transparent 60%),
@@ -485,22 +514,16 @@
   }
 
   /* ─── ARTIST INFO WRAP ───────────────────────────────────────────────
-     Container del scroll-reveal. Padding generoso, gap entre cards. El bg
-     transition video→info se hace con un degrade vertical sutil al fondo
-     dark del panel. Cada card hija tiene SU PROPIO bg sólido (cp-card)
-     para que se distingan visualmente del backdrop — patrón Spotify right
-     rail con boxes claramente separados. */
+     Container del scroll-reveal. Padding generoso, gap entre cards. NO
+     necesita gradient propio — el bg base del panel es el mismo que se
+     ve durante el fade del video (mask-image en .cp-video). La transición
+     queda continua y sin step. Cada card hija tiene SU PROPIO bg sólido
+     (cp-card) para distinguirse del backdrop común. */
   .cp-info-wrap {
     padding: var(--space-5) var(--space-4) var(--space-8);
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    background:
-      linear-gradient(180deg,
-        rgba(0, 0, 0, 0.85) 0%,
-        rgba(8, 10, 14, 0.96) 30%,
-        rgba(8, 10, 14, 1) 100%
-      );
     color: rgba(255, 255, 255, 0.92);
   }
 
