@@ -1,11 +1,15 @@
 <script lang="ts">
   import {
     Play, Pause, SkipForward, SkipBack, Shuffle, Repeat,
-    MusicNote, Heart, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple
+    MusicNote, Heart, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple,
+    Broadcast
   } from 'phosphor-svelte';
   import { formatTime } from '$utils/format';
   import WaveText from '$components/shared/WaveText.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
+  import DevicePicker from '$components/now-playing/DevicePicker.svelte';
+  import { connectService } from '$services/ConnectService.svelte';
+  import { player } from '$stores/player.svelte';
 
   type Props = {
     /** True = mini pill compacto. False = wide bar (default). */
@@ -68,6 +72,22 @@
   const pct = $derived(Math.max(0, Math.min(1, progress)) * 100);
   const positionSec = $derived(progress * durationSec);
   const volumePct = $derived(Math.max(0, Math.min(1, volume)) * 100);
+
+  // Device picker state — local al MiniPlayer (no necesita prop drill).
+  let devicePickerOpen = $state(false);
+  let deviceBtnEl: HTMLButtonElement | null = $state(null);
+  /** Indicador verde en el botón cuando hay un device activo distinto al
+      local (estamos viendo remote o casteando). */
+  const deviceActive = $derived(
+    player.isRemote || connectService.activeDeviceId !== null
+  );
+  /** El picker solo tiene contenido cuando hay otros devices o LAN. Si la
+      web está sola (caso típico del director sin iOS abierto), el botón
+      queda oculto para no añadir ruido visual. */
+  const hasAnyDevice = $derived(
+    connectService.connectedDevices.some((d) => !d.isThisDevice) ||
+    connectService.lanDevices.length > 0
+  );
 </script>
 
 <div
@@ -170,6 +190,29 @@
     </div>
 
     <div class="extras">
+      {#if hasAnyDevice}
+        <button
+          bind:this={deviceBtnEl}
+          type="button"
+          class="icon-btn device-btn"
+          class:active={deviceActive}
+          aria-label="Dispositivos disponibles"
+          aria-haspopup="menu"
+          aria-expanded={devicePickerOpen}
+          tabindex={compact ? -1 : 0}
+          onclick={() => (devicePickerOpen = !devicePickerOpen)}
+        >
+          <Broadcast size={18} weight="regular" />
+          {#if deviceActive}
+            <span class="device-dot" aria-hidden="true"></span>
+          {/if}
+        </button>
+        <DevicePicker
+          open={devicePickerOpen}
+          triggerEl={deviceBtnEl}
+          onClose={() => (devicePickerOpen = false)}
+        />
+      {/if}
       <button
         type="button"
         class="icon-btn"
@@ -668,6 +711,27 @@
     opacity: 0.4;
     cursor: not-allowed;
     pointer-events: none;
+  }
+
+  /* Botón de devices con position:relative para anclar el dot indicador.
+     El popover propiamente se renderiza con position:fixed (DevicePicker)
+     calculando su anchor desde getBoundingClientRect del botón — eso le
+     permite escapar del `overflow: hidden` del .player. */
+  .device-btn {
+    position: relative;
+  }
+  /* Indicador verde — un dot pequeño en la esquina sup-der del icono
+     cuando hay device activo (remote o casting). Imita el "play indicator"
+     de iOS. */
+  .device-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--status-success, #22c55e);
+    box-shadow: 0 0 0 2px var(--bg-glass-solid);
   }
 
   .play-pause {
