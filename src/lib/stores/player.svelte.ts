@@ -72,6 +72,20 @@ class PlayerStore {
         SmartMix de esa playlist del playback normal de la misma. */
   contextUri = $state<string | null>(null);
 
+  /** True cuando el player está reflejando el estado de OTRO device (Audiorr
+      Connect). Mirror del iOS `NowPlayingState.isRemote`. Mientras esté true:
+      - los controles del MiniPlayer envían `remote_command` al hub en vez de
+        actuar local;
+      - el `broadcastPlaybackState` se suprime para no echo;
+      - al desaparecer el device origen, ConnectService restaura local con
+        `restoreLastPlayback`. */
+  isRemote = $state(false);
+  /** Nombre del device cuyo playback estamos espejando (ej. "iPhone de Lean"). */
+  remoteDeviceName = $state<string | null>(null);
+  /** Subtítulo opcional para el MiniPlayer — "Reproduciendo en {device}".
+      Cuando es null, el MiniPlayer renderiza solo título + artista. */
+  subtitle = $state<string | null>(null);
+
   /** True si hay algo cargado y el mini player debe mostrarse. */
   hasSong = $derived(this.currentSong !== null);
 

@@ -753,14 +753,20 @@ class QueueManager {
       this.lastLocalPositionSave = now;
       this.persistState();
     }
+    // ConnectService aplica su propio throttle 1Hz internamente — aquí
+    // pasamos el evento sin filtrar; es el servicio quien decide si emitir.
+    void import('$services/ConnectService.svelte').then(({ connectService }) => {
+      connectService.broadcastStateIfNeeded(false);
+    });
     // TODO Phase 2: ScrobbleService.progressUpdate(songId, currentTime, duration)
     // TODO Phase 2: prepareNextForCrossfade (DJMixingService)
-    // TODO Phase 2: ConnectService.broadcastStateIfNeeded(false)
   }
 
   onPlaybackStateChanged(_isPlaying: boolean, _currentTime: number): void {
-    // El player store ya espeja `isPlaying`; este hook queda para Connect/Scrobble.
-    // TODO Phase 2: ConnectService.broadcastStateIfNeeded(true)
+    // El player store ya espeja `isPlaying`; aquí broadcastemos al hub.
+    void import('$services/ConnectService.svelte').then(({ connectService }) => {
+      connectService.broadcastStateIfNeeded(true);
+    });
   }
 
   /** El engine terminó el track actual (evento 'ended'). Equivale a next(). */
@@ -878,6 +884,13 @@ class QueueManager {
       playbackMode: this.playbackMode,
       contextUri: this.contextUri,
       startAt: safeStart
+    });
+
+    // Broadcast significant change al hub Connect (mirror Swift line 199-254).
+    // Lo hacemos tras `player.load` para que `player.currentSong` esté ya
+    // actualizado al construir el payload.
+    void import('$services/ConnectService.svelte').then(({ connectService }) => {
+      connectService.broadcastStateIfNeeded(true);
     });
 
     // TODO Phase 2 (DJ Mixing port): cuando `startAt` cae en la zona outro

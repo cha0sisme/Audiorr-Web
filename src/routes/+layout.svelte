@@ -18,6 +18,7 @@
   import { credentials } from '$stores/credentials.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
+  import { connectService } from '$services/ConnectService.svelte';
 
   /** Rutas que se renderizan SIN shell (sin sidebar, sin mini player).
       Login es full-screen — el shell distrae. */
@@ -46,6 +47,19 @@
   $effect(() => {
     if (credentials.isConfigured) {
       void queueManager.restoreLastPlayback();
+    }
+  });
+
+  /** Conexión al Audiorr Hub (Socket.IO) para control remoto cross-device.
+      Mirror del iOS ContentView line `ConnectService.shared.connect()` — se
+      arranca cuando hay credenciales válidas y se desconecta en logout.
+      socket.io-client gestiona el reintento exponencial 5s→60s
+      automáticamente; aquí solo trigger inicial + cleanup. */
+  $effect(() => {
+    if (credentials.isConfigured) {
+      void connectService.connect();
+    } else {
+      connectService.disconnect();
     }
   });
 

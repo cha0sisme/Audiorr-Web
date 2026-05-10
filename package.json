@@ -31,6 +31,7 @@
     "js-md5": "^0.8.3",
     "node-vibrant": "^4.0.4",
     "phosphor-svelte": "^3.1.0",
+    "socket.io-client": "^4.8.3",
     "zod": "^4.4.3"
   }
 }
