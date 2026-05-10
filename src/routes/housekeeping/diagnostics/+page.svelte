@@ -26,6 +26,7 @@
   import { diagnosticsService } from '$services/DiagnosticsService.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { diagnosticsBus } from '$stores/diagnostics-bus.svelte';
+  import { transitionTypeTone } from '$utils/transition-type-tone';
   import type { TransitionRecord, SessionSummary } from '$types/diagnostics';
   import TransitionDetailPanel from '$components/diagnostics/TransitionDetailPanel.svelte';
   import DiagnosticsKPI from '$components/diagnostics/DiagnosticsKPI.svelte';
@@ -645,7 +646,10 @@
                         <span class="dg-row-arrow">→</span>
                         <span class="dg-row-title">{r.toTitle}</span>
                       </span>
-                      <span class="dg-row-type">{r.type}</span>
+                      <span
+                        class="dg-row-type"
+                        style:--type-color={transitionTypeTone(r.type).color}
+                      >{r.type}</span>
                       <span class="dg-row-time">{fmtTime(r.date)}</span>
                     </button>
                   </li>
@@ -804,44 +808,76 @@
     flex-direction: column;
     gap: var(--space-3);
   }
+  /* Search alineado al patrón canónico del Sidebar (.search): grid 3 cols,
+     padding tighter, radius-md (no full pill — no respeta el lenguaje del
+     resto del shell), bg elevated → hover/focus a hover bg + border strong
+     + focus-ring del design system. Coherencia total con el search global. */
   .dg-search {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-2);
-    padding: 10px 14px;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-full);
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
     background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
     color: var(--text-secondary);
-    transition: border-color var(--duration-fast) var(--ease-ios-default);
+    min-height: 36px;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      border-color var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .dg-search:hover,
+  .dg-search:focus-within {
+    background: var(--bg-surface-hover);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
   }
   .dg-search:focus-within {
-    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
   }
   .dg-search input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    color: var(--text-primary);
-    outline: none;
+    width: 100%;
     min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--text-sm);
+    line-height: 1.2;
+    letter-spacing: var(--tracking-body);
+    padding: 0;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .dg-search input::-webkit-search-decoration,
+  .dg-search input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .dg-search input::placeholder {
+    color: var(--text-secondary);
   }
   .dg-search-clear {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     border: none;
-    border-radius: 50%;
-    background: var(--bg-surface-active);
-    color: var(--text-secondary);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-tertiary);
     cursor: pointer;
     display: grid;
     place-items: center;
     flex-shrink: 0;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
   }
   .dg-search-clear:hover {
-    background: var(--bg-surface-hover);
+    background: var(--bg-surface-active);
     color: var(--text-primary);
   }
 
@@ -1051,13 +1087,20 @@
     color: var(--text-quaternary);
     flex-shrink: 0;
   }
+  /* Badge del transition type tinted con la paleta de transition-type-tone
+     (mirror iOS line 937-952). El color base llega via custom prop
+     `--type-color` desde el inline style del span. background + border
+     usan color-mix sobre ese color para que combine con el fondo glass
+     del row sin chillar — bg al 16%, border al 32%, color del label
+     full saturation (legible). */
   .dg-row-type {
     font-size: 10px;
     font-weight: 700;
     letter-spacing: var(--tracking-label);
     text-transform: uppercase;
-    color: var(--text-secondary);
-    background: var(--bg-surface-elevated);
+    color: var(--type-color, var(--text-secondary));
+    background: color-mix(in srgb, var(--type-color, var(--bg-surface-elevated)) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--type-color, transparent) 32%, transparent);
     padding: 3px 8px;
     border-radius: var(--radius-full);
     flex-shrink: 0;
@@ -1096,11 +1139,11 @@
     color: var(--status-danger-text);
   }
 
-  /* ── Scrim debajo del sheet */
+  /* ── Scrim debajo del sheet (token semántico) */
   .dg-scrim {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--scrim);
     border: none;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;

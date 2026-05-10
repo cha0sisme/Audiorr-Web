@@ -16,6 +16,7 @@
    */
   import { X, Trash, Info } from 'phosphor-svelte';
   import type { TransitionRecord } from '$types/diagnostics';
+  import { transitionTypeTone } from '$utils/transition-type-tone';
   import StarRating10 from './StarRating10.svelte';
 
   type Props = {
@@ -161,7 +162,10 @@
         {/if}
       </p>
       <div class="dx-meta-row">
-        <span class="dx-type-badge">{record.type}</span>
+        <span
+          class="dx-type-badge"
+          style:--type-color={transitionTypeTone(record.type).color}
+        >{record.type}</span>
         <span class="dx-meta-date">{fmtDate(record.date)}</span>
       </div>
     </section>
@@ -399,12 +403,16 @@
     padding-top: var(--space-3);
     border-top: 1px solid var(--border-subtle);
   }
+  /* Badge tinted con la paleta transition-type-tone (mismo helper que la
+     row del listing). Color base via custom prop --type-color, bg+border
+     con color-mix. Coherencia visual entre row y detail. */
   .dx-type-badge {
     font-size: var(--text-xs);
     font-weight: 700;
     letter-spacing: var(--tracking-label);
-    color: var(--accent);
-    background: var(--accent-muted);
+    color: var(--type-color, var(--accent));
+    background: color-mix(in srgb, var(--type-color, var(--accent)) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--type-color, var(--accent)) 32%, transparent);
     padding: 4px 10px;
     border-radius: var(--radius-full);
   }
