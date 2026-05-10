@@ -259,70 +259,86 @@
       {/if}
     </div>
 
-    <!-- ─── ARTIST INFO: revelado con scroll ─────────────────────────── -->
+    <!-- ─── ARTIST INFO: cards diferenciadas estilo Spotify right rail ─
+         El bloque entero scroll-reveal queda lurking 60px abajo del video.
+         Cada card tiene su propio bg sólido + border + radius para que se
+         distingan visualmente del fondo dark del panel. -->
     {#if artist || artistInfo || topSongs.length > 0}
-      <section bind:this={infoEl} class="cp-artist-section">
-        <header class="cp-artist-header">
-          {#if artistImageUrl}
-            <img
-              class="cp-artist-avatar"
-              src={artistImageUrl}
-              alt=""
-              loading="lazy"
-              decoding="async"
-            />
-          {:else}
-            <div class="cp-artist-avatar cp-avatar-placeholder" aria-hidden="true">
-              <MusicNoteSimple size={28} weight="regular" />
+      <div bind:this={infoEl} class="cp-info-wrap">
+        <!-- ─── Card 1: About the artist ──────────────────────────────
+             Hero card mirror Spotify "About the artist": avatar full-width
+             como image-banner, kicker + nombre + bio debajo. -->
+        <article class="cp-card cp-about">
+          <div class="cp-about-cover">
+            {#if artistImageUrl}
+              <img
+                class="cp-about-img"
+                src={artistImageUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+            {:else}
+              <div class="cp-about-placeholder" aria-hidden="true">
+                <MusicNoteSimple size={48} weight="fill" />
+              </div>
+            {/if}
+            <div class="cp-about-scrim"></div>
+            <div class="cp-about-overlay">
+              <span class="cp-card-kicker">Acerca del artista</span>
+              <h3 class="cp-about-name">{artist?.name ?? artistName}</h3>
             </div>
-          {/if}
-          <div class="cp-artist-meta">
-            <span class="cp-kicker">Artista</span>
-            <h3 class="cp-artist-name">{artist?.name ?? artistName}</h3>
           </div>
-        </header>
+          {#if cleanBio}
+            <p class="cp-about-bio">{cleanBio}</p>
+          {/if}
+        </article>
 
-        {#if cleanBio}
-          <p class="cp-artist-bio">{cleanBio}</p>
-        {/if}
-
+        <!-- ─── Card 2: Populares ─────────────────────────────────────
+             Lista de top tracks por nombre del artista (Last.fm via
+             Subsonic getTopSongs). Click reproduce inmediato sin perder
+             la cola actual (insertNext + skipNext). -->
         {#if topSongs.length > 0}
-          <h4 class="cp-section-title">Populares</h4>
-          <ul class="cp-songs-list">
-            {#each topSongs as song (song.id)}
-              <li>
-                <button
-                  type="button"
-                  class="cp-song-row"
-                  onclick={() => playSong(song)}
-                >
-                  <span class="cp-song-thumb">
-                    {#if song.coverArt}
-                      <img
-                        src={getCoverArtUrl(song.coverArt, 80)}
-                        alt=""
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    {:else}
-                      <span class="cp-song-thumb-placeholder">
-                        <MusicNote size={18} weight="regular" />
-                      </span>
-                    {/if}
-                  </span>
-                  <span class="cp-song-meta">
-                    <span class="cp-song-title">{song.title}</span>
-                    <span class="cp-song-album">{song.album ?? ''}</span>
-                  </span>
-                  <span class="cp-song-play" aria-hidden="true">
-                    <Play size={14} weight="fill" />
-                  </span>
-                </button>
-              </li>
-            {/each}
-          </ul>
+          <article class="cp-card cp-populars">
+            <header class="cp-card-head">
+              <span class="cp-card-kicker">Populares</span>
+            </header>
+            <ul class="cp-songs-list">
+              {#each topSongs as song (song.id)}
+                <li>
+                  <button
+                    type="button"
+                    class="cp-song-row"
+                    onclick={() => playSong(song)}
+                  >
+                    <span class="cp-song-thumb">
+                      {#if song.coverArt}
+                        <img
+                          src={getCoverArtUrl(song.coverArt, 80)}
+                          alt=""
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      {:else}
+                        <span class="cp-song-thumb-placeholder">
+                          <MusicNote size={18} weight="regular" />
+                        </span>
+                      {/if}
+                    </span>
+                    <span class="cp-song-meta">
+                      <span class="cp-song-title">{song.title}</span>
+                      <span class="cp-song-album">{song.album ?? ''}</span>
+                    </span>
+                    <span class="cp-song-play" aria-hidden="true">
+                      <Play size={14} weight="fill" />
+                    </span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </article>
         {/if}
-      </section>
+      </div>
     {/if}
   </div>
 
@@ -468,74 +484,123 @@
     50%      { transform: translateX(-50%) translateY(-3px); }
   }
 
-  /* ─── ARTIST SECTION ─────────────────────────────────────────────────
-     Background con leve gradiente vertical para destacar transición video→
-     info. Padding generoso para respirar en wide. Scroll-margin-top facilita
-     el scrollIntoView (la sección queda alineada al top tras click). */
-  .cp-artist-section {
-    padding: var(--space-6) var(--space-5) var(--space-8);
+  /* ─── ARTIST INFO WRAP ───────────────────────────────────────────────
+     Container del scroll-reveal. Padding generoso, gap entre cards. El bg
+     transition video→info se hace con un degrade vertical sutil al fondo
+     dark del panel. Cada card hija tiene SU PROPIO bg sólido (cp-card)
+     para que se distingan visualmente del backdrop — patrón Spotify right
+     rail con boxes claramente separados. */
+  .cp-info-wrap {
+    padding: var(--space-5) var(--space-4) var(--space-8);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
     background:
       linear-gradient(180deg,
         rgba(0, 0, 0, 0.85) 0%,
-        rgba(8, 10, 14, 0.96) 40%,
+        rgba(8, 10, 14, 0.96) 30%,
         rgba(8, 10, 14, 1) 100%
       );
     color: rgba(255, 255, 255, 0.92);
-    scroll-margin-top: 0;
   }
 
-  .cp-artist-header {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    column-gap: var(--space-3);
-    margin-bottom: var(--space-4);
+  /* ─── Card base ─────────────────────────────────────────────────────
+     Surface elevada con border, radius lg. Patrón Spotify: cada bloque
+     informativo es una caja clara, fácil de escanear. Bg con leve
+     elevation sobre el wrap dark. */
+  .cp-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    isolation: isolate;
   }
-  .cp-artist-avatar {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    object-fit: cover;
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  .cp-card-head {
+    padding: var(--space-3) var(--space-4) 0;
   }
-  .cp-avatar-placeholder {
-    display: grid;
-    place-items: center;
-    color: rgba(255, 255, 255, 0.45);
-  }
-  .cp-artist-meta {
-    min-width: 0;
-  }
-  .cp-kicker {
+  .cp-card-kicker {
     display: block;
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
     letter-spacing: var(--tracking-label);
-    color: rgba(255, 255, 255, 0.55);
-    margin-bottom: 2px;
+    color: rgba(255, 255, 255, 0.6);
   }
-  .cp-artist-name {
+
+  /* ─── Card "About the artist" ───────────────────────────────────────
+     Cover image full-width como hero (similar a Spotify "About the
+     artist"). Scrim oscuro abajo + overlay con kicker + nombre Söhne 700.
+     Bio debajo, clamp 6 líneas con fade. */
+  .cp-about-cover {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .cp-about-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .cp-about-placeholder {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.3);
+    background:
+      radial-gradient(circle at 30% 30%, oklch(0.4 0.1 280), transparent 60%),
+      radial-gradient(circle at 70% 70%, oklch(0.35 0.12 200), transparent 55%);
+  }
+  /* Scrim degradado al fondo de la cover para que el overlay de texto
+     blanco lea sobre cualquier imagen. */
+  .cp-about-scrim {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      transparent 35%,
+      rgba(0, 0, 0, 0.55) 70%,
+      rgba(0, 0, 0, 0.85) 100%
+    );
+  }
+  .cp-about-overlay {
+    position: absolute;
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .cp-about-overlay .cp-card-kicker {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  .cp-about-name {
     margin: 0;
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
     font-weight: 700;
-    line-height: 1.2;
     letter-spacing: var(--tracking-display);
     color: #fff;
+    line-height: 1.15;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  .cp-artist-bio {
-    margin: 0 0 var(--space-5);
+  .cp-about-bio {
+    margin: 0;
+    padding: var(--space-3) var(--space-4) var(--space-4);
     font-size: var(--text-sm);
     line-height: 1.6;
     color: rgba(255, 255, 255, 0.72);
-    /* Limita la bio a 6 líneas con fade — Spotify tampoco muestra biografías
-       enteras inline; si quieres leer todo, hay otros lugares (artist page). */
+    /* Clamp 6 líneas — Spotify tampoco muestra biografías enteras inline.
+       Si quieres leer todo, vas al artist page. */
     display: -webkit-box;
     -webkit-line-clamp: 6;
     line-clamp: 6;
@@ -543,21 +608,18 @@
     overflow: hidden;
   }
 
-  .cp-section-title {
-    margin: 0 0 var(--space-3);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: var(--tracking-label);
-    color: rgba(255, 255, 255, 0.55);
+  /* ─── Card "Populares" ─────────────────────────────────────────────── */
+  .cp-populars {
+    padding-bottom: var(--space-2);
   }
 
-  /* Lista de canciones populares — fila tap-friendly, hover bg sutil. */
+  /* Lista de canciones populares — fila tap-friendly, hover bg sutil.
+     Vive dentro de la card .cp-populars con padding del card en lugar
+     de inline. */
   .cp-songs-list {
     list-style: none;
     margin: 0;
-    padding: 0;
+    padding: var(--space-2);
     display: flex;
     flex-direction: column;
     gap: 2px;
