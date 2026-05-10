@@ -365,6 +365,46 @@ class ConnectService {
     });
   }
 
+  /**
+   * Emite un scrobble al hub vía socket. El backend lo escribe en
+   * wrapped.db con dedupe 600s (no duplicará con el POST REST que
+   * ScrobbleService manda en paralelo si el socket no está conectado).
+   * Mirror Swift line 256-274.
+   *
+   * - `playedAt` se serializa como ISO 8601 (ej. 2026-05-10T14:30:00.000Z).
+   * - `contextUri`/`contextName` opcionales — si vienen, el wrapped.db los
+   *   usa para alimentar `recentContexts` del home.
+   *
+   * Llamado por ScrobbleService cuando `hubConnected === true`. Si el
+   * socket cae justo al emitir, socket.io-client lo bufferea hasta la
+   * reconexión (default 3 reintentos antes de descartar).
+   */
+  emitScrobble(payload: {
+    songId: string;
+    title: string;
+    artist: string;
+    album: string;
+    albumId?: string;
+    duration: number;
+    playedAt: Date;
+    contextUri?: string;
+    contextName?: string;
+  }): void {
+    if (!this.socket?.connected) return;
+    const out: Record<string, unknown> = {
+      songId: payload.songId,
+      title: payload.title,
+      artist: payload.artist,
+      album: payload.album,
+      duration: payload.duration,
+      playedAt: payload.playedAt.toISOString()
+    };
+    if (payload.albumId) out.albumId = payload.albumId;
+    if (payload.contextUri) out.contextUri = payload.contextUri;
+    if (payload.contextName) out.contextName = payload.contextName;
+    this.socket.emit('scrobble', out);
+  }
+
   /** Variante throttled. `significantChange=true` siempre emite; los progress
       ticks se cap a 1Hz para no saturar el socket. Mirror Swift line 281-294. */
   broadcastStateIfNeeded(significantChange: boolean = false): void {

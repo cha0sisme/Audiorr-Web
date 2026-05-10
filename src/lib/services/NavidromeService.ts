@@ -203,6 +203,29 @@ export async function ping(): Promise<{ ok: boolean; version: string }> {
   return { ok: envelope.status === 'ok', version: envelope.version };
 }
 
+/**
+ * Subsonic scrobble.view. Si `submission=true`, registra el play en
+ * Navidrome (cuenta para Last.fm si el server tiene plugin); si false,
+ * actúa como "now playing" indicator.
+ *
+ * `time` en SEGUNDOS — el wrapper lo convierte a ms (Subsonic spec).
+ * Tira `NavidromeError` si la respuesta no es status=ok.
+ */
+export async function scrobble(
+  songId: string,
+  options: { time?: number; submission?: boolean } = {}
+): Promise<void> {
+  const creds = requireCreds();
+  const params: Record<string, string | number | boolean> = {
+    id: songId,
+    submission: options.submission ?? true
+  };
+  if (options.time !== undefined) {
+    params.time = options.time * 1000;
+  }
+  await call(creds, 'scrobble', params);
+}
+
 export async function getAlbumList2(
   type: 'newest' | 'recent' | 'frequent' | 'random' | 'starred' | 'alphabeticalByName',
   size = 20,

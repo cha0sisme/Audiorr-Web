@@ -758,7 +758,15 @@ class QueueManager {
     void import('$services/ConnectService.svelte').then(({ connectService }) => {
       connectService.broadcastStateIfNeeded(false);
     });
-    // TODO Phase 2: ScrobbleService.progressUpdate(songId, currentTime, duration)
+    // ScrobbleService espera al threshold (50% duration o 4min wall-clock).
+    const cur = this.currentSong;
+    if (cur) {
+      void import('$services/ScrobbleService.svelte').then(
+        ({ scrobbleService }) => {
+          scrobbleService.progressUpdate(cur.id, _currentTime, _duration);
+        }
+      );
+    }
     // TODO Phase 2: prepareNextForCrossfade (DJMixingService)
   }
 
@@ -892,6 +900,17 @@ class QueueManager {
     void import('$services/ConnectService.svelte').then(({ connectService }) => {
       connectService.broadcastStateIfNeeded(true);
     });
+
+    // ScrobbleService.songDidStart marca la canción + manda "now playing"
+    // a Navidrome. El scrobble real lo dispara progressUpdate al alcanzar
+    // el threshold. NOTA anti-smartmix: si playbackMode==='dj', el
+    // ScrobbleService internamente NO enviará contextUri al backend
+    // (regla director 2026-05-09). El home filtra defensivo igualmente.
+    void import('$services/ScrobbleService.svelte').then(
+      ({ scrobbleService }) => {
+        scrobbleService.songDidStart(cur);
+      }
+    );
 
     // TODO Phase 2 (DJ Mixing port): cuando `startAt` cae en la zona outro
     // de la canción (últimos N segundos definidos por outroStartTime del
