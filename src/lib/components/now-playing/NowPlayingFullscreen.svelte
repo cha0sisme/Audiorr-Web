@@ -43,9 +43,10 @@
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import {
     CaretDown, DotsThree, MusicNote, Heart, SkipForward, SkipBack,
-    Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast, MicrophoneStage,
-    Queue as QueueIcon, FilmStrip, Image as ImageIcon, ListPlus
+    Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast,
+    Queue as QueueIcon, FilmStrip, ListPlus
   } from 'phosphor-svelte';
+  import LyricsIcon from '$components/shared/LyricsIcon.svelte';
 
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
@@ -370,6 +371,27 @@
     player.volume = v / 100;
   }
 
+  // ─── Flash feedback (mirror MiniPlayer) ─────────────────────────────────
+  // Mismo lenguaje visual que MiniPlayer.flash(): pop+halo diferenciado por
+  // botón. Coherencia entre la vista compacta y la fullscreen — el usuario
+  // reconoce el feedback como propio de Audiorr, no genérico.
+  type FlashKey =
+    | 'heart' | 'playpause' | 'skipback' | 'skipforward'
+    | 'lyrics' | 'canvas' | 'connect' | 'queue' | 'volume';
+  let just = $state<Record<FlashKey, boolean>>({
+    heart: false, playpause: false, skipback: false, skipforward: false,
+    lyrics: false, canvas: false, connect: false, queue: false, volume: false
+  });
+  const flashTimers: Partial<Record<FlashKey, ReturnType<typeof setTimeout>>> = {};
+  function flash(k: FlashKey) {
+    just[k] = false;
+    if (flashTimers[k]) clearTimeout(flashTimers[k]);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      just[k] = true;
+      flashTimers[k] = setTimeout(() => { just[k] = false; }, 760);
+    }));
+  }
+
   // ─── Custom transition ──────────────────────────────────────────────────
   // Slide-up + scale para el overlay completo. cubicOut entrando, cubicIn
   // saliendo. Igual sensación que el push iOS de full-screen modals.
@@ -606,8 +628,10 @@
           </div>
           <button
             type="button"
-            class="np-icon-btn np-heart"
+            class="np-icon-btn np-heart np-heart-btn"
+            class:just-clicked={just.heart}
             aria-label="Añadir a favoritos"
+            onclick={() => flash('heart')}
           >
             <Heart size={22} weight="regular" />
           </button>
@@ -768,17 +792,19 @@
         </button>
         <button
           type="button"
-          class="np-icon-btn np-skip"
+          class="np-icon-btn np-skip np-skipback-btn"
+          class:just-clicked={just.skipback}
           aria-label="Anterior"
-          onclick={() => player.previous()}
+          onclick={() => { flash('skipback'); player.previous(); }}
         >
           <SkipBack size={28} weight="fill" />
         </button>
         <button
           type="button"
           class="np-play"
+          class:just-clicked={just.playpause}
           aria-label={player.isPlaying ? 'Pausar' : 'Reproducir'}
-          onclick={() => player.toggle()}
+          onclick={() => { flash('playpause'); player.toggle(); }}
         >
           {#if player.isPlaying}
             <Pause size={32} weight="fill" />
@@ -788,9 +814,10 @@
         </button>
         <button
           type="button"
-          class="np-icon-btn np-skip"
+          class="np-icon-btn np-skip np-skipforward-btn"
+          class:just-clicked={just.skipforward}
           aria-label="Siguiente"
-          onclick={() => player.next()}
+          onclick={() => { flash('skipforward'); player.next(); }}
         >
           <SkipForward size={28} weight="fill" />
         </button>
@@ -802,7 +829,9 @@
       <!-- Volumen + bottom actions -->
       <div class="np-bottom-row">
         <div class="np-volume">
-          <SpeakerHigh size={16} weight="regular" />
+          <span class="np-volume-icon np-volume-btn" class:just-clicked={just.volume} aria-hidden="true">
+            <SpeakerHigh size={16} weight="regular" />
+          </span>
           <div class="np-vol-slider">
             <input
               type="range"
@@ -811,6 +840,7 @@
               step="1"
               value={volumePct}
               oninput={onVolume}
+              onchange={() => flash('volume')}
               aria-label="Volumen"
               class="np-range"
             />
@@ -823,44 +853,37 @@
         <div class="np-actions">
           <button
             type="button"
-            class="np-icon-btn"
+            class="np-icon-btn np-lyrics-btn"
             class:active-mode={mode === 'lyrics'}
+            class:just-clicked={just.lyrics}
             aria-label="Ver letras"
             aria-pressed={mode === 'lyrics'}
-            onclick={() => setMode(mode === 'lyrics' ? 'cover' : 'lyrics')}
+            onclick={() => { flash('lyrics'); setMode(mode === 'lyrics' ? 'cover' : 'lyrics'); }}
           >
-            <MicrophoneStage size={20} weight="fill" />
+            <LyricsIcon size={20} filled={mode === 'lyrics'} />
           </button>
           {#if hasCanvas}
             <button
               type="button"
-              class="np-icon-btn"
+              class="np-icon-btn np-canvas-btn"
               class:active-mode={mode === 'canvas'}
+              class:just-clicked={just.canvas}
               aria-label="Ver canvas"
               aria-pressed={mode === 'canvas'}
-              onclick={() => setMode(mode === 'canvas' ? 'cover' : 'canvas')}
+              onclick={() => { flash('canvas'); setMode(mode === 'canvas' ? 'cover' : 'canvas'); }}
             >
               <FilmStrip size={20} weight="regular" />
-            </button>
-          {/if}
-          {#if mode !== 'cover'}
-            <button
-              type="button"
-              class="np-icon-btn"
-              aria-label="Ver portada"
-              onclick={() => setMode('cover')}
-            >
-              <ImageIcon size={20} weight="regular" />
             </button>
           {/if}
           {#if hasAnyDevice}
             <button
               bind:this={deviceBtnEl}
               type="button"
-              class="np-icon-btn"
-              class:active-mode={deviceActive}
+              class="np-icon-btn np-connect-btn"
+              class:active-mode={deviceActive || devicePickerOpen}
+              class:just-clicked={just.connect}
               aria-label="Dispositivos"
-              onclick={() => (devicePickerOpen = !devicePickerOpen)}
+              onclick={() => { flash('connect'); devicePickerOpen = !devicePickerOpen; }}
             >
               <Broadcast size={20} weight="regular" />
               {#if deviceActive}
@@ -875,11 +898,12 @@
           {/if}
           <button
             type="button"
-            class="np-icon-btn"
+            class="np-icon-btn np-queue-btn"
             class:active-mode={innerQueueOpen}
+            class:just-clicked={just.queue}
             aria-label="Cola"
             aria-pressed={innerQueueOpen}
-            onclick={toggleQueueSheet}
+            onclick={() => { flash('queue'); toggleQueueSheet(); }}
           >
             <QueueIcon size={20} weight="regular" />
           </button>
@@ -1038,7 +1062,11 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    overflow: hidden;
+    /* `overflow: visible` (antes `hidden`) — el clip cortaba la sombra
+       superior del canvas-stage y rompía el efecto de "phone-frame
+       flotante". Los panes inactivos ya tienen opacity:0 y pointer-events:
+       none durante el cross-fade; no sangran visualmente. */
+    overflow: visible;
   }
 
   /* Mode panes: cada uno absolute fill del .np-content. Cross-fade + blur-
@@ -1331,25 +1359,39 @@
     margin: 0 auto;
     box-sizing: border-box;
   }
-  /* Canvas mode pane: phone-frame centrado + meta debajo. */
+  /* Canvas mode pane: phone-frame centrado + meta debajo. Padding-top da
+     respiro a la sombra superior del stage (28px), padding-bottom respiro
+     a la inferior — sin ellos la sombra se vería visualmente "amputada"
+     por el clip del pane absoluto. justify-items:center alinea el stage
+     horizontalmente sin que dependa de un width:100%. */
   .np-pane-canvas {
-    grid-template-rows: 1fr auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     align-content: center;
-    gap: var(--space-5);
+    justify-items: center;
+    gap: var(--space-4);
     width: 100%;
+    padding-top: 32px;
+    padding-bottom: 12px;
   }
   /* "Phone frame": aspect 9:16 (formato nativo Spotify Canvas). El height
-     manda; width sale de aspect-ratio. min(72vh, 640px) para que entre en
-     screens razonables. Border-radius xl + shadow profundo simula la
-     sensación de "device portrait" flotando sobre el backdrop. */
+     ocupa el espacio disponible del pane (no vh absoluto, que rebasaba
+     cuando topbar+transport tomaban demasiado). aspect-ratio calcula el
+     width. max-height y max-width acotan en pantallas grandes. Border-
+     radius xl + shadow profundo simula "device portrait" flotando. */
   .np-canvas-stage {
-    height: min(72vh, 640px);
+    height: 100%;
+    max-height: 620px;
     aspect-ratio: 9 / 16;
-    max-width: calc(100vw - 80px);
+    width: auto;
+    max-width: min(360px, calc(100vw - 80px));
     border-radius: var(--radius-xl);
     overflow: hidden;
     background: #000;
+    /* Sombra simétrica: arriba sutil, abajo más larga para sensación de
+       elevación. Ambas direcciones se ven gracias a `overflow:visible` del
+       np-content. */
     box-shadow:
+      0 -4px 20px rgba(0, 0, 0, 0.35),
       0 28px 80px rgba(0, 0, 0, 0.65),
       0 8px 28px rgba(0, 0, 0, 0.4);
     isolation: isolate;
@@ -1679,6 +1721,322 @@
     .np-info {
       width: calc(100vw - 32px);
     }
+  }
+
+  /* ============================================================================
+     FLASH FEEDBACK — mismo lenguaje visual que MiniPlayer.
+     Apple/Disney "12 principles": anticipation (squash) → action (overshoot)
+     → settling. Multi-stage keyframes con filter brightness/saturate en peak,
+     halos con blur sutil. Diferenciación por botón:
+       Heart        → pop + halo coral cálido (no accent)
+       Play/Pause   → box-shadow tactile (vive dentro, no ring exterior)
+       Skip prev/fw → bounce direccional (translateX hacia la dirección)
+       Lyrics       → pulse del micro con drop-shadow (encendido)
+       Canvas       → iris focus + rings concéntricos (semántica de video)
+       Connect      → ondas concéntricas (broadcast emitiendo)
+       Queue        → lift + glow inferior (panel emergiendo)
+       Volume       → vibration + sonar lateral (membrana altavoz)
+     ============================================================================ */
+
+  .np-heart-btn.just-clicked > :global(svg) {
+    animation: np-heart-burst 760ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    transform-origin: center;
+    will-change: transform, filter;
+  }
+  .np-heart-btn.just-clicked::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    border: 1.5px solid oklch(0.72 0.22 14);
+    pointer-events: none;
+    opacity: 0;
+    animation: np-heart-ring 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .np-heart-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: -12px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center,
+      oklch(0.72 0.22 14 / 0.55) 0%,
+      oklch(0.72 0.22 14 / 0.25) 28%,
+      transparent 65%);
+    filter: blur(2px);
+    pointer-events: none;
+    animation: np-heart-glow 820ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes np-heart-burst {
+    0%   { transform: scale(1); filter: none; }
+    14%  { transform: scale(0.62); filter: brightness(0.95); }
+    34%  { transform: scale(1.55) rotate(-4deg); filter: brightness(1.25) saturate(1.6) drop-shadow(0 0 8px oklch(0.72 0.22 14 / 0.75)); }
+    58%  { transform: scale(0.88) rotate(3deg); filter: brightness(1.08) saturate(1.2); }
+    80%  { transform: scale(1.05) rotate(-1deg); filter: none; }
+    100% { transform: scale(1); }
+  }
+  @keyframes np-heart-ring {
+    0%   { transform: scale(0.7); opacity: 0; }
+    18%  { opacity: 0.95; }
+    100% { transform: scale(2.0); opacity: 0; }
+  }
+  @keyframes np-heart-glow {
+    0%   { transform: scale(0.55); opacity: 0; }
+    25%  { transform: scale(1.1); opacity: 0.85; }
+    100% { transform: scale(2.1); opacity: 0; }
+  }
+
+  /* Play/Pause grande (64px disco blanco). Sin ring exterior — el disco YA
+     es el límite visual. Spring squash→overshoot→settle con box-shadow
+     que crece y se intensifica brevemente, + inset glow que aporta
+     sensación de "press into glass". */
+  .np-play.just-clicked {
+    animation: np-pp-tactile 580ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter, box-shadow;
+  }
+  @keyframes np-pp-tactile {
+    0%   {
+      transform: scale(1);
+      filter: none;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 0 transparent;
+    }
+    16%  {
+      transform: scale(0.9);
+      filter: brightness(0.95);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5), inset 0 0 0 0 transparent;
+    }
+    42%  {
+      transform: scale(1.14);
+      filter: brightness(1.12) saturate(1.05);
+      box-shadow:
+        0 14px 38px rgba(0, 0, 0, 0.55),
+        0 6px 18px rgba(255, 255, 255, 0.12),
+        inset 0 0 14px rgba(255, 255, 255, 0.35);
+    }
+    66%  {
+      transform: scale(0.96);
+      filter: brightness(1.05);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45), inset 0 0 0 0 transparent;
+    }
+    88%  { transform: scale(1.02); filter: none; }
+    100% {
+      transform: scale(1);
+      filter: none;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), inset 0 0 0 0 transparent;
+    }
+  }
+
+  /* Skip prev/forward — bounce direccional. El icono se desplaza hacia su
+     dirección (izquierda para back, derecha para forward) con un sutil
+     drop-shadow trailing en el peak para sensación de "ímpetu". Más
+     sutil que un pop — son secundarios, no protagonistas. */
+  .np-skipback-btn.just-clicked > :global(svg) {
+    animation: np-skip-back 460ms cubic-bezier(0.32, 1.6, 0.5, 0.95);
+    will-change: transform, filter;
+  }
+  .np-skipforward-btn.just-clicked > :global(svg) {
+    animation: np-skip-forward 460ms cubic-bezier(0.32, 1.6, 0.5, 0.95);
+    will-change: transform, filter;
+  }
+  @keyframes np-skip-back {
+    0%   { transform: translateX(0) scale(1); filter: none; }
+    35%  { transform: translateX(-6px) scale(1.08); filter: brightness(1.15) drop-shadow(2px 0 4px rgba(255,255,255,0.25)); }
+    65%  { transform: translateX(2px) scale(0.97); filter: brightness(1.05); }
+    100% { transform: translateX(0) scale(1); filter: none; }
+  }
+  @keyframes np-skip-forward {
+    0%   { transform: translateX(0) scale(1); filter: none; }
+    35%  { transform: translateX(6px) scale(1.08); filter: brightness(1.15) drop-shadow(-2px 0 4px rgba(255,255,255,0.25)); }
+    65%  { transform: translateX(-2px) scale(0.97); filter: brightness(1.05); }
+    100% { transform: translateX(0) scale(1); filter: none; }
+  }
+
+  /* Lyrics (LyricsIcon) — pulse "encendido" del icono con drop-shadow
+     accent. El icono se "ilumina" momentáneamente y el filled toma el
+     relevo. El target del animation es `.lyrics-icon` (span con mask-image),
+     no un svg, porque el componente LyricsIcon renderiza el SVG via
+     `mask-image: url(...)` para poder heredar currentColor. */
+  .np-lyrics-btn.just-clicked > :global(.lyrics-icon) {
+    animation: np-lyrics-on 520ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter;
+  }
+  @keyframes np-lyrics-on {
+    0%   { transform: scale(1); filter: none; }
+    20%  { transform: scale(0.88); filter: brightness(0.92); }
+    50%  { transform: scale(1.16); filter: brightness(1.3) saturate(1.4) drop-shadow(0 0 6px rgba(255,255,255,0.8)); }
+    75%  { transform: scale(0.96); filter: brightness(1.1); }
+    100% { transform: scale(1); filter: none; }
+  }
+
+  /* Canvas — iris focus + 2 rings concéntricos (igual que MiniPlayer pero
+     escalado para el tamaño 40px). */
+  .np-canvas-btn.just-clicked > :global(svg) {
+    animation: np-canvas-focus 540ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter;
+  }
+  .np-canvas-btn.just-clicked::before,
+  .np-canvas-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .np-canvas-btn.just-clicked::before {
+    animation: np-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .np-canvas-btn.just-clicked::after {
+    animation: np-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1) 100ms;
+  }
+  @keyframes np-canvas-focus {
+    0%   { transform: scale(1); filter: none; }
+    20%  { transform: scale(0.78); filter: saturate(1.5) brightness(0.85); }
+    50%  { transform: scale(1.2); filter: saturate(1.7) brightness(1.3) drop-shadow(0 0 6px rgba(255,255,255,0.6)); }
+    75%  { transform: scale(0.96); filter: saturate(1.2); }
+    100% { transform: scale(1); filter: none; }
+  }
+  @keyframes np-canvas-ring {
+    0%   { transform: scale(0.5); opacity: 0; }
+    20%  { opacity: 0.85; }
+    100% { transform: scale(2.0); opacity: 0; }
+  }
+
+  /* Connect — 2 ondas concéntricas + brightness pulse del icono. */
+  .np-connect-btn.just-clicked > :global(svg) {
+    animation: np-connect-emit 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: filter;
+  }
+  .np-connect-btn.just-clicked::before,
+  .np-connect-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.35);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .np-connect-btn.just-clicked::before {
+    animation: np-connect-wave 760ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .np-connect-btn.just-clicked::after {
+    animation: np-connect-wave 760ms cubic-bezier(0.16, 1, 0.3, 1) 130ms;
+  }
+  @keyframes np-connect-emit {
+    0%, 100% { filter: none; }
+    25%      { filter: brightness(1.35) drop-shadow(0 0 6px rgba(255,255,255,0.7)); }
+    60%      { filter: brightness(1.1); }
+  }
+  @keyframes np-connect-wave {
+    0%   { transform: scale(0.35); opacity: 0; }
+    14%  { opacity: 1; }
+    100% { transform: scale(2.0); opacity: 0; }
+  }
+
+  /* Queue — lift + glow inferior. */
+  .np-queue-btn.just-clicked > :global(svg) {
+    animation: np-queue-lift 580ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter;
+  }
+  .np-queue-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    bottom: 4px;
+    left: 50%;
+    width: 28px;
+    height: 7px;
+    margin-left: -14px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center,
+      rgba(255, 255, 255, 0.7) 0%,
+      transparent 70%);
+    filter: blur(3px);
+    pointer-events: none;
+    opacity: 0;
+    animation: np-queue-glow 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes np-queue-lift {
+    0%   { transform: translateY(0) rotate(0); filter: none; }
+    18%  { transform: translateY(1px) rotate(2deg); }
+    44%  { transform: translateY(-5px) rotate(-6deg); filter: brightness(1.2) drop-shadow(0 2px 4px rgba(255,255,255,0.4)); }
+    70%  { transform: translateY(1.5px) rotate(3deg); filter: brightness(1.05); }
+    100% { transform: translateY(0) rotate(0); filter: none; }
+  }
+  @keyframes np-queue-glow {
+    0%   { opacity: 0; transform: scaleX(0.4); }
+    50%  { opacity: 0.9; transform: scaleX(1.3); }
+    100% { opacity: 0; transform: scaleX(0.9); }
+  }
+
+  /* Volumen — el icono SpeakerHigh vibra + sonar lateral. El span wrapper
+     .np-volume-icon es position:relative para anclar el ::after. */
+  .np-volume-icon {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    color: inherit;
+  }
+  .np-volume-btn.just-clicked > :global(svg) {
+    animation: np-volume-vibrate 380ms cubic-bezier(0.36, 0, 0.64, 1);
+    will-change: transform, filter;
+  }
+  .np-volume-btn.just-clicked::before,
+  .np-volume-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 75%;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .np-volume-btn.just-clicked::before {
+    animation: np-volume-wave 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .np-volume-btn.just-clicked::after {
+    animation: np-volume-wave 560ms cubic-bezier(0.22, 1, 0.36, 1) 130ms;
+  }
+  @keyframes np-volume-vibrate {
+    0%, 100% { transform: scale(1) translateX(0); filter: none; }
+    20%      { transform: scale(1.1) translateX(-1px); filter: brightness(1.2); }
+    45%      { transform: scale(1.05) translateX(1px); filter: brightness(1.08); }
+    70%      { transform: scale(1.01) translateX(-0.5px); }
+  }
+  @keyframes np-volume-wave {
+    0%   { transform: scale(0.3) translateX(-2px); opacity: 0; }
+    16%  { opacity: 0.95; }
+    100% { transform: scale(2.0) translateX(3px); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .np-heart-btn.just-clicked > :global(svg),
+    .np-play.just-clicked,
+    .np-skipback-btn.just-clicked > :global(svg),
+    .np-skipforward-btn.just-clicked > :global(svg),
+    .np-lyrics-btn.just-clicked > :global(.lyrics-icon),
+    .np-canvas-btn.just-clicked > :global(svg),
+    .np-connect-btn.just-clicked > :global(svg),
+    .np-queue-btn.just-clicked > :global(svg),
+    .np-volume-btn.just-clicked > :global(svg) { animation: none; }
+    .np-heart-btn.just-clicked::before,
+    .np-heart-btn.just-clicked::after,
+    .np-canvas-btn.just-clicked::before,
+    .np-canvas-btn.just-clicked::after,
+    .np-connect-btn.just-clicked::before,
+    .np-connect-btn.just-clicked::after,
+    .np-queue-btn.just-clicked::after,
+    .np-volume-btn.just-clicked::before,
+    .np-volume-btn.just-clicked::after { animation: none; opacity: 0; }
   }
 
   /* Reduced motion: el sistema ya pone --duration-* a 0ms via primitives.

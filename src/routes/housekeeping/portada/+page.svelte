@@ -485,14 +485,11 @@
     background: var(--hk-card-bg);
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: var(--hk-card-border);
     border-radius: var(--hk-card-radius);
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
-    transition: border-color 240ms var(--hk-spring-soft);
   }
-  .hk-card:hover { border: var(--hk-card-border-hover); }
 
   .hk-section-head {
     display: flex;
@@ -539,14 +536,11 @@
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
     background: var(--hk-tile-bg);
-    border: var(--hk-tile-border);
     border-radius: 14px;
     transition:
-      border-color 200ms var(--hk-spring-soft),
       opacity 200ms var(--hk-spring-soft),
       transform 200ms var(--hk-spring-soft);
   }
-  .hk-row:hover { border: var(--hk-tile-border-hover); }
   .hk-row.dragging {
     opacity: 0.4;
     transform: scale(0.96);
@@ -690,8 +684,7 @@
   .hk-info {
     margin: 0;
     padding: var(--space-3) var(--space-4);
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
-    border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
     border-radius: 10px;
     color: var(--text-secondary);
     font-size: var(--text-sm);
@@ -702,8 +695,7 @@
     padding: 10px 14px;
     font-size: var(--text-sm);
     color: var(--text-tertiary);
-    background: transparent;
-    border: 1.5px dashed color-mix(in srgb, var(--border-subtle) 80%, transparent);
+    background: var(--bg-canvas);
     border-radius: 10px;
     text-align: center;
     line-height: 1.5;
@@ -727,7 +719,6 @@
     gap: 6px;
     padding: 4px 4px 4px 6px;
     background: var(--bg-surface);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
     border-radius: 999px;
     max-width: 220px;
   }
@@ -818,8 +809,8 @@
     overflow-y: auto;
     padding: 6px;
     background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
     border-radius: 12px;
+    box-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.35), 0 4px 10px -4px rgba(0, 0, 0, 0.2);
     animation: hk-picker-in 200ms var(--hk-spring);
   }
   @keyframes hk-picker-in {
@@ -904,7 +895,7 @@
     background: var(--bg-glass-thin);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    border: 0;
     border-radius: 999px;
     color: var(--text-primary);
     font: inherit;
@@ -931,8 +922,8 @@
     background: var(--hk-card-bg);
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: var(--hk-card-border);
     border-radius: 999px;
+    box-shadow: 0 16px 40px -14px rgba(0, 0, 0, 0.4), 0 4px 12px -4px rgba(0, 0, 0, 0.22);
     opacity: 0;
     transform: translateY(20px) scale(0.96);
     pointer-events: none;

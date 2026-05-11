@@ -16,9 +16,12 @@
  * (ver LyricsService.swift:82-86). En cualquier otro caso esperamos los 3 y
  * elegimos en el orden documentado.
  *
- * Cache: songId → result. NO cacheamos resultados vacíos para que el path
- * de retry (cuando el title llega después del songId vía race) pueda
- * recuperar — mismo razonamiento que iOS líneas 51-60.
+ * Cache: songId → result, LRU con tope `CACHE_CAP`. JS Map preserva orden
+ * de inserción, así que un `delete + set` en cada `get` lleva la entrada
+ * al final → la cabeza del Map es siempre la menos recientemente usada.
+ * NO cacheamos resultados vacíos para que el path de retry (cuando el
+ * title llega después del songId vía race) pueda recuperar — mismo
+ * razonamiento que iOS líneas 51-60.
  */
 
 import {
@@ -88,6 +91,11 @@ function parsePlain(text: string, source: LyricsSource): LyricsResult {
 // Service singleton
 // ============================================================================
 
+/** Tope del cache en memoria. ~150 letras ≈ 750KB-1.5MB con peor caso
+    text-heavy. Suficiente para una sesión larga sin acumular indefinida-
+    mente. Cuando se rebasa, eviccionamos la entrada menos reciente. */
+const CACHE_CAP = 150;
+
 class LyricsServiceImpl {
   private cache = new Map<string, LyricsResult>();
   private pending = new Map<string, Promise<LyricsResult>>();
@@ -96,7 +104,14 @@ class LyricsServiceImpl {
     if (!songId) return EMPTY_LYRICS;
 
     const cached = this.cache.get(songId);
-    if (cached) return cached;
+    if (cached) {
+      // Touch: re-insertar al final para marcar como "recientemente usado".
+      // En JS Map el orden es inserción — re-set lleva al final sin cambiar
+      // el valor (operación O(1) amortizada).
+      this.cache.delete(songId);
+      this.cache.set(songId, cached);
+      return cached;
+    }
 
     const existing = this.pending.get(songId);
     if (existing) return existing;
@@ -112,12 +127,25 @@ class LyricsServiceImpl {
     // completa recupera. Mismo razonamiento que iOS líneas 51-60.
     if (result.lines.length > 0) {
       this.cache.set(songId, result);
+      // Eviction LRU: si rebasamos el cap, eliminar la primera key (la
+      // menos recientemente usada). Map.keys().next() es O(1).
+      if (this.cache.size > CACHE_CAP) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest !== undefined) this.cache.delete(oldest);
+      }
     }
     return result;
   }
 
   invalidate(songId: string): void {
     this.cache.delete(songId);
+  }
+
+  /** Vacía el cache entero. Pensado para usuarios que cambian de servidor
+      (los songIds son del servidor anterior y ya no apuntan a nada). */
+  clear(): void {
+    this.cache.clear();
+    this.pending.clear();
   }
 
   // ──────────────────────────────────────────────────────────────────────

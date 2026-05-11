@@ -351,7 +351,6 @@
     background: var(--bg-surface-elevated);
     border-radius: var(--radius-lg);
     padding: var(--space-4);
-    border: 1px solid var(--border-subtle);
   }
   .dx-section-title {
     margin: 0 0 var(--space-3);
@@ -411,8 +410,7 @@
     font-weight: 700;
     letter-spacing: var(--tracking-label);
     color: var(--type-color, var(--accent));
-    background: color-mix(in srgb, var(--type-color, var(--accent)) 16%, transparent);
-    border: 1px solid color-mix(in srgb, var(--type-color, var(--accent)) 32%, transparent);
+    background: color-mix(in srgb, var(--type-color, var(--accent)) 22%, transparent);
     padding: 4px 10px;
     border-radius: var(--radius-full);
   }
@@ -495,7 +493,6 @@
     font-weight: 600;
     padding: 3px 9px;
     border-radius: var(--radius-full);
-    border: 1px solid var(--border-subtle);
     background: var(--bg-surface);
     color: var(--text-secondary);
     letter-spacing: 0.01em;
@@ -503,17 +500,14 @@
   .dx-chip[data-tone='accent'] {
     color: var(--accent);
     background: var(--accent-muted);
-    border-color: transparent;
   }
   .dx-chip[data-tone='success'] {
     color: var(--status-success-text);
     background: var(--status-success-bg);
-    border-color: transparent;
   }
   .dx-chip[data-tone='warning'] {
     color: var(--status-warning-text);
     background: var(--status-warning-bg);
-    border-color: transparent;
   }
 
   /* Telemetría grid */

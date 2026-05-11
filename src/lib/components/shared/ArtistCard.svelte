@@ -27,8 +27,11 @@
     if (coverEl) coverEl.style.viewTransitionName = `artist-${id}`;
   }
 
+  // 0 álbumes = artista colaborador sin discografía propia indexada
+  // (típico en resultados de búsqueda). Mostrar "0 álbumes" confunde —
+  // tratamos 0 igual que undefined → subtítulo genérico "Artista".
   const subtitle = $derived(
-    albumCount === undefined
+    albumCount === undefined || albumCount === 0
       ? 'Artista'
       : `${albumCount} ${albumCount === 1 ? 'álbum' : 'álbumes'}`
   );

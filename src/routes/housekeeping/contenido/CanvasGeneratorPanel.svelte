@@ -123,6 +123,20 @@
     retry: false
   }));
 
+  // El backend a veces devuelve un CanvasEntry con `canvasUrl: null` y
+  // `localPath: null` para canciones que solo tienen metadata sembrada
+  // pero sin canvas resuelto. Un `if existingQ.data` directo trataría eso
+  // como "tiene canvas" → falso positivo. Solo consideramos que hay canvas
+  // cuando existe URL externa o localPath.
+  const existingCanvas = $derived<CanvasEntry | null>(
+    existingQ.data && (existingQ.data.canvasUrl || existingQ.data.localPath)
+      ? existingQ.data
+      : null
+  );
+  const existingCanvasUrl = $derived(
+    existingCanvas ? existingCanvasVideoUrl(existingCanvas) : null
+  );
+
   // ─── Cuando un job termina → invalidar canvas caches ──────────────────
   let lastDoneJobId = $state<string | null>(null);
   $effect(() => {
@@ -351,11 +365,11 @@
               {selectedSong.artist ?? 'Sin artista'}
               {#if selectedSong.album} · {selectedSong.album}{/if}
             </span>
-            {#if existingQ.data}
+            {#if existingCanvas}
               <span class="hk-existing">
                 <Check size={11} weight="bold" />
                 Ya tiene canvas
-                {#if existingQ.data.source === 'generated'}(generado){:else}(Spotify){/if}
+                {#if existingCanvas.source === 'generated'}(generado){:else}(Spotify){/if}
               </span>
             {/if}
           </div>
@@ -368,6 +382,35 @@
             Cambiar
           </button>
         </div>
+
+        {#if existingCanvas && existingCanvasUrl}
+          <div class="hk-existing-preview">
+            <div class="hk-preview-wrap sm">
+              <video
+                class="hk-preview-video"
+                src={existingCanvasUrl}
+                autoplay
+                loop
+                muted
+                playsinline
+                controls={false}
+              ></video>
+            </div>
+            <div class="hk-existing-preview-meta">
+              <span class="hk-block-label">Canvas vinculado</span>
+              <span class="hk-existing-preview-sub">
+                {#if existingCanvas.source === 'generated'}
+                  Generado anteriormente desde YouTube.
+                {:else}
+                  Canvas oficial de Spotify.
+                {/if}
+              </span>
+              <span class="hk-existing-preview-hint">
+                Genera otro abajo y se reemplazará tras confirmar.
+              </span>
+            </div>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
@@ -1048,6 +1091,39 @@
     background: var(--bg-canvas);
   }
   .hk-preview-wrap.centered { margin: 0 auto; }
+  .hk-preview-wrap.sm {
+    width: 110px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+
+  /* Preview inline del canvas ya vinculado (Spotify o generado). Visible
+     dentro del paso 1 cuando la canción seleccionada YA tiene canvas. */
+  .hk-existing-preview {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    background: var(--hk-tile-bg);
+    border-radius: 12px;
+    margin-top: 4px;
+  }
+  .hk-existing-preview-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .hk-existing-preview-sub {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+  .hk-existing-preview-hint {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    line-height: 1.4;
+  }
   .hk-preview-video {
     width: 100%;
     height: 100%;

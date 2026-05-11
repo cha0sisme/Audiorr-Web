@@ -455,14 +455,11 @@
     background: var(--hk-card-bg);
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: var(--hk-card-border);
     border-radius: var(--hk-card-radius);
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
-    transition: border-color 240ms var(--hk-spring-soft);
   }
-  .hk-card:hover { border: var(--hk-card-border-hover); }
 
   .hk-section-head {
     display: flex;
@@ -503,7 +500,6 @@
     height: 26px;
     border-radius: 999px;
     background: var(--bg-surface-elevated);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
     color: var(--text-secondary);
     font-family: 'Söhne Mono', var(--font-mono);
     font-size: 12px;
@@ -619,7 +615,6 @@
     overflow-y: auto;
     background: var(--bg-surface);
     border-radius: 12px;
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
     padding: 4px;
   }
   .hk-search-row {
@@ -698,8 +693,7 @@
     align-items: center;
     gap: 14px;
     padding: 12px 14px;
-    background: var(--hk-tile-bg);
-    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--hk-tile-bg));
     border-radius: 12px;
   }
   .hk-selected-meta {
@@ -730,8 +724,7 @@
     align-items: center;
     gap: 5px;
     padding: 3px 9px;
-    background: color-mix(in srgb, oklch(0.72 0.18 145) 12%, transparent);
-    border: 1px solid color-mix(in srgb, oklch(0.72 0.18 145) 28%, transparent);
+    background: color-mix(in srgb, oklch(0.72 0.18 145) 18%, transparent);
     border-radius: 999px;
     font-size: 10px;
     font-weight: 500;
@@ -758,7 +751,6 @@
     border-radius: 14px;
     overflow: hidden;
     background: var(--bg-canvas);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
   }
   .hk-preview-video {
     width: 100%;
@@ -818,7 +810,7 @@
     background: var(--bg-glass-thin);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    border: 0;
     border-radius: 999px;
     color: var(--text-primary);
     font: inherit;
@@ -877,7 +869,6 @@
     gap: 10px;
     padding: 12px 16px;
     background: var(--bg-surface);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
     border-radius: 12px;
     color: var(--text-secondary);
   }
@@ -929,7 +920,6 @@
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
     background: var(--hk-tile-bg);
-    border: var(--hk-tile-border);
     border-radius: 12px;
   }
   .hk-stub-meta {

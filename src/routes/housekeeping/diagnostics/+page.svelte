@@ -863,7 +863,7 @@
   .dg-refresh {
     width: 32px;
     height: 32px;
-    border: 1px solid var(--border-subtle);
+    border: 0;
     border-radius: 50%;
     background: var(--bg-surface);
     color: var(--text-tertiary);
@@ -990,7 +990,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border: 1px solid var(--border-subtle);
+    border: 0;
     border-radius: var(--radius-full);
     background: var(--bg-surface);
     color: var(--text-secondary);
@@ -999,8 +999,7 @@
     cursor: pointer;
     transition:
       background var(--duration-fast) var(--ease-ios-default),
-      color var(--duration-fast) var(--ease-ios-default),
-      border-color var(--duration-fast) var(--ease-ios-default);
+      color var(--duration-fast) var(--ease-ios-default);
   }
   .dg-chip:hover {
     background: var(--bg-surface-hover);
@@ -1009,7 +1008,6 @@
   .dg-chip.active {
     background: var(--accent);
     color: var(--text-on-accent);
-    border-color: transparent;
   }
   .dg-chip-emoji {
     font-size: 12px;
@@ -1092,7 +1090,6 @@
     gap: 1px;
     background: var(--bg-surface);
     border-radius: var(--radius-lg);
-    border: 1px solid var(--border-subtle);
     overflow: hidden;
   }
   .dg-row {
@@ -1274,8 +1271,7 @@
     letter-spacing: var(--tracking-label);
     text-transform: uppercase;
     color: var(--type-color, var(--text-secondary));
-    background: color-mix(in srgb, var(--type-color, var(--bg-surface-elevated)) 16%, transparent);
-    border: 1px solid color-mix(in srgb, var(--type-color, transparent) 32%, transparent);
+    background: color-mix(in srgb, var(--type-color, var(--bg-surface-elevated)) 22%, transparent);
     padding: 3px 8px;
     border-radius: var(--radius-full);
     flex-shrink: 0;
@@ -1296,7 +1292,7 @@
     place-items: center;
     text-align: center;
     color: var(--text-secondary);
-    border: 1px dashed var(--border-subtle);
+    background: var(--bg-surface);
     border-radius: var(--radius-lg);
   }
   .dg-empty-title {

@@ -545,7 +545,6 @@
     background: var(--hk-card-bg);
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: var(--hk-card-border);
     border-radius: var(--hk-card-radius);
   }
   .hk-server-cell {
@@ -668,12 +667,7 @@
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
     background: var(--bg-canvas);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
     border-radius: 12px;
-    transition: border-color 200ms var(--hk-spring-soft);
-  }
-  .hk-detail-row:hover {
-    border-color: var(--border-subtle);
   }
   .hk-detail-meta {
     min-width: 0;
@@ -698,7 +692,6 @@
     gap: 8px;
     padding: 5px 11px;
     background: var(--bg-glass-thin);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
     border-radius: 999px;
     flex-shrink: 0;
   }
@@ -752,11 +745,8 @@
     gap: 10px;
     padding: 8px 12px;
     background: var(--bg-canvas);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 50%, transparent);
     border-radius: 12px;
-    transition: border-color 200ms var(--hk-spring-soft);
   }
-  .hk-user-row:hover { border-color: var(--border-subtle); }
   .hk-user-avatar {
     width: 32px;
     height: 32px;
@@ -822,7 +812,6 @@
     color: var(--text-tertiary);
     font-size: var(--text-sm);
     background: var(--bg-canvas);
-    border: 1.5px dashed color-mix(in srgb, var(--border-subtle) 60%, transparent);
     border-radius: 12px;
   }
   .hk-users-empty :global(svg) { color: var(--text-tertiary); flex-shrink: 0; }

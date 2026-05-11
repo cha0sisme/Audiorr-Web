@@ -21,20 +21,27 @@
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import SegmentedControl from '$components/shared/SegmentedControl.svelte';
+  import SongList from '$components/shared/SongList.svelte';
   import * as nav from '$services/NavidromeService';
   import {
     albumToCardProps,
     artistToCardProps,
-    playlistToCardProps
+    playlistToCardProps,
+    songToListItem,
+    type SongListItem
   } from '$utils/navidrome-mappers';
+  import type { NavidromeArtist, NavidromeSong } from '$types/navidrome';
   import { credentials } from '$stores/credentials.svelte';
   import { searchHistory } from '$stores/search-history.svelte';
+  import { player } from '$stores/player.svelte';
+  import { queueManager } from '$services/QueueManager.svelte';
 
-  type Tab = 'all' | 'artists' | 'albums' | 'playlists';
+  type Tab = 'all' | 'artists' | 'albums' | 'songs' | 'playlists';
   const TABS = [
     { id: 'all' as const, label: 'Todo' },
     { id: 'artists' as const, label: 'Artistas' },
     { id: 'albums' as const, label: 'Álbumes' },
+    { id: 'songs' as const, label: 'Canciones' },
     { id: 'playlists' as const, label: 'Playlists' }
   ];
 
@@ -70,15 +77,16 @@
   // pool de conexiones para que la nueva petición search3 corra rápido,
   // y luego sus covers nuevos.
   //
-  // Counts conservadores (12 / 12) — total max 24 covers en "Todo" tab,
-  // suficiente para señalizar y no congestionar Navidrome con 60 imgs.
+  // Counts: artistas/álbumes 20 (luego filtramos client-side por nombre,
+  // así que sobre-pedimos un poco), canciones 40 (suficiente para tener
+  // material tras filtrar y poder reproducir desde el resultado).
   const searchQ = createQuery(() => ({
     queryKey: ['search', urlQuery],
     // signal viene de TanStack Query — se aborta cuando el queryKey cambia
     // (siguiente keystroke debounced). Cancela el fetch en vuelo en lugar
     // de esperar a que devuelva data ya stale.
     queryFn: ({ signal }) =>
-      nav.search3(urlQuery, { artistCount: 12, albumCount: 12, songCount: 0 }, signal),
+      nav.search3(urlQuery, { artistCount: 20, albumCount: 20, songCount: 40 }, signal),
     enabled: credentials.isConfigured && isActive,
     staleTime: 30 * 1000,
     gcTime: 60 * 1000
@@ -95,20 +103,142 @@
     if (!isActive || !playlistsQ.data) return [];
     const q = urlQuery.toLowerCase();
     return playlistsQ.data
-      .filter((p) => {
-        const name = p.name.toLowerCase();
-        const owner = (p.owner ?? '').toLowerCase();
-        const comment = (p.comment ?? '').toLowerCase();
-        return name.includes(q) || owner.includes(q) || comment.includes(q);
-      })
-      .slice(0, 20);
+      .map((p) => ({
+        p,
+        score: bestFieldScore([p.name, p.owner, p.comment], q)
+      }))
+      .filter((x) => x.score !== NO_MATCH)
+      .sort((x, y) => x.score - y.score)
+      .slice(0, 20)
+      .map((x) => x.p);
   });
 
-  const artists = $derived(searchQ.data?.artists ?? []);
-  const albums = $derived(searchQ.data?.albums ?? []);
+  // Refinado: Subsonic search3 hace FTS sobre múltiples campos (lyrics,
+  // comments, tags), así que devuelve álbumes y artistas que matchean por
+  // cualquier metadata interno — p. ej. buscar "POWER" trae "Nevermind"
+  // porque alguna pista del álbum contiene esa palabra en sus tags. Para
+  // mostrar solo matches obvios filtramos client-side por substring en
+  // los campos visibles, y además rankeamos por calidad de match:
+  //
+  //   0 = exacto (title === query)
+  //   1 = empieza por la query
+  //   2 = la query es una palabra completa dentro del campo
+  //   3 = la query aparece como substring en cualquier posición
+  //
+  // Para items con varios campos relevantes (canción: title/artist/album;
+  // álbum: name/artist) tomamos el MEJOR campo y le sumamos un offset por
+  // prioridad de campo (primary 0, secondary +10, tertiary +20). Así un
+  // match exacto en title gana a un match exacto en album, y un match en
+  // título-de-canción gana a uno solo-en-album.
+  const NO_MATCH = Number.POSITIVE_INFINITY;
+  const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g;
+
+  function matchScore(value: string | undefined | null, q: string): number {
+    if (!value) return NO_MATCH;
+    const lower = value.toLowerCase();
+    if (lower === q) return 0;
+    if (lower.startsWith(q)) return 1;
+    const escaped = q.replace(REGEX_ESCAPE, '\\$&');
+    if (new RegExp(`\\b${escaped}\\b`, 'i').test(value)) return 2;
+    if (lower.includes(q)) return 3;
+    return NO_MATCH;
+  }
+
+  /** Combina varios campos: el mejor score gana, con offset por prioridad. */
+  function bestFieldScore(
+    fields: Array<string | undefined | null>,
+    q: string
+  ): number {
+    let best = NO_MATCH;
+    for (let i = 0; i < fields.length; i++) {
+      const s = matchScore(fields[i], q);
+      if (s === NO_MATCH) continue;
+      const withOffset = s + i * 10;
+      if (withOffset < best) best = withOffset;
+    }
+    return best;
+  }
+
+  const rawSongs = $derived<NavidromeSong[]>(searchQ.data?.songs ?? []);
+  const rawArtists = $derived<NavidromeArtist[]>(searchQ.data?.artists ?? []);
+  const rawAlbums = $derived(searchQ.data?.albums ?? []);
+
+  const filteredAlbums = $derived.by(() => {
+    if (!isActive) return [];
+    const q = urlQuery.toLowerCase();
+    return rawAlbums
+      .map((a) => ({ a, score: bestFieldScore([a.name, a.artist], q) }))
+      .filter((x) => x.score !== NO_MATCH)
+      .sort((x, y) => x.score - y.score)
+      .map((x) => x.a);
+  });
+
+  // Para artistas: Navidrome a veces no devuelve artistas que existen solo
+  // como `artist` de tracks (sin álbumes propios indexados). Complementamos
+  // extrayendo artistas únicos de los songs results cuyo nombre matchea el
+  // query, deduplicando contra los artistas que ya devolvió search3. El
+  // ranking final se hace sobre la lista combinada.
+  const filteredArtists = $derived.by<NavidromeArtist[]>(() => {
+    if (!isActive) return [];
+    const q = urlQuery.toLowerCase();
+    const seenIds = new Set<string>();
+    const candidates: NavidromeArtist[] = [];
+
+    for (const a of rawArtists) {
+      if (matchScore(a.name, q) === NO_MATCH) continue;
+      seenIds.add(a.id);
+      candidates.push(a);
+    }
+    for (const s of rawSongs) {
+      if (!s.artistId || seenIds.has(s.artistId)) continue;
+      if (matchScore(s.artist, q) === NO_MATCH) continue;
+      seenIds.add(s.artistId);
+      // NavidromeArtist mínimo. Sin coverArt → fallback de ArtistCard
+      // (icono User). albumCount undefined → subtítulo "Artista".
+      candidates.push({ id: s.artistId, name: s.artist ?? '' });
+    }
+
+    return candidates
+      .map((a) => ({ a, score: matchScore(a.name, q) }))
+      .sort((x, y) => x.score - y.score)
+      .map((x) => x.a);
+  });
+
+  // Canciones rankeadas: title (primary) > artist (+10) > album (+20). Eso
+  // hace que "POWER" exact match en title aparezca antes que "Powertrip" o
+  // que una canción cualquiera de un álbum llamado "Power Symphony". El
+  // mismo orden se replica en filteredSongsRaw para que `playSong(index)`
+  // apunte al track correcto.
+  const filteredSongsRaw = $derived.by<NavidromeSong[]>(() => {
+    if (!isActive) return [];
+    const q = urlQuery.toLowerCase();
+    return rawSongs
+      .map((s) => ({
+        s,
+        score: bestFieldScore([s.title, s.artist, s.album], q)
+      }))
+      .filter((x) => x.score !== NO_MATCH)
+      .sort((x, y) => x.score - y.score)
+      .map((x) => x.s);
+  });
+
+  const filteredSongs = $derived<SongListItem[]>(
+    filteredSongsRaw.map((s, i) => songToListItem(s, i, true, true))
+  );
+
+  function playSong(_track: SongListItem, index: number) {
+    if (filteredSongsRaw.length === 0) return;
+    // Sin contexto: la reproducción desde search es ad-hoc, no queremos
+    // que ningún álbum/artista/playlist se marque como "playing from".
+    player.context = null;
+    queueManager.play(filteredSongsRaw, index);
+  }
 
   const totalResults = $derived(
-    artists.length + albums.length + filteredPlaylists.length
+    filteredArtists.length +
+      filteredAlbums.length +
+      filteredSongs.length +
+      filteredPlaylists.length
   );
 
   // Registrar en historial cuando hay matches sustanciales.
@@ -186,11 +316,11 @@
     </p>
   {:else}
     <section class="results" aria-busy={searchQ.isFetching}>
-      {#if (currentTab === 'all' || currentTab === 'artists') && artists.length > 0}
+      {#if (currentTab === 'all' || currentTab === 'artists') && filteredArtists.length > 0}
         <div class="result-section">
           <h2 class="section-title">Artistas</h2>
           <div class="grid" data-kind="artist">
-            {#each artists.slice(0, currentTab === 'all' ? 6 : artists.length) as a (a.id)}
+            {#each filteredArtists.slice(0, currentTab === 'all' ? 6 : filteredArtists.length) as a (a.id)}
               {@const props = artistToCardProps(a)}
               <ArtistCard {...props} />
             {/each}
@@ -198,14 +328,29 @@
         </div>
       {/if}
 
-      {#if (currentTab === 'all' || currentTab === 'albums') && albums.length > 0}
+      {#if (currentTab === 'all' || currentTab === 'albums') && filteredAlbums.length > 0}
         <div class="result-section">
           <h2 class="section-title">Álbumes</h2>
           <div class="grid" data-kind="album">
-            {#each albums.slice(0, currentTab === 'all' ? 6 : albums.length) as a (a.id)}
+            {#each filteredAlbums.slice(0, currentTab === 'all' ? 6 : filteredAlbums.length) as a (a.id)}
               {@const props = albumToCardProps(a)}
               <AlbumCard {...props} />
             {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if (currentTab === 'all' || currentTab === 'songs') && filteredSongs.length > 0}
+        <div class="result-section">
+          <h2 class="section-title">Canciones</h2>
+          <div class="songs-list">
+            <SongList
+              tracks={filteredSongs.slice(0, currentTab === 'all' ? 5 : filteredSongs.length)}
+              contextType="queue"
+              contextId="search"
+              showCover
+              onPlay={playSong}
+            />
           </div>
         </div>
       {/if}

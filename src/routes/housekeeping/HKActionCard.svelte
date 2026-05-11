@@ -165,16 +165,12 @@
       );
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: 1px solid color-mix(in srgb, var(--card-accent) 22%, transparent);
     border-radius: 18px;
     overflow: hidden;
     isolation: isolate;
-    transition:
-      border-color 240ms var(--hk-spring-soft),
-      transform 240ms var(--hk-spring-soft);
+    transition: transform 240ms var(--hk-spring-soft);
   }
   .hk-action-card:hover {
-    border-color: color-mix(in srgb, var(--card-accent) 38%, transparent);
     transform: translateY(-1px);
   }
 
@@ -254,7 +250,6 @@
     height: 38px;
     border-radius: 11px;
     background: color-mix(in srgb, var(--card-accent) 18%, transparent);
-    border: 1px solid color-mix(in srgb, var(--card-accent) 32%, transparent);
     color: var(--card-accent);
     flex-shrink: 0;
   }
@@ -331,7 +326,6 @@
     gap: 6px;
     padding: 4px 10px;
     background: var(--bg-canvas);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 60%, transparent);
     border-radius: 999px;
     font-size: 11px;
     font-weight: 500;

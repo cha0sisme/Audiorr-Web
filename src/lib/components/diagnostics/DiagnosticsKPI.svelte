@@ -136,16 +136,12 @@
       );
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: 1px solid color-mix(in srgb, var(--card-accent) 22%, transparent);
     border-radius: 18px;
     overflow: hidden;
     isolation: isolate;
-    transition:
-      border-color 240ms var(--hk-spring-soft),
-      transform 240ms var(--hk-spring-soft);
+    transition: transform 240ms var(--hk-spring-soft);
   }
   .kpi:hover {
-    border-color: color-mix(in srgb, var(--card-accent) 38%, transparent);
     transform: translateY(-1px);
   }
   .kpi[data-tone='pink']  { --card-accent: oklch(0.7 0.18 12);  }
@@ -211,7 +207,6 @@
     height: 28px;
     border-radius: 9px;
     background: color-mix(in srgb, var(--card-accent) 18%, transparent);
-    border: 1px solid color-mix(in srgb, var(--card-accent) 32%, transparent);
     color: var(--card-accent);
     flex-shrink: 0;
   }

@@ -592,14 +592,11 @@
     background: var(--hk-card-bg);
     backdrop-filter: var(--hk-card-blur);
     -webkit-backdrop-filter: var(--hk-card-blur);
-    border: var(--hk-card-border);
     border-radius: var(--hk-card-radius);
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
-    transition: border-color 240ms var(--hk-spring-soft);
   }
-  .hk-card:hover { border: var(--hk-card-border-hover); }
 
   .hk-section-head {
     display: flex;
@@ -683,8 +680,8 @@
     align-items: center;
     gap: 6px;
     padding: 5px 11px;
-    background: transparent;
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    background: var(--bg-canvas);
+    border: 0;
     border-radius: 999px;
     color: var(--text-secondary);
     font: inherit;
@@ -693,17 +690,15 @@
     cursor: pointer;
     transition:
       background 200ms var(--hk-spring-soft),
-      color 200ms var(--hk-spring-soft),
-      border-color 200ms var(--hk-spring-soft);
+      color 200ms var(--hk-spring-soft);
   }
   .hk-filter-chip:hover:not(.active) {
     color: var(--text-primary);
-    border-color: var(--border-subtle);
+    background: var(--bg-surface);
   }
   .hk-filter-chip.active {
     background: var(--accent);
     color: #fff;
-    border-color: var(--accent);
   }
   .hk-filter-count {
     padding: 1px 6px;
@@ -739,7 +734,7 @@
     color: var(--text-tertiary);
     font-size: var(--text-sm);
     text-align: center;
-    border: 1px dashed color-mix(in srgb, var(--border-subtle) 80%, transparent);
+    background: var(--bg-canvas);
     border-radius: 12px;
   }
   .hk-library-empty strong {
@@ -752,15 +747,12 @@
     flex-direction: column;
     padding: 8px 10px;
     background: var(--hk-tile-bg);
-    border: var(--hk-tile-border);
     border-radius: 12px;
-    transition:
-      border-color 180ms var(--hk-spring-soft),
-      background 180ms var(--hk-spring-soft);
+    transition: background 180ms var(--hk-spring-soft);
   }
-  .hk-lib-item:hover { border: var(--hk-tile-border-hover); }
+  .hk-lib-item:hover { background: var(--bg-surface); }
   .hk-lib-item.editorial {
-    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--hk-tile-bg));
   }
 
   .hk-lib-item-row {
@@ -995,11 +987,10 @@
     gap: 12px;
     padding: 8px 12px;
     background: var(--hk-tile-bg);
-    border: var(--hk-tile-border);
     border-radius: 12px;
-    transition: border-color 200ms var(--hk-spring-soft);
+    transition: background 200ms var(--hk-spring-soft);
   }
-  .hk-thisis-row:hover { border: var(--hk-tile-border-hover); }
+  .hk-thisis-row:hover { background: var(--bg-surface); }
   .hk-thisis-cover-fallback {
     display: grid;
     place-items: center;
@@ -1061,8 +1052,7 @@
   .hk-thisis-empty {
     margin: 0;
     padding: var(--space-3) var(--space-4);
-    background: transparent;
-    border: 1.5px dashed color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    background: var(--bg-canvas);
     border-radius: 12px;
     color: var(--text-tertiary);
     font-size: var(--text-sm);
@@ -1076,7 +1066,6 @@
     gap: var(--space-3);
     padding: var(--space-4);
     background: var(--hk-tile-bg);
-    border: var(--hk-tile-border);
     border-radius: 14px;
   }
   .hk-block-label {
@@ -1178,8 +1167,8 @@
     overflow-y: auto;
     padding: 6px;
     background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
     border-radius: 12px;
+    box-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.35), 0 4px 10px -4px rgba(0, 0, 0, 0.2);
     animation: hk-picker-in 200ms var(--hk-spring);
   }
   @keyframes hk-picker-in {
@@ -1308,8 +1297,7 @@
     gap: 5px;
     margin-right: auto;
     padding: 4px 10px;
-    background: color-mix(in srgb, oklch(0.72 0.18 145) 14%, transparent);
-    border: 1px solid color-mix(in srgb, oklch(0.72 0.18 145) 32%, transparent);
+    background: color-mix(in srgb, oklch(0.72 0.18 145) 18%, transparent);
     border-radius: 999px;
     color: oklch(0.72 0.18 145);
     font-size: 11px;
@@ -1324,7 +1312,7 @@
     background: var(--bg-glass-thin);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+    border: 0;
     border-radius: 999px;
     color: var(--text-primary);
     font: inherit;
