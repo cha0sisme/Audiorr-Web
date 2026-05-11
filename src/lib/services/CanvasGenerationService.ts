@@ -37,7 +37,14 @@ function resolveBaseUrl(): string {
   return '';
 }
 
-const BASE = resolveBaseUrl();
+/** Lazy getter — mismo motivo que BackendService.baseUrl: si lo
+    evaluamos a nivel module, en el SSR de adapter-node `browser` es
+    `false` y `window.__AUDIORR_BACKEND_URL__` no existe, dejando BASE
+    congelado en '' y mandando POST /api/canvas/generate al SvelteKit
+    server (404) en lugar del backend. */
+function BASE(): string {
+  return resolveBaseUrl();
+}
 
 export interface CanvasGenerateInput {
   songId: string;
@@ -104,7 +111,7 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 export async function enqueueCanvasJob(
   input: CanvasGenerateInput
 ): Promise<CanvasGenerateEnqueued> {
-  const url = `${BASE}/api/canvas/generate`;
+  const url = `${BASE()}/api/canvas/generate`;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -171,7 +178,7 @@ export async function enqueueCanvasJob(
 /** Estado de un job. 404 → null. Otros errores tiran `CanvasGenerateError`
     con `kind: 'server'`. */
 export async function getCanvasJob(jobId: string): Promise<CanvasGenerationJob | null> {
-  const url = `${BASE}/api/canvas/generate/jobs/${encodeURIComponent(jobId)}`;
+  const url = `${BASE()}/api/canvas/generate/jobs/${encodeURIComponent(jobId)}`;
   let res: Response;
   try {
     res = await fetch(url, { credentials: 'omit', headers: authHeaders() });
@@ -191,7 +198,7 @@ export async function getCanvasJob(jobId: string): Promise<CanvasGenerationJob |
 
 /** Lista jobs en memoria del backend. Útil para histórico reciente. */
 export async function listCanvasJobs(): Promise<CanvasGenerationJobList> {
-  const url = `${BASE}/api/canvas/generate/jobs`;
+  const url = `${BASE()}/api/canvas/generate/jobs`;
   let res: Response;
   try {
     res = await fetch(url, { credentials: 'omit', headers: authHeaders() });

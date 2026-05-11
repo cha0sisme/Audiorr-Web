@@ -77,6 +77,13 @@ services:
       # URL pública del backend que verá el navegador del usuario.
       # El entrypoint la inyecta en build/client/env.js en cada start.
       VITE_API_URL: ${VITE_API_URL:-http://192.168.1.43:2999}
+    volumes:
+      # Fonts Söhne (versión Test de Befonts, licencia restringida) —
+      # quedan fuera del repo Git y se montan desde el filesystem del
+      # homelab. Sin esto, /sohne/*.otf da 404 en el container.
+      # Copiarlas una vez:
+      #   scp -r ./public/sohne srv@rosario:/mnt/homelab_media/audiorr/fonts/
+      - /mnt/homelab_media/audiorr/fonts/sohne:/app/build/client/sohne:ro
     depends_on:
       backend:
         condition: service_healthy

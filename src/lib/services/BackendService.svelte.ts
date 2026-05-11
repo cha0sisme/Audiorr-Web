@@ -36,7 +36,17 @@ function resolveBaseUrl(): string {
 }
 
 class BackendServiceImpl {
-  readonly baseUrl: string = resolveBaseUrl();
+  /** Getter (no field assignment): `resolveBaseUrl()` se evalúa cada
+      vez que se accede, NO en el module-init. Crítico para
+      adapter-node SSR: la singleton `backendService` se instancia
+      durante el render server-side donde `browser` es `false` →
+      `window.__AUDIORR_BACKEND_URL__` no existe y el campo readonly
+      quedaba congelado en cadena vacía para siempre, mandando todas
+      las llamadas /api/* al SvelteKit server (404) en vez de al
+      backend Audiorr real. */
+  get baseUrl(): string {
+    return resolveBaseUrl();
+  }
 
   /**
    * GET tipado. 404 → null (recurso no encontrado, caso normal para Canvas);
