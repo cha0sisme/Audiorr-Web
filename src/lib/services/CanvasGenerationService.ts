@@ -14,6 +14,7 @@
 
 import { browser } from '$app/environment';
 import { env } from '$env/dynamic/public';
+import { credentials } from '$stores/credentials.svelte';
 import {
   CanvasEntrySchema,
   CanvasGenerateEnqueuedSchema,
@@ -83,6 +84,20 @@ export function isLikelyYoutubeUrl(url: string): boolean {
   return YOUTUBE_HOST_RX.test(url.trim());
 }
 
+/** Construye headers comunes. Si tenemos username configurado en el
+    store de credentials, lo enviamos como `x-navidrome-user` para que el
+    backend resuelva la canción con las creds del usuario correcto (mismo
+    patrón que daily-mixes / smart-playlists). Sin este header, el backend
+    cae a creds globales y puede dar 404 sobre canciones que SÍ existen
+    en la biblioteca del user actual. */
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const user = credentials.current?.username;
+  return {
+    ...(user ? { 'x-navidrome-user': user } : {}),
+    ...(extra ?? {})
+  };
+}
+
 /** Encola un job. 202 → CanvasGenerateEnqueued; el resto se traduce a
     `CanvasGenerateError` con `kind` y, si aplica, el `existingCanvas` /
     `existingJob` parseados del body. */
@@ -95,7 +110,7 @@ export async function enqueueCanvasJob(
     res = await fetch(url, {
       method: 'POST',
       credentials: 'omit',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(input)
     });
   } catch (e) {
@@ -159,7 +174,7 @@ export async function getCanvasJob(jobId: string): Promise<CanvasGenerationJob |
   const url = `${BASE}/api/canvas/generate/jobs/${encodeURIComponent(jobId)}`;
   let res: Response;
   try {
-    res = await fetch(url, { credentials: 'omit' });
+    res = await fetch(url, { credentials: 'omit', headers: authHeaders() });
   } catch (e) {
     throw new CanvasGenerateError(
       'server',
@@ -179,7 +194,7 @@ export async function listCanvasJobs(): Promise<CanvasGenerationJobList> {
   const url = `${BASE}/api/canvas/generate/jobs`;
   let res: Response;
   try {
-    res = await fetch(url, { credentials: 'omit' });
+    res = await fetch(url, { credentials: 'omit', headers: authHeaders() });
   } catch (e) {
     throw new CanvasGenerateError(
       'server',
