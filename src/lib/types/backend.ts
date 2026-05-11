@@ -8,9 +8,76 @@ export const CanvasEntrySchema = z.object({
   title: z.string(),
   artist: z.string(),
   album: z.string().optional(),
+  // source añadido por backend tras feature canvas-gen (2026-05-11). Optional
+  // con default para tolerar un backend pre-rebuild que aún no lo emite.
+  source: z.enum(['spotify', 'generated']).optional().default('spotify'),
   cachedAt: z.string()
 });
 export type CanvasEntry = z.infer<typeof CanvasEntrySchema>;
+
+// ============================================================================
+// Canvas generation — POST /api/canvas/generate + GET /jobs/:id
+// ============================================================================
+
+export const CanvasGenerateModeSchema = z.enum(['random', 'loop']);
+export type CanvasGenerateMode = z.infer<typeof CanvasGenerateModeSchema>;
+
+export const CanvasJobStatusSchema = z.enum([
+  'queued',
+  'running',
+  'done',
+  'failed',
+  'canceled'
+]);
+export type CanvasJobStatus = z.infer<typeof CanvasJobStatusSchema>;
+
+export const CanvasGenerationPhaseSchema = z.enum([
+  'probing',
+  'downloading',
+  'evaluating',
+  'concatenating',
+  'normalizing'
+]);
+export type CanvasGenerationPhase = z.infer<typeof CanvasGenerationPhaseSchema>;
+
+/** Job de generación. El `log` lo emite el backend cuando hay attempts;
+    lo dejamos como passthrough para no acoplarnos a un shape que aún puede
+    evolucionar. */
+export const CanvasGenerationJobSchema = z.object({
+  id: z.string(),
+  songId: z.string(),
+  songTitle: z.string(),
+  songArtist: z.string(),
+  songAlbum: z.string().optional(),
+  youtubeUrl: z.string(),
+  mode: CanvasGenerateModeSchema,
+  fragments: z.number(),
+  fragmentSec: z.number(),
+  durationSec: z.number(),
+  force: z.boolean(),
+  status: CanvasJobStatusSchema,
+  phase: CanvasGenerationPhaseSchema.nullable(),
+  phaseDetail: z.string().nullable(),
+  outputPath: z.string().nullable(),
+  outputUrl: z.string().nullable(),
+  error: z.string().nullable(),
+  log: z.unknown().nullable(),
+  enqueuedAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable()
+});
+export type CanvasGenerationJob = z.infer<typeof CanvasGenerationJobSchema>;
+
+export const CanvasGenerateEnqueuedSchema = z.object({
+  jobId: z.string(),
+  job: CanvasGenerationJobSchema
+});
+export type CanvasGenerateEnqueued = z.infer<typeof CanvasGenerateEnqueuedSchema>;
+
+export const CanvasGenerationJobListSchema = z.object({
+  jobs: z.array(CanvasGenerationJobSchema)
+});
+export type CanvasGenerationJobList = z.infer<typeof CanvasGenerationJobListSchema>;
 
 // ============================================================================
 // Stats — /api/stats

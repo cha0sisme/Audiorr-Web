@@ -37,6 +37,7 @@
     saveCanvasEntry,
     getCanvasBySongId
   } from '$services/canvas-admin';
+  import CanvasGeneratorPanel from './CanvasGeneratorPanel.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import type { NavidromeSong } from '$types/navidrome';
@@ -386,7 +387,12 @@
 </section>
 
 <!-- ════════════════════════════════════════════════════════════════════
-     2. Spotify Sync — ofuscado, temporalmente desactivado
+     2. Auto-Generador de Canvas desde YouTube
+     ════════════════════════════════════════════════════════════════════ -->
+<CanvasGeneratorPanel />
+
+<!-- ════════════════════════════════════════════════════════════════════
+     3. Spotify Sync — ofuscado, temporalmente desactivado
      ════════════════════════════════════════════════════════════════════ -->
 <div class="hk-disabled-zone">
   <div class="hk-disabled-banner">
