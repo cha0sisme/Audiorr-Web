@@ -13,10 +13,12 @@
     <link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
     <link rel="manifest" href="%sveltekit.assets%/site.webmanifest" />
 
-    <!-- Runtime config: el contenedor Docker reescribe env.js sin rebuild.
-         Cargado ANTES de hidratar para que window.__AUDIORR_BACKEND_URL__
-         esté disponible en el primer frame. -->
-    <script src="%sveltekit.assets%/env.js"></script>
+    <!-- Runtime config inyectada INLINE por `hooks.server.ts` en cada
+         render SSR. NO usamos un script externo (`env.js`) porque los
+         browsers lo cachean sin invalidación y dejaba `window.__AUDIORR_BACKEND_URL__`
+         congelado al valor del primer despliegue. Inline = parte del HTML
+         del documento, que va siempre por SSR y nunca queda stale. -->
+    <script>window.__AUDIORR_BACKEND_URL__ = %audiorr.backend_url%;</script>
 
     <script>
       // FOUC prevention: aplica el tema antes de hidratar.
