@@ -32,7 +32,18 @@ export const handle: Handle = async ({ event, resolve }) => {
   const backendUrl = (env.VITE_API_URL || env.PUBLIC_BACKEND_URL || '').replace(/\/+$/, '');
   const literal = safeScriptLiteral(backendUrl);
 
-  return resolve(event, {
+  const response = await resolve(event, {
     transformPageChunk: ({ html }) => html.replace('%audiorr.backend_url%', literal)
   });
+
+  // SvelteKit emite un `Link:` header gigante (varios KB) con todos los
+  // `modulepreload` de los chunks JS en una sola línea HTTP. Nginx con
+  // buffer default 4-8KB lo rechaza → 502 "upstream sent too big header".
+  // El head del HTML ya lleva los mismos `<link rel="modulepreload">`,
+  // así que estripeando el header solo perdemos la pista HTTP/2-push (que
+  // ni siquiera está activo por defecto). Cero impacto funcional, evita
+  // tener que tocar `proxy_buffer_size` en cada reverse-proxy aguas
+  // arriba (NPM/Caddy/Traefik).
+  response.headers.delete('Link');
+  return response;
 };
