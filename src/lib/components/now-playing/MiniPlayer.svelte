@@ -21,6 +21,11 @@
     songId?: string | undefined;
     title: string;
     artist: string;
+    /** Id de Subsonic del artista — cuando viene, el nombre del artista en
+        el MiniPlayer se renderiza como link a `/artist/<id>`. Sin él, sigue
+        siendo texto plano (no inferimos `/search?q=<name>` aquí — UX raro
+        desde un mini-player). */
+    artistId?: string | undefined;
     coverUrl?: string | undefined;
     explicit?: boolean;
     progress?: number;
@@ -64,6 +69,7 @@
     songId,
     title,
     artist,
+    artistId,
     coverUrl,
     explicit = false,
     progress = 0,
@@ -89,6 +95,25 @@
   const pct = $derived(Math.max(0, Math.min(1, progress)) * 100);
   const positionSec = $derived(progress * durationSec);
   const volumePct = $derived(Math.max(0, Math.min(1, volume)) * 100);
+
+  // Flash pop+halo al activar un control. Reutiliza el lenguaje visual del
+  // panel de diagnostics ("just rated"). Cada key se resetea a 700ms para
+  // dejar terminar el keyframe antes de poder repetirlo.
+  type FlashKey = 'heart' | 'playpause' | 'connect' | 'queue' | 'canvas' | 'volume';
+  let just = $state<Record<FlashKey, boolean>>({
+    heart: false, playpause: false, connect: false, queue: false, canvas: false, volume: false
+  });
+  const flashTimers: Partial<Record<FlashKey, ReturnType<typeof setTimeout>>> = {};
+  function flash(k: FlashKey) {
+    just[k] = false;
+    if (flashTimers[k]) clearTimeout(flashTimers[k]);
+    // Doble rAF para reiniciar el keyframe si el botón se vuelve a pulsar
+    // mientras la animación anterior aún no ha terminado.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      just[k] = true;
+      flashTimers[k] = setTimeout(() => { just[k] = false; }, 750);
+    }));
+  }
 
   // Device picker state — local al MiniPlayer (no necesita prop drill).
   let devicePickerOpen = $state(false);
@@ -154,9 +179,20 @@
             <ExplicitBadge size="13px" />
           {/if}
         </p>
-        <p class="artist">{artist}</p>
+        {#if artistId}
+          <a class="artist artist-link" href="/artist/{artistId}">{artist}</a>
+        {:else}
+          <p class="artist">{artist}</p>
+        {/if}
       </div>
-      <button type="button" class="icon-btn" aria-label="Añadir a favoritos" tabindex={compact ? -1 : 0}>
+      <button
+        type="button"
+        class="icon-btn heart-btn"
+        class:just-clicked={just.heart}
+        aria-label="Añadir a favoritos"
+        tabindex={compact ? -1 : 0}
+        onclick={() => flash('heart')}
+      >
         <Heart size={18} weight="regular" />
       </button>
     </div>
@@ -172,9 +208,10 @@
         <button
           type="button"
           class="play-pause"
+          class:just-clicked={just.playpause}
           aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
           tabindex={compact ? -1 : 0}
-          onclick={onPlayPause}
+          onclick={() => { flash('playpause'); onPlayPause(); }}
         >
           {#if isPlaying}
             <Pause size={20} weight="fill" />
@@ -224,13 +261,15 @@
         <button
           bind:this={deviceBtnEl}
           type="button"
-          class="icon-btn device-btn"
-          class:active={deviceActive}
+          class="icon-btn device-btn connect-btn"
+          class:active={deviceActive || devicePickerOpen}
+          class:just-clicked={just.connect}
           aria-label="Dispositivos disponibles"
           aria-haspopup="menu"
           aria-expanded={devicePickerOpen}
           tabindex={compact ? -1 : 0}
           onclick={() => {
+            flash('connect');
             devicePickerOpen = !devicePickerOpen;
             onDevicePickerOpenChange(devicePickerOpen);
           }}
@@ -251,29 +290,37 @@
       {/if}
       <button
         type="button"
-        class="icon-btn"
+        class="icon-btn queue-btn"
         class:active={queueOpen}
+        class:just-clicked={just.queue}
         aria-label="Cola"
         aria-pressed={queueOpen}
         tabindex={compact ? -1 : 0}
-        onclick={onQueue}
+        onclick={() => { flash('queue'); onQueue(); }}
       >
         <Queue size={18} weight="regular" />
       </button>
       <button
         type="button"
-        class="icon-btn"
+        class="icon-btn canvas-btn"
         class:active={canvasOpen}
+        class:just-clicked={just.canvas}
         aria-label="Canvas"
         aria-pressed={canvasOpen}
         disabled={!canvasAvailable}
         tabindex={compact ? -1 : 0}
-        onclick={onCanvas}
+        onclick={() => { flash('canvas'); onCanvas(); }}
       >
         <YoutubeLogo size={18} weight="fill" />
       </button>
       <div class="volume">
-        <button type="button" class="icon-btn" aria-label="Volumen" tabindex={compact ? -1 : 0}>
+        <button
+          type="button"
+          class="icon-btn volume-btn"
+          class:just-clicked={just.volume}
+          aria-label="Volumen"
+          tabindex={compact ? -1 : 0}
+        >
           <SpeakerHigh size={18} weight="regular" />
         </button>
         <div class="volume-slider">
@@ -285,6 +332,7 @@
             value={volumePct}
             tabindex={compact ? -1 : 0}
             oninput={(e) => onVolumeChange(Number(e.currentTarget.value) / 100)}
+            onchange={() => flash('volume')}
             aria-label="Volumen"
             class="range-input"
           />
@@ -339,6 +387,8 @@
         <p class="auto-mix-line">
           <WaveText text="AutoMix" />
         </p>
+      {:else if artistId}
+        <a class="artist artist-link" href="/artist/{artistId}">{artist}</a>
       {:else}
         <p class="artist">{artist}</p>
       {/if}
@@ -348,9 +398,10 @@
       <button
         type="button"
         class="play-pause compact-pp"
+        class:just-clicked={just.playpause}
         aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
         tabindex={compact ? 0 : -1}
-        onclick={onPlayPause}
+        onclick={() => { flash('playpause'); onPlayPause(); }}
       >
         {#if isPlaying}
           <Pause size={18} weight="fill" />
@@ -532,6 +583,26 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Variante <a>: que el hit-area se limite al ancho del propio texto (no
+     toda la franja del meta). `inline-block` + `max-width: 100%` colapsa
+     al contenido pero sigue permitiendo ellipsis cuando overflowa. */
+  .artist-link {
+    display: inline-block;
+    max-width: 100%;
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-ios-default);
+  }
+  .artist-link:hover {
+    color: var(--text-primary);
+  }
+  .artist-link:focus-visible {
+    outline: none;
+    color: var(--text-primary);
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-xs);
   }
 
   /* Flex column con márgenes específicos en lugar de grid gap uniforme:
@@ -774,6 +845,7 @@
   /* Hover minimalista: SOLO el icono cambia color (a primary).
      Sin bg fill — más Apple Music macOS / Linear, menos web genérico. */
   .icon-btn {
+    position: relative;
     width: 32px;
     height: 32px;
     border: none;
@@ -833,6 +905,7 @@
   }
 
   .play-pause {
+    position: relative;
     width: 36px;
     height: 36px;
     border: none;
@@ -856,6 +929,299 @@
   .play-pause:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+
+  /* ==========================================================================
+     Feedback de interacción por botón — cada control tiene su propio gesto
+     visual. Construido con principio Disney "12 principles": anticipation
+     (squash pre-burst) → action (overshoot) → settling (oscilación amortiguada).
+     Curvas spring custom no estándar, filter brightness/saturate en el peak,
+     halos multi-stop con blur sutil para profundidad. Sin transition-curves
+     planas — cada keyframe respira distinto.
+
+     `will-change` en los animados activa composición GPU (transform/opacity)
+     evitando jank durante el spring. Se limpia automáticamente al terminar.
+     ========================================================================== */
+
+  /* ── Heart "like burst" ──────────────────────────────────────────────────
+     Apple Music style. Pre-squash (anticipation), explosión 1.55× con tinte
+     coral en el peak (filter saturate+hue), settling con oscilación. Halo
+     doble: ring exterior coral expandiéndose + glow radial cálido detrás.
+     -------------------------------------------------------------------- */
+  .heart-btn.just-clicked > :global(svg) {
+    animation: mp-heart-burst 760ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    transform-origin: center;
+    will-change: transform, filter;
+  }
+  .heart-btn.just-clicked::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: var(--radius-full);
+    border: 1.5px solid oklch(0.7 0.2 12);
+    pointer-events: none;
+    opacity: 0;
+    animation: mp-heart-ring 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .heart-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: var(--radius-full);
+    background:
+      radial-gradient(circle at center,
+        oklch(0.72 0.22 14 / 0.55) 0%,
+        oklch(0.72 0.22 14 / 0.28) 28%,
+        transparent 62%);
+    filter: blur(2px);
+    pointer-events: none;
+    animation: mp-heart-glow 820ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes mp-heart-burst {
+    0%   { transform: scale(1); filter: none; }
+    14%  { transform: scale(0.62); filter: brightness(0.95); }
+    34%  { transform: scale(1.55) rotate(-4deg); filter: brightness(1.25) saturate(1.6) drop-shadow(0 0 6px oklch(0.7 0.2 12 / 0.7)); }
+    58%  { transform: scale(0.88) rotate(3deg); filter: brightness(1.08) saturate(1.2); }
+    80%  { transform: scale(1.04) rotate(-1deg); filter: none; }
+    100% { transform: scale(1); }
+  }
+  @keyframes mp-heart-ring {
+    0%   { transform: scale(0.7); opacity: 0; }
+    18%  { opacity: 0.9; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+  @keyframes mp-heart-glow {
+    0%   { transform: scale(0.6); opacity: 0; }
+    25%  { transform: scale(1.1); opacity: 0.85; }
+    100% { transform: scale(2.0); opacity: 0; }
+  }
+
+  /* ── Play/Pause "tactile pulse" ─────────────────────────────────────────
+     Ancla principal: el botón YA es el límite visual (disco blanco sobre
+     glass). Un ring outline saliendo de él rompería el lenguaje del disco
+     compacto — el feedback debe vivir DENTRO del propio botón. Spring con
+     squash→overshoot→settle + box-shadow que se intensifica brevemente
+     (sugiere "press into glass" como en iOS) + inner glow sutil que
+     refuerza el peak sin añadir cromo externo.
+     -------------------------------------------------------------------- */
+  .play-pause.just-clicked {
+    animation: mp-pp-tactile 560ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter, box-shadow;
+  }
+  @keyframes mp-pp-tactile {
+    0%   {
+      transform: scale(1);
+      filter: none;
+      box-shadow: 0 0 0 0 transparent, inset 0 0 0 0 transparent;
+    }
+    16%  {
+      transform: scale(0.9);
+      filter: brightness(0.95);
+      box-shadow: 0 2px 6px color-mix(in srgb, var(--text-primary) 18%, transparent), inset 0 0 0 0 transparent;
+    }
+    42%  {
+      transform: scale(1.16);
+      filter: brightness(1.18) saturate(1.05);
+      box-shadow:
+        0 6px 16px color-mix(in srgb, var(--text-primary) 30%, transparent),
+        inset 0 0 8px color-mix(in srgb, var(--text-primary) 25%, transparent);
+    }
+    66%  {
+      transform: scale(0.97);
+      filter: brightness(1.06);
+      box-shadow:
+        0 3px 8px color-mix(in srgb, var(--text-primary) 18%, transparent),
+        inset 0 0 0 0 transparent;
+    }
+    88%  { transform: scale(1.02); filter: none; }
+    100% {
+      transform: scale(1);
+      filter: none;
+      box-shadow: 0 0 0 0 transparent, inset 0 0 0 0 transparent;
+    }
+  }
+
+  /* ── Connect "broadcast pulse" ──────────────────────────────────────────
+     Dos ondas concéntricas con stagger 130ms — cada onda nace pequeña,
+     escala rápido (ease-out fuerte) y desvanece lento (asimetría natural
+     del sonido propagándose). El icono pulsa brightness durante la
+     primera onda para sugerir "emisión activa".
+     -------------------------------------------------------------------- */
+  .connect-btn.just-clicked > :global(svg) {
+    animation: mp-connect-emit 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: filter;
+  }
+  .connect-btn.just-clicked::before,
+  .connect-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border-radius: var(--radius-full);
+    border: 1.5px solid color-mix(in srgb, var(--accent) 85%, transparent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 35%, transparent);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .connect-btn.just-clicked::before {
+    animation: mp-connect-wave 760ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .connect-btn.just-clicked::after {
+    animation: mp-connect-wave 760ms cubic-bezier(0.16, 1, 0.3, 1) 130ms;
+  }
+  @keyframes mp-connect-emit {
+    0%, 100% { filter: none; }
+    25%      { filter: brightness(1.3) drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 60%, transparent)); }
+    60%      { filter: brightness(1.1); }
+  }
+  @keyframes mp-connect-wave {
+    0%   { transform: scale(0.35); opacity: 0; }
+    14%  { opacity: 1; }
+    100% { transform: scale(2.1); opacity: 0; }
+  }
+
+  /* ── Queue "stack reveal" ───────────────────────────────────────────────
+     El icono se eleva con bounce + ligera rotación direccional (sugiere
+     algo se "abre"). Un glow accent aparece DEBAJO del icono mientras está
+     elevado — sugiere visualmente que algo emerge desde abajo. La rotación
+     es contra-direccional al lift (anticipación de Disney).
+     -------------------------------------------------------------------- */
+  .queue-btn.just-clicked > :global(svg) {
+    animation: mp-queue-lift 580ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter;
+  }
+  .queue-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    width: 24px;
+    height: 6px;
+    margin-left: -12px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse at center,
+      color-mix(in srgb, var(--accent) 70%, transparent) 0%,
+      transparent 70%);
+    filter: blur(3px);
+    pointer-events: none;
+    opacity: 0;
+    animation: mp-queue-glow 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes mp-queue-lift {
+    0%   { transform: translateY(0) rotate(0); filter: none; }
+    18%  { transform: translateY(1px) rotate(2deg); }
+    44%  { transform: translateY(-5px) rotate(-6deg); filter: brightness(1.2) drop-shadow(0 2px 4px color-mix(in srgb, var(--accent) 40%, transparent)); }
+    70%  { transform: translateY(1.5px) rotate(3deg); filter: brightness(1.05); }
+    100% { transform: translateY(0) rotate(0); filter: none; }
+  }
+  @keyframes mp-queue-glow {
+    0%   { opacity: 0; transform: scaleX(0.4); }
+    50%  { opacity: 0.85; transform: scaleX(1.2); }
+    100% { opacity: 0; transform: scaleX(0.9); }
+  }
+
+  /* ── Canvas "iris focus" ────────────────────────────────────────────────
+     Apertura de iris fotográfico. Pre-contracción (anticipation) → expand
+     overshoot con saturate boost (es video/audiovisual, debería saturarse
+     en el peak) → settle. Ring outline acompaña el iris desde dentro hacia
+     fuera, simulando la apertura de un diafragma. Dos rings stagger para
+     reforzar la sensación de "focus encontrado".
+     -------------------------------------------------------------------- */
+  .canvas-btn.just-clicked > :global(svg) {
+    animation: mp-canvas-focus 540ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
+    will-change: transform, filter;
+  }
+  .canvas-btn.just-clicked::before,
+  .canvas-btn.just-clicked::after {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: var(--radius-full);
+    border: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .canvas-btn.just-clicked::before {
+    animation: mp-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .canvas-btn.just-clicked::after {
+    animation: mp-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1) 90ms;
+  }
+  @keyframes mp-canvas-focus {
+    0%   { transform: scale(1); filter: none; }
+    20%  { transform: scale(0.78); filter: saturate(1.5) brightness(0.85); }
+    50%  { transform: scale(1.2); filter: saturate(1.8) brightness(1.3) drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)); }
+    75%  { transform: scale(0.96); filter: saturate(1.2); }
+    100% { transform: scale(1); filter: none; }
+  }
+  @keyframes mp-canvas-ring {
+    0%   { transform: scale(0.5); opacity: 0; }
+    20%  { opacity: 0.9; }
+    100% { transform: scale(2.0); opacity: 0; }
+  }
+
+  /* ── Volumen "sonar emit" ───────────────────────────────────────────────
+     El icono SpeakerHigh apunta a la derecha → las ondas salen desde el
+     borde derecho del icono. Mini vibración del SVG (translateX 1px+-)
+     simula la membrana del altavoz al recibir señal. Dos ondas con
+     stagger reforzando "emisión continua". Originadas en left:70% para
+     que el centro de cada ring quede al lado del cono, no en el centro.
+     -------------------------------------------------------------------- */
+  .volume-btn.just-clicked > :global(svg) {
+    animation: mp-volume-vibrate 380ms cubic-bezier(0.36, 0, 0.64, 1);
+    will-change: transform, filter;
+  }
+  .just-clicked.volume-btn::before,
+  .just-clicked.volume-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 68%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: var(--radius-full);
+    border: 1.5px solid color-mix(in srgb, var(--accent) 80%, transparent);
+    box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+    pointer-events: none;
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .just-clicked.volume-btn::before {
+    animation: mp-volume-wave 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .just-clicked.volume-btn::after {
+    animation: mp-volume-wave 560ms cubic-bezier(0.22, 1, 0.36, 1) 130ms;
+  }
+  @keyframes mp-volume-vibrate {
+    0%, 100% { transform: scale(1) translateX(0); filter: none; }
+    20%      { transform: scale(1.08) translateX(-1px); filter: brightness(1.18); }
+    45%      { transform: scale(1.04) translateX(1px); filter: brightness(1.08); }
+    70%      { transform: scale(1.01) translateX(-0.5px); }
+  }
+  @keyframes mp-volume-wave {
+    0%   { transform: scale(0.3) translateX(-2px); opacity: 0; }
+    16%  { opacity: 0.95; }
+    100% { transform: scale(2.0) translateX(3px); opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .heart-btn.just-clicked > :global(svg),
+    .play-pause.just-clicked,
+    .connect-btn.just-clicked > :global(svg),
+    .queue-btn.just-clicked > :global(svg),
+    .canvas-btn.just-clicked > :global(svg),
+    .volume-btn.just-clicked > :global(svg) { animation: none; }
+    .heart-btn.just-clicked::before,
+    .heart-btn.just-clicked::after,
+    .connect-btn.just-clicked::before,
+    .connect-btn.just-clicked::after,
+    .queue-btn.just-clicked::after,
+    .canvas-btn.just-clicked::before,
+    .canvas-btn.just-clicked::after,
+    .just-clicked.volume-btn::before,
+    .just-clicked.volume-btn::after { animation: none; opacity: 0; }
   }
 
   /* ==========================================================================

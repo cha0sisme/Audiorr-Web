@@ -1,6 +1,16 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { Play, MusicNote, DotsThree, Plus, ListPlus, User, Disc } from 'phosphor-svelte';
+  import {
+    Play,
+    MusicNote,
+    DotsThree,
+    Plus,
+    ListPlus,
+    User,
+    Disc,
+    Wrench,
+    YoutubeLogo
+  } from 'phosphor-svelte';
   import NowPlayingIndicator from './NowPlayingIndicator.svelte';
   import ExplicitBadge from './ExplicitBadge.svelte';
   import CoverImage from './CoverImage.svelte';
@@ -8,6 +18,8 @@
   import { player, type PlaybackContext } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
+  import { adminToolsUI } from '$stores/admin-tools-ui.svelte';
+  import { authInfo } from '$stores/auth-info.svelte';
   import { formatTime } from '$utils/format';
   import type { SongListItem } from '$utils/navidrome-mappers';
 
@@ -90,6 +102,26 @@
     if (navItems.length > 0) {
       items.push({ divider: true });
       items.push(...navItems);
+    }
+    if (authInfo.isAdmin) {
+      items.push({ divider: true });
+      items.push({
+        label: 'Admin Tools',
+        icon: Wrench,
+        submenu: [
+          {
+            label: 'Enviar a la cola de Canvas',
+            icon: YoutubeLogo,
+            action: () => {
+              adminToolsUI.openCanvasQueue({
+                songId: track.id,
+                songTitle: track.title,
+                songArtist: artist ?? track.artist ?? 'Desconocido'
+              });
+            }
+          }
+        ]
+      });
     }
     return items;
   });

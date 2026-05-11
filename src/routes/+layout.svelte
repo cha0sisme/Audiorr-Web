@@ -15,11 +15,13 @@
   import NowPlayingFullscreen from '$components/now-playing/NowPlayingFullscreen.svelte';
   import AddToPlaylistSheet from '$components/shared/AddToPlaylistSheet.svelte';
   import CreatePlaylistDialog from '$components/shared/CreatePlaylistDialog.svelte';
+  import CanvasQueueModal from '$components/shared/CanvasQueueModal.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { queueUI } from '$stores/queue-ui.svelte';
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { credentials } from '$stores/credentials.svelte';
+  import { authInfo } from '$stores/auth-info.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
@@ -51,6 +53,16 @@
   $effect(() => {
     if (credentials.isConfigured) {
       void queueManager.restoreLastPlayback();
+    }
+  });
+
+  /** Hidrata `authInfo` (adminRole) cuando hay creds. Cacheado dentro del
+      store por username — no se re-fetch si el user no cambia. Lo consume
+      SongRow para mostrar la sección "Admin Tools" del context menu sin
+      pagar un createQuery por cada row montada. */
+  $effect(() => {
+    if (credentials.isConfigured) {
+      void authInfo.refresh();
     }
   });
 
@@ -366,6 +378,7 @@
             songId={player.currentSong.id}
             title={player.currentSong.title}
             artist={player.currentSong.artist}
+            artistId={player.currentSong.artistId}
             coverUrl={player.currentSong.coverUrl}
             explicit={player.currentSong.explicit ?? false}
             durationSec={player.currentSong.durationSec ?? 0}
@@ -417,6 +430,7 @@
   {#if !isBareRoute && credentials.isConfigured}
     <AddToPlaylistSheet />
     <CreatePlaylistDialog />
+    <CanvasQueueModal />
   {/if}
 
   <!-- ToastViewport siempre montado, también en /login -->

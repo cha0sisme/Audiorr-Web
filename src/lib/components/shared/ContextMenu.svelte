@@ -15,6 +15,13 @@
         action: () => void;
         destructive?: boolean;
       }
+    | {
+        /** Item con submenu — al hacer click hace push del nuevo nivel dentro
+            del mismo popover (mirror iOS Menu jerárquico). */
+        label: string;
+        icon: Component<{ size?: number | string; weight?: IconWeight }>;
+        submenu: ContextMenuItem[];
+      }
     | { divider: true };
 </script>
 
@@ -36,6 +43,7 @@
    *   - ↑/↓ navegación, Enter/Space activación, Escape cierra.
    */
   import { onMount, tick } from 'svelte';
+  import { CaretLeft, CaretRight } from 'phosphor-svelte';
 
   type Props = {
     open: boolean;
@@ -50,6 +58,14 @@
 
   let menuEl: HTMLDivElement | null = $state(null);
 
+  /** Stack de submenu activo. Cada vez que se hace click en un item con
+      `submenu`, hacemos push con `{ title, items }`. El "Atrás" hace pop.
+      Cuando está vacío, mostramos `items` raíz. */
+  type Frame = { title: string; items: ContextMenuItem[] };
+  let stack = $state<Frame[]>([]);
+  const visibleItems = $derived(stack.length > 0 ? stack[stack.length - 1]!.items : items);
+  const breadcrumb = $derived(stack.length > 0 ? stack[stack.length - 1]!.title : null);
+
   /** Items interactivos (excluye dividers) — para navegación por teclado.
       `$state` array porque Svelte 5 marca `bind:this={itemRefs[idx]}` como
       "binding to a non-reactive property" si itemRefs no es reactivo. */
@@ -59,6 +75,12 @@
     itemRefs[idx]?.focus();
   }
 
+  // Reset del stack cada vez que el menu se cierra — la próxima apertura
+  // empieza desde la raíz.
+  $effect(() => {
+    if (!open) stack = [];
+  });
+
   $effect(() => {
     if (open) {
       // Foco al primer item al abrir — coherente con menus de Apple.
@@ -66,16 +88,45 @@
     }
   });
 
-  function handleAction(item: ContextMenuItem) {
+  function handleAction(e: MouseEvent, item: ContextMenuItem) {
+    // El menú vive dentro del propio anchor del row (.menu-anchor inside .row).
+    // Sin stopPropagation, el click bubble hasta `.row` y dispara `onPlay()`
+    // tras nuestro `onClose()` (que ya bajó menuOpen) — el guard `if (menuOpen)`
+    // del row no salva nada. Cortamos la propagación aquí.
+    e.stopPropagation();
     if ('divider' in item) return;
+    if ('submenu' in item) {
+      stack = [...stack, { title: item.label, items: item.submenu }];
+      tick().then(() => focusItem(0));
+      return;
+    }
     item.action();
     onClose();
+  }
+
+  function popStack(e: MouseEvent) {
+    e.stopPropagation();
+    stack = stack.slice(0, -1);
+    tick().then(() => focusItem(0));
   }
 
   function handleKeydown(e: KeyboardEvent, idx: number) {
     if (e.key === 'Escape') {
       e.preventDefault();
+      if (stack.length > 0) {
+        stack = stack.slice(0, -1);
+        tick().then(() => focusItem(0));
+        return;
+      }
       onClose();
+      return;
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+      if (stack.length > 0) {
+        e.preventDefault();
+        stack = stack.slice(0, -1);
+        tick().then(() => focusItem(0));
+      }
       return;
     }
     if (e.key === 'ArrowDown') {
@@ -126,24 +177,46 @@
     class:side-top-start={side === 'top-start'}
     role="menu"
   >
-    {#each items as item, idx}
+    {#if breadcrumb}
+      <button
+        type="button"
+        class="item submenu-back"
+        role="menuitem"
+        onclick={popStack}
+      >
+        <span class="item-icon back-arrow" aria-hidden="true">
+          <CaretLeft size={14} weight="bold" />
+        </span>
+        <span class="item-label">{breadcrumb}</span>
+      </button>
+      <span class="divider" role="separator" aria-hidden="true"></span>
+    {/if}
+    {#each visibleItems as item, idx}
       {#if 'divider' in item}
         <span class="divider" role="separator" aria-hidden="true"></span>
       {:else}
         {@const Icon = item.icon}
+        {@const hasSubmenu = 'submenu' in item}
         <button
           bind:this={itemRefs[idx]}
           type="button"
           class="item"
-          class:destructive={item.destructive}
+          class:destructive={!hasSubmenu && (item as { destructive?: boolean }).destructive}
           role="menuitem"
-          onclick={() => handleAction(item)}
+          aria-haspopup={hasSubmenu ? 'menu' : undefined}
+          onclick={(e) => handleAction(e, item)}
           onkeydown={(e) => handleKeydown(e, idx)}
         >
           <span class="item-label">{item.label}</span>
-          <span class="item-icon" aria-hidden="true">
-            <Icon size={16} weight="regular" />
-          </span>
+          {#if hasSubmenu}
+            <span class="item-icon submenu-chevron" aria-hidden="true">
+              <CaretRight size={14} weight="bold" />
+            </span>
+          {:else}
+            <span class="item-icon" aria-hidden="true">
+              <Icon size={16} weight="regular" />
+            </span>
+          {/if}
         </button>
       {/if}
     {/each}
@@ -254,5 +327,24 @@
     height: 1px;
     margin: var(--space-1) var(--space-2);
     background: var(--border-subtle);
+  }
+
+  /* Header item del submenu (back). Icono al INICIO en vez de al final, y
+     label en color secundario (typografía de breadcrumb más que de acción). */
+  .submenu-back {
+    grid-template-columns: auto 1fr;
+    color: var(--text-secondary);
+  }
+  .submenu-back .item-label {
+    font-size: var(--text-sm);
+  }
+  .submenu-back .back-arrow {
+    color: var(--text-secondary);
+  }
+
+  /* Chevron del item que abre submenu — más tenue que iconos de acción
+     porque señala "hay más", no es la acción en sí. */
+  .submenu-chevron {
+    color: var(--text-tertiary);
   }
 </style>

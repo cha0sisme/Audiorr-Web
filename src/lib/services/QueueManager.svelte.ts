@@ -115,6 +115,7 @@ function persistableToPlayerSong(s: PersistableSong): {
   id: string;
   title: string;
   artist: string;
+  artistId?: string | undefined;
   album?: string | undefined;
   coverUrl?: string | undefined;
   durationSec?: number | undefined;
@@ -124,6 +125,7 @@ function persistableToPlayerSong(s: PersistableSong): {
     id: s.id,
     title: s.title,
     artist: s.artist,
+    ...(s.artistId !== undefined ? { artistId: s.artistId } : {}),
     ...(s.album !== undefined ? { album: s.album } : {}),
     ...(s.coverArt ? { coverUrl: getCoverArtUrl(s.coverArt, 300) } : {}),
     durationSec: s.duration > 0 ? s.duration : undefined,

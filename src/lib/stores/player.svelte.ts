@@ -20,6 +20,10 @@ export type Song = {
   id: string;
   title: string;
   artist: string;
+  /** Id de Subsonic del artista — opcional porque algunas fuentes legacy
+      (Connect remoto, restore) no lo propagan. Cuando existe, el MiniPlayer
+      y Now Playing renderizan el nombre como link a `/artist/<id>`. */
+  artistId?: string | undefined;
   album?: string | undefined;
   coverUrl?: string | undefined;
   durationSec?: number | undefined;
