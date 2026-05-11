@@ -1,0 +1,34 @@
+# Build artifacts y locales — todo se regenera en el build stage.
+node_modules
+build
+.svelte-kit
+
+# VCS y editor
+.git
+.gitignore
+.vscode
+.idea
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs y temporales
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Documentación local (no se necesita en runtime)
+README.md
+CLAUDE.md
+LICENSE
+
+# Tests (no aplica hoy, pero por si llega)
+coverage
+.nyc_output
+
+# Entornos locales — NO entran en la imagen, la config va vía env del
+# compose. El env.js lo escribe el entrypoint.
+.env
+.env.*
+!.env.example

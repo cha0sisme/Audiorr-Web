@@ -1,0 +1,86 @@
+# Audiorr — stack monolítico (backend + frontend) para Portainer.
+#
+# Pegar este compose en Portainer (Web editor del stack actual). El
+# servicio `frontend` construye su imagen directamente desde el repo
+# de GitHub vía `build.context: <git url>` — el daemon de Docker del
+# homelab clona el repo y construye usando este mismo Dockerfile.
+# Nada se transfiere desde el portátil.
+#
+# Ajustes que tienes que hacer al pegar:
+#   1. Verifica que la URL del repo en `build.context` es la correcta.
+#   2. Si el repo es privado, mete el token en una env var del stack
+#      (GITHUB_TOKEN) y cambia la URL a:
+#         https://${GITHUB_TOKEN}@github.com/cha0sisme/Audiorr-web.git#main
+#   3. VITE_API_URL en la sección "Environment variables" del stack.
+#
+# Refresh tras un push:
+#   - Manual: Stack → Update the stack → marca "Force rebuild" /
+#     "Re-pull and redeploy".
+#   - Webhook: crear webhook en el stack, copiar URL a GitHub →
+#     Settings → Webhooks → Push events.
+
+version: '3.9'
+
+services:
+  backend:
+    image: audiorr-backend:latest
+    container_name: audiorr-backend
+    restart: unless-stopped
+    # CRÍTICO para mDNS / Discovery
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      PORT: 2999
+      DATA_DIR: /app/data
+      LOG_LEVEL: info
+      TEMP_AUDIO_DIR: /app/temp-audio
+      SCRIPTS_DIR: /app/scripts
+      PYTHON_PATH: /usr/bin/python3
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SP_DC: ${SP_DC}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      NAVIDROME_URL: ${NAVIDROME_URL:-}
+      NAVIDROME_USER: ${NAVIDROME_USER:-}
+      NAVIDROME_TOKEN: ${NAVIDROME_TOKEN:-}
+      NAVIDROME_SALT: ${NAVIDROME_SALT:-}
+      GETSONGBPM_API_KEY: ${GETSONGBPM_API_KEY:-}
+      GENIUS_ACCESS_TOKEN: ${GENIUS_ACCESS_TOKEN:-}
+      YT_DLP_COOKIES_PATH: ${YT_DLP_COOKIES_PATH:-}
+    volumes:
+      - /mnt/homelab_media/audiorr/data:/app/data
+      - /mnt/homelab_media/audiorr/canvas:/app/canvas
+      - /mnt/homelab_media/audiorr/animated-artwork:/app/animated-artwork
+      - /mnt/homelab_media/audiorr/temp-audio:/app/temp-audio
+      - /home/srv/docker/audiorr/backend/scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2999/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    # Build directo desde el repo de GitHub — el daemon de Docker del
+    # homelab clona el repo y construye usando el Dockerfile en la raíz.
+    build:
+      context: https://github.com/cha0sisme/Audiorr-web.git#main
+      dockerfile: Dockerfile
+    image: audiorr-web:latest
+    container_name: audiorr-web
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 2998
+      # URL pública del backend que verá el navegador del usuario.
+      # El entrypoint la inyecta en build/client/env.js en cada start.
+      VITE_API_URL: ${VITE_API_URL:-http://192.168.1.43:2999}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  audiorr_data:
+    driver: local
