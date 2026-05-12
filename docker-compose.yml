@@ -40,7 +40,17 @@ services:
       SP_DC: ${SP_DC}
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
-      NAVIDROME_URL: ${NAVIDROME_URL:-}
+      # NAVIDROME_URL: apunta al backend Navidrome.
+      # Por defecto usamos la IP fija del bridge `navidrome_default`
+      # (172.22.0.2:4533). Como este servicio corre con network_mode: host,
+      # el host es gateway de ese bridge (172.22.0.1) y la ruta es directa,
+      # sin pasar por docker-proxy ni NAT de userspace — evita el hairpin
+      # NAT que tenía la URL antigua (`http://192.168.1.43:4533`, ~200ms).
+      # Si recreas el stack Navidrome y la IP cambia, comprueba con:
+      #   docker inspect navidrome | grep IPAddress
+      # Alternativa más robusta pero que rompe mDNS: quitar network_mode: host
+      # y meter el backend en `navidrome_default` para resolver por nombre.
+      NAVIDROME_URL: ${NAVIDROME_URL:-http://172.22.0.2:4533}
       NAVIDROME_USER: ${NAVIDROME_USER:-}
       NAVIDROME_TOKEN: ${NAVIDROME_TOKEN:-}
       NAVIDROME_SALT: ${NAVIDROME_SALT:-}
