@@ -3,6 +3,7 @@
   import { Play, MusicNote } from 'phosphor-svelte';
   import NowPlayingIndicator from './NowPlayingIndicator.svelte';
   import ExplicitBadge from './ExplicitBadge.svelte';
+  import NewArrivalBadge from './NewArrivalBadge.svelte';
   import CoverImage from './CoverImage.svelte';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -23,6 +24,10 @@
         artista. 'year' → año (modo Discografía en ArtistDetail, donde el
         artist es redundante). */
     subtitleMode?: 'artist' | 'year';
+    /** Timestamp ISO de cuándo se añadió a la biblioteca. Si está dentro
+        de 48h, pinta NewArrivalBadge (HOY / AYER) en la esquina sup-izq
+        del cover. */
+    createdAt?: string | undefined;
     /** Pre-fetch del hero del cover (size mayor) on hover/focus. El detalle
         renderiza el mismo coverArt a tamaño hero (600 vs 300 de la card)
         — con prefetch, al click el cache HTTP del browser ya tiene la
@@ -39,6 +44,7 @@
     explicit = false,
     year,
     subtitleMode = 'artist',
+    createdAt,
     prefetchHero,
     ...rest
   }: Props = $props();
@@ -140,6 +146,7 @@
     {#if explicit}
       <ExplicitBadge />
     {/if}
+    <NewArrivalBadge {createdAt} />
   </p>
   {#if subtitle}
     <p class="artist">{subtitle}</p>

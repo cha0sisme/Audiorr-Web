@@ -64,9 +64,14 @@
 
   /** Mapea el type al subsonic albumList type. `new-releases` no usa
       `getAlbumList2` directamente — usa `getAlbumsByYear` con el año actual,
-      que es lo que la home también consume. */
+      que es lo que la home también consume.
+
+      Ojo: URL `/library/recent` (= "Recientemente añadido") debe pedir
+      `newest` a Subsonic — `recent` en el spec significa recently PLAYED,
+      no recently ADDED, y eso no es lo que la home consume bajo ese
+      título. */
   const albumListType = $derived(
-    type === 'recent' ? 'recent'
+    type === 'recent' ? 'newest'
     : type === 'most-played' ? 'frequent'
     : type === 'newest' ? 'newest'
     : 'random'
@@ -76,16 +81,30 @@
 
   // ============================================================================
   // Albums (recent / most-played / random / newest / new-releases)
+  //
+  // QueryKey + size alineados con los que usa la home (`+page.svelte`):
+  //   - 'newest'    → ['albumList2', 'newest']          size 30
+  //   - 'frequent'  → ['albumList2', 'frequent']        size 30
+  //   - 'random'    → ['albumList2', 'random']          size 30
+  //   - 'byYear'    → ['albumList2', 'byYear', year]    size 30
+  //
+  // Si pedimos un size distinto o una key distinta, el "Ver todo" carga
+  // OTRO set de álbumes — eso era el bug: el contador "+25" de SeeAllCard
+  // prometía 25 elementos extra (los que no entraban en el carrusel) y al
+  // entrar a /library/random aparecían 100 random DISTINTOS porque se
+  // disparaba un fetch fresco con otra queryKey. Reusando la cache, el
+  // usuario ve exactamente los mismos N items que el carrusel anunciaba.
   // ============================================================================
+  const HOME_SIZE = 30;
   const albumsQ = createQuery(() => ({
     queryKey:
       type === 'new-releases'
-        ? ['library-grid', 'albums', 'byYear', currentYear]
-        : ['library-grid', 'albums', albumListType],
+        ? ['albumList2', 'byYear', currentYear]
+        : ['albumList2', albumListType],
     queryFn: () =>
       type === 'new-releases'
-        ? nav.getAlbumsByYear(currentYear, currentYear, 100)
-        : nav.getAlbumList2(albumListType, 100),
+        ? nav.getAlbumsByYear(currentYear, currentYear, HOME_SIZE)
+        : nav.getAlbumList2(albumListType, HOME_SIZE),
     enabled: credentials.isConfigured && kind === 'album',
     staleTime: type === 'new-releases' ? 60 * 60 * 1000 : 0
   }));

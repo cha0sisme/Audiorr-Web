@@ -15,10 +15,12 @@
   import ExplicitBadge from './ExplicitBadge.svelte';
   import CoverImage from './CoverImage.svelte';
   import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
+  import { Users } from 'phosphor-svelte';
   import { player, type PlaybackContext } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
   import { adminToolsUI } from '$stores/admin-tools-ui.svelte';
+  import { viewArtistsUI } from '$stores/view-artists-ui.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
   import { formatTime } from '$utils/format';
   import type { SongListItem } from '$utils/navidrome-mappers';
@@ -53,8 +55,12 @@
   /**
    * Items del menu contextual. Lógica:
    *   - "Añadir a continuación" y "Añadir a Playlist" siempre presentes.
-   *   - "Ver artista" — todos menos cuando ya estamos en /artist (contextType
-   *     === 'artist'). Solo aparece si tenemos artistId del track.
+   *   - "Ver artista" / "Ver artistas" — todos menos cuando ya estamos en
+   *     /artist (contextType === 'artist'). Si `track.artists` trae >1
+   *     entrada (OpenSubsonic multi-artist), pasamos a "Ver artistas"
+   *     (plural) y abrimos el mini-modal `ViewArtistsDialog` con la lista.
+   *     Si solo hay 1 (o el server no expone `artists[]`), queda la
+   *     versión singular que navega directo a `track.artistId`.
    *   - "Ver álbum" — todos menos cuando ya estamos en /album. Solo si
    *     tenemos albumId.
    *   - El divider separa las acciones de los "ver". Si el segundo grupo
@@ -81,14 +87,26 @@
       }
     ];
     const navItems: ContextMenuItem[] = [];
-    if (contextType !== 'artist' && track.artistId) {
-      navItems.push({
-        label: 'Ver artista',
-        icon: User,
-        action: () => {
-          if (track.artistId) goto(`/artist/${track.artistId}`);
-        }
-      });
+    if (contextType !== 'artist') {
+      const multiArtist = (track.artists?.length ?? 0) > 1;
+      if (multiArtist && track.artists) {
+        const artists = track.artists;
+        navItems.push({
+          label: 'Ver artistas',
+          icon: Users,
+          action: () => {
+            viewArtistsUI.open(artists, track.title);
+          }
+        });
+      } else if (track.artistId) {
+        navItems.push({
+          label: 'Ver artista',
+          icon: User,
+          action: () => {
+            if (track.artistId) goto(`/artist/${track.artistId}`);
+          }
+        });
+      }
     }
     if (contextType !== 'album' && track.albumId) {
       navItems.push({

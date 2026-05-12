@@ -16,6 +16,7 @@
   import AddToPlaylistSheet from '$components/shared/AddToPlaylistSheet.svelte';
   import CreatePlaylistDialog from '$components/shared/CreatePlaylistDialog.svelte';
   import CanvasQueueModal from '$components/shared/CanvasQueueModal.svelte';
+  import ViewArtistsDialog from '$components/shared/ViewArtistsDialog.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { queueUI } from '$stores/queue-ui.svelte';
@@ -431,6 +432,7 @@
     <AddToPlaylistSheet />
     <CreatePlaylistDialog />
     <CanvasQueueModal />
+    <ViewArtistsDialog />
   {/if}
 
   <!-- ToastViewport siempre montado, también en /login -->

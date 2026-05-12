@@ -828,7 +828,9 @@
                  debajo. Al expandir, sin clamp (texto entero visible). -->
             {#if displayedAnnotation.fragment}
               <div class="cp-genius-fragment-anchor" aria-hidden="true">
-                <p class="cp-genius-fragment">{displayedAnnotation.fragment}</p>
+                <p class="cp-genius-fragment">
+                  <span class="cp-genius-quote">&ldquo;</span>{displayedAnnotation.fragment}
+                </p>
               </div>
             {/if}
 
@@ -1612,13 +1614,17 @@
     transform-origin: left center;
   }
   .cp-genius-fragment {
+    /* Pull-quote: cita textual de la letra. Tipografía recta (no italic
+       — italic en pantalla pequeña pierde legibilidad sobre la lyric
+       subyacente) un punto mayor que el body. La comilla va inline al
+       inicio del texto (.cp-genius-quote) — sin decoración absoluta que
+       compita con el logo de Genius del overlay debajo. */
     margin: 0;
     padding: 9px 14px 8px;
     background: transparent;
     font-family: var(--font-sans);
-    font-size: 12.5px;
-    font-weight: 600;
-    font-style: italic;
+    font-size: 14px;
+    font-weight: 500;
     line-height: 1.4;
     letter-spacing: var(--tracking-snug);
     color: rgba(255, 255, 255, 0.96);
@@ -1626,6 +1632,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     transition: padding 380ms var(--ease-ios-default, ease);
+  }
+  .cp-genius-quote {
+    font-family: Georgia, 'Times New Roman', var(--font-sans);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.55);
+    margin-right: 2px;
+    /* Sin font-size grande ni position absolute — la comilla fluye con
+       el texto. Apenas se nota pero da la pista tipográfica de que es
+       una cita literal. */
   }
   /* Expanded: sin clamp 1, texto entero del fragment con justify. */
   .cp-genius-wrap.expanded .cp-genius-fragment {

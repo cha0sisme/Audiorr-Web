@@ -156,6 +156,24 @@ function computeDurationMs(body: string): number {
   return Math.max(6000, Math.min(18000, words * 280));
 }
 
+/** Score para elegir la "mejor" anotación de un cluster denso. Verified
+    cuenta mucho (la editorial de Genius la ha vetted); votes y autor son
+    señales débiles pero útiles para desempate. */
+function scoreAnnotation(a: MatchedGeniusAnnotation): number {
+  let s = 0;
+  if (a.verified) s += 1000;
+  if (typeof a.votes === 'number') s += a.votes;
+  if (a.authorName) s += 10;
+  return s;
+}
+
+/** Tiempo mínimo (s) que una anotación debe poder estar visible antes de
+    ser desplazada por la siguiente. Si dentro de esta ventana caen 3
+    anotaciones, mostrar las 3 las haría parpadear con menos de 2s cada
+    una — el usuario no puede leer. Agrupamos el cluster en una sola
+    elección (la "mejor" por score) y descartamos el resto. */
+const MIN_GAP_SEC = 6;
+
 /** Matchea cada annotation a la línea LRCLib más similar a su `fragment`.
  *  - Solo considera líneas con `time >= 0` (synced).
  *  - Usa similitud Jaccard sobre tokens; aplica boost si una línea
@@ -164,6 +182,9 @@ function computeDurationMs(body: string): number {
  *  - Threshold mínimo 0.35 para evitar matches espurios.
  *  - Devuelve las annotations ordenadas por `matchedTime` ascendente,
  *    ya filtradas: las que no superan el threshold se descartan.
+ *  - Si 2+ anotaciones caen dentro de MIN_GAP_SEC seg (cluster denso),
+ *    se queda solo la de mejor score — evita que tres curiosidades
+ *    seguidas duren ~1s cada una sin tiempo para leerlas.
  */
 export function matchAnnotationsToLyrics(
   annotations: GeniusAnnotation[],
@@ -178,7 +199,7 @@ export function matchAnnotationsToLyrics(
     toks: tokens(l.text)
   }));
 
-  const out: MatchedGeniusAnnotation[] = [];
+  const matched: MatchedGeniusAnnotation[] = [];
   for (const ann of annotations) {
     const fragNorm = normalize(ann.fragment);
     if (!fragNorm) continue;
@@ -201,7 +222,7 @@ export function matchAnnotationsToLyrics(
     }
 
     if (bestScore >= 0.35 && bestTime !== null) {
-      out.push({
+      matched.push({
         ...ann,
         matchedTime: bestTime,
         durationMs: computeDurationMs(ann.body)
@@ -209,6 +230,36 @@ export function matchAnnotationsToLyrics(
     }
   }
 
-  out.sort((a, b) => a.matchedTime - b.matchedTime);
+  matched.sort((a, b) => a.matchedTime - b.matchedTime);
+
+  // Cluster collapse: si la siguiente anotación arranca menos de
+  // MIN_GAP_SEC seg después de la primera del cluster, todas van al
+  // mismo grupo y solo se queda la mejor por score.
+  const out: MatchedGeniusAnnotation[] = [];
+  let cluster: MatchedGeniusAnnotation[] = [];
+  const flush = () => {
+    if (cluster.length === 0) return;
+    let best = cluster[0]!;
+    let bestScore = scoreAnnotation(best);
+    for (let i = 1; i < cluster.length; i++) {
+      const c = cluster[i]!;
+      const s = scoreAnnotation(c);
+      if (s > bestScore) {
+        best = c;
+        bestScore = s;
+      }
+    }
+    out.push(best);
+    cluster = [];
+  };
+  for (const ann of matched) {
+    if (cluster.length === 0 || ann.matchedTime - cluster[0]!.matchedTime < MIN_GAP_SEC) {
+      cluster.push(ann);
+    } else {
+      flush();
+      cluster.push(ann);
+    }
+  }
+  flush();
   return out;
 }

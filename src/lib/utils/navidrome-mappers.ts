@@ -16,7 +16,8 @@ import type {
   NavidromePlaylist,
   NavidromeArtist,
   NavidromeSimilarArtist,
-  NavidromeSong
+  NavidromeSong,
+  NavidromeItemArtist
 } from '$types/navidrome';
 
 /**
@@ -43,6 +44,10 @@ export type AlbumCardProps = {
   href: string;
   explicit?: boolean | undefined;
   year?: number | undefined;
+  /** Timestamp ISO 8601 de cuándo se añadió a la biblioteca (= `album.created`
+      de Navidrome). AlbumCard lo usa para decidir si pinta NewArrivalBadge
+      (HOY / AYER si < 48h). */
+  createdAt?: string | undefined;
   /** Pre-fetch de la versión hero del cover. Las cards lo invocan en
       onmouseenter/onfocus — al click el detalle ya tendrá la imagen
       en el cache HTTP. No-op si la card no tiene coverArt. */
@@ -58,6 +63,7 @@ export function albumToCardProps(album: NavidromeAlbum): AlbumCardProps {
     href: `/album/${album.id}`,
     explicit: album.explicitStatus === 'explicit',
     year: album.year,
+    createdAt: album.created,
     prefetchHero: () => prefetchCover(album.coverArt, HERO_SIZE)
   };
 }
@@ -168,6 +174,11 @@ export type SongListItem = {
   /** Necesario para "Ver artista" desde el menu contextual de cada row.
       Subsonic lo expone en cada NavidromeSong. */
   artistId?: string | undefined;
+  /** Lista completa de artistas de la pista (OpenSubsonic `song.artists[]`).
+      Cuando trae >1 entrada, el menu contextual muestra "Ver artistas"
+      (plural, abre mini-modal); si viene undefined o length===1, queda
+      "Ver artista" (singular) que navega al artistId principal. */
+  artists?: NavidromeItemArtist[] | undefined;
 };
 
 /** Convierte NavidromeSong → SongListItem. Pasa `includeArtist: true` para
@@ -189,6 +200,7 @@ export function songToListItem(
     coverUrl: includeCover && song.coverArt ? getCoverArtUrl(song.coverArt, ROW_SIZE) : undefined,
     album: song.album,
     albumId: song.albumId,
-    artistId: song.artistId
+    artistId: song.artistId,
+    artists: song.artists
   };
 }

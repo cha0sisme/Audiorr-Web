@@ -241,7 +241,14 @@ export async function getAlbumList2(
 
 /** Variante `byYear` de getAlbumList2 — devuelve los álbumes lanzados entre
     `fromYear` y `toYear` (inclusive). Útil para "Nuevos lanzamientos" del
-    año en curso. Subsonic acepta from > to para invertir el orden. */
+    año en curso. Subsonic acepta from > to para invertir el orden.
+
+    Ordenamos client-side por (year desc, created desc): cuando `from===to`
+    Navidrome no garantiza orden entre álbumes del mismo año, y necesitamos
+    "lo más reciente al principio". El tiebreaker por `created` (timestamp
+    ISO de cuándo se añadió a la biblioteca) aproxima bien "lanzamientos
+    nuevos primero" en un Navidrome al que se va metiendo música al ritmo
+    al que sale al mundo. */
 export async function getAlbumsByYear(
   fromYear: number,
   toYear: number,
@@ -254,7 +261,12 @@ export async function getAlbumsByYear(
     { type: 'byYear', fromYear, toYear, size },
     AlbumList2ResponseSchema
   );
-  return data.albumList2.album ?? [];
+  const albums = data.albumList2.album ?? [];
+  return [...albums].sort((a, b) => {
+    const byYear = (b.year ?? 0) - (a.year ?? 0);
+    if (byYear !== 0) return byYear;
+    return (b.created ?? '').localeCompare(a.created ?? '');
+  });
 }
 
 /** Variante `byGenre` — álbumes etiquetados con un género específico.
