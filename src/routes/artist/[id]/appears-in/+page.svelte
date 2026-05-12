@@ -1,11 +1,9 @@
 <script lang="ts">
   /**
    * /artist/[id]/appears-in — SeeAllGrid de álbumes donde el artista
-   * colabora (feat./&/and). Mirrors `getArtistCollaborations` de iOS.
-   *
-   * Reusa la queryKey ['artistCollaborations', name] del detail → si llegas
-   * desde el carrusel "Aparece en" la query ya está en cache y la página
-   * renderiza instantáneo.
+   * colabora. Comparte queryKey ['artistCollaborations', artistId] con el
+   * detail → si llegas desde el carrusel "Aparece en" la query ya está en
+   * cache y la página renderiza instantáneo.
    */
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
@@ -24,11 +22,17 @@
   }));
 
   const artist = $derived(artistQ.data);
+  const primaryAlbums = $derived(artist?.album ?? []);
 
   const collabsQ = createQuery(() => ({
-    queryKey: ['artistCollaborations', artist?.name ?? ''],
-    queryFn: () => nav.getArtistCollaborations(artist!.name),
-    enabled: credentials.isConfigured && !!artist?.name,
+    queryKey: ['artistCollaborations', artistId],
+    queryFn: () =>
+      nav.getArtistCollaborations(
+        artistId,
+        artist!.name,
+        new Set(primaryAlbums.map((a) => a.id))
+      ),
+    enabled: credentials.isConfigured && !!artist,
     retry: false,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000

@@ -104,6 +104,17 @@ export type NavidromePlaylist = z.infer<typeof NavidromePlaylistSchema>;
 // Song
 // ============================================================================
 
+/** OpenSubsonic ItemArtist — {id, name} de un artist en una pista o álbum.
+    Navidrome lo expone en `song.artists[]` / `album.artists[]` cuando el ID3
+    multi-artist está poblado. Permite detectar collabs por id en lugar de
+    string matching contra `artist` (que solo trae el primario). */
+export const NavidromeItemArtistSchema = z.object({
+  id: z.string(),
+  name: z.string()
+});
+
+export type NavidromeItemArtist = z.infer<typeof NavidromeItemArtistSchema>;
+
 export const NavidromeSongSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -124,7 +135,11 @@ export const NavidromeSongSchema = z.object({
   starred: z.string().optional(),
   // OpenSubsonic extension. 'explicit' marca contenido explícito;
   // 'clean' es la edición limpia; vacío/undefined = no etiquetado.
-  explicitStatus: z.string().optional()
+  explicitStatus: z.string().optional(),
+  // OpenSubsonic extension. Lista completa de artistas de la pista
+  // (incluyendo features). Si el server no la expone, viene undefined y
+  // hay que fallback al string `artist`.
+  artists: z.array(NavidromeItemArtistSchema).optional()
 });
 
 export type NavidromeSong = z.infer<typeof NavidromeSongSchema>;
@@ -318,14 +333,6 @@ export const LyricsLegacyResponseSchema = z.object({
     })
     .optional()
 });
-
-// ============================================================================
-// AlbumList2 con artistId — Subsonic permite filtrar getAlbumList2 por
-// byArtist + artistId para traer todos los álbumes en los que aparece un
-// artista (incluyendo collabs donde no es el albumArtist). Reutilizamos
-// AlbumList2ResponseSchema que ya existe.
-// ============================================================================
-
 
 // ============================================================================
 // Search3 — endpoint unificado que devuelve artistas + álbumes + canciones

@@ -69,12 +69,19 @@
   }));
 
   // "Aparece en" — álbumes donde el artista colabora (no es el albumArtist).
-  // Search server-side con artist name + filtro local idéntico a iOS:515-535.
+  // search3(name, songCount=500) → filtro por song.artists[].id === artistId
+  // (OpenSubsonic ext, captura feats canción-a-canción), dedupe por albumId,
+  // restamos los principales (getArtist().album), resolve via getAlbum.
   // Aislada como query independiente — no bloquea hero ni discografía.
   const collaborationsQ = createQuery(() => ({
-    queryKey: ['artistCollaborations', artist?.name ?? ''],
-    queryFn: () => nav.getArtistCollaborations(artist!.name),
-    enabled: credentials.isConfigured && !!artist?.name,
+    queryKey: ['artistCollaborations', artistId],
+    queryFn: () =>
+      nav.getArtistCollaborations(
+        artistId,
+        artist!.name,
+        new Set(albums.map((a) => a.id))
+      ),
+    enabled: credentials.isConfigured && !!artist,
     retry: false,
     // Las collabs son derivadas del catálogo Navidrome — cambian poco.
     staleTime: 30 * 60 * 1000,

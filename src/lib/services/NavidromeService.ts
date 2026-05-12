@@ -276,34 +276,60 @@ export async function getAlbumsByGenre(
 
 /**
  * Albumes donde el artista APARECE como colaborador (no como artist principal).
- * Mirrors `getArtistCollaborations` de iOS NavidromeService.swift:515-535:
  *
- *   1. search3 con query=artistName, albumCount=1000.
- *   2. Filtra: descarta álbumes donde el artista es el `albumArtist` principal
- *      (matches exactos o que empiezan con "{name}{,&and feat ft featuring}").
- *   3. Mantiene solo los que CONTIENEN el nombre en el campo `artist` del
- *      álbum (para que sea una colaboración real, no falso positivo).
- *   4. Ordena por año desc.
+ * Approach: search3(artistName, songCount=500) → para cada song, comprobar si
+ * el artista buscado está en `song.artists[]` (OpenSubsonic ext, array completo
+ * de artistas de la pista incluyendo features) o, fallback, si `song.artistId`
+ * matchea. Deduplicar por `albumId`, restar los álbumes principales (los que
+ * vienen embedded en `getArtist().album`) y resolver el meta de los álbumes
+ * supervivientes con `getAlbum` en paralelo.
  *
- * iOS usa search2; aquí search3 (estructuralmente equivalente para álbumes).
+ * Reemplaza dos approaches anteriores:
+ *   - search3 + string match contra `album.artist` (legacy iOS, frágil): solo
+ *     capturaba colabs reflejadas en el albumArtist tag del álbum.
+ *   - getAlbumList2?type=byArtist: Navidrome solo lista álbumes donde el
+ *     artista es albumArtist principal, no incluye feats canción-a-canción.
+ *
+ * El campo `artists[]` es la clave: lo expone Navidrome cuando el ID3 trae
+ * multi-artist, y permite filtrar por id (robusto a typos/casing/separadores).
  */
 export async function getArtistCollaborations(
-  artistName: string
+  artistId: string,
+  artistName: string,
+  primaryAlbumIds: ReadonlySet<string>
 ): Promise<NavidromeAlbum[]> {
-  if (!artistName) return [];
+  if (!artistId || !artistName) return [];
   const result = await search3(artistName, {
     artistCount: 0,
-    albumCount: 1000,
-    songCount: 0
+    albumCount: 0,
+    songCount: 500
   });
-  const lower = artistName.toLowerCase().trim();
-  const mainPrefixes = [',', ' &', ' and', ' ', ' feat', ' ft', ' featuring'];
-  return result.albums
-    .filter((album) => {
-      const a = (album.artist ?? '').toLowerCase();
-      const isMain = a === lower || mainPrefixes.some((p) => a.startsWith(lower + p));
-      return !isMain && a.includes(lower);
-    })
+
+  const candidateAlbumIds = new Set<string>();
+  for (const song of result.songs) {
+    if (!song.albumId) continue;
+    if (primaryAlbumIds.has(song.albumId)) continue;
+    const inArtists = song.artists?.some((a) => a.id === artistId) ?? false;
+    // Fallback: si el server no expone `artists[]`, comparar por artistId
+    // de la pista (cubre el caso donde el queried es el primary de la song
+    // pero el álbum padre es de otro).
+    const isPrimaryOfSong = song.artistId === artistId;
+    if (inArtists || isPrimaryOfSong) {
+      candidateAlbumIds.add(song.albumId);
+    }
+  }
+
+  if (candidateAlbumIds.size === 0) return [];
+
+  const albums = await Promise.all(
+    [...candidateAlbumIds].map((id) =>
+      getAlbum(id)
+        .then((a) => a as NavidromeAlbum)
+        .catch(() => null)
+    )
+  );
+  return albums
+    .filter((a): a is NavidromeAlbum => a !== null)
     .sort((x, y) => (y.year ?? 0) - (x.year ?? 0));
 }
 
