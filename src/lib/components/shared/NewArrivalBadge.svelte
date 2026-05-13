@@ -36,13 +36,13 @@
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;
-    padding: 1px 6px 2px;
+    padding: 2px 5px 3px;
     border-radius: var(--radius-full);
-    background: var(--accent);
+    background: #0097fe8a;
     color: var(--text-on-accent, white);
     font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.04em;
+    font-weight: 200;
+    letter-spacing: 0.08em;
     line-height: 1;
     user-select: none;
     vertical-align: middle;

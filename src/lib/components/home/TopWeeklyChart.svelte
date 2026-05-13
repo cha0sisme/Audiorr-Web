@@ -392,11 +392,12 @@
   .trend-new { color: var(--accent); }
   .badge {
     padding: 2px 6px;
-    background: var(--accent);
+    background: #0097fe8a;
     color: var(--accent-fg, #fff);
     border-radius: var(--radius-xs, 4px);
     font-size: 10px;
     letter-spacing: 0.04em;
+    display: none;
   }
   .dash {
     color: var(--text-tertiary);
