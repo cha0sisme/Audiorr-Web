@@ -245,14 +245,108 @@
       "elemento saliendo con clases viejas" del que protegerse. */
   let displayedExpanded = $state(false);
 
+  /** Marca si el wrap se acaba de montar fresh desde null (no swap).
+      En ese caso, contentIn aplica delay grande (~700ms) para esperar
+      a que la caja se haya desenrollado completamente — sin esto, el
+      texto aparece dentro de una caja a medio abrir y se ve feo. En
+      swap entre dos anotaciones (wrap persiste), delay corto (200ms)
+      es suficiente porque la caja no se mueve.
+
+      El flag se levanta cuando visibleAnnotation pasa de null→no-null
+      y se baja con un setTimeout corto (50ms) tras el siguiente flush
+      del DOM — tiempo de sobra para que las transitions svelte de
+      contentIn se hayan instanciado (corren en el mismo tick del
+      mount), pero antes de cualquier siguiente swap. */
+  let freshMountInProgress = false;
+  let freshMountResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Referencia al wrap del overlay Genius para animar su altura entre
+      swaps de anotación. Sin esto, la altura del wrap salta entre A→B
+      cuando A tiene 4 líneas de body y B tiene 1 (o viceversa). */
+  let geniusWrapEl: HTMLDivElement | undefined = $state();
+  let prevDisplayedId: string | null = null;
+  let heightAnimTimers: Array<ReturnType<typeof setTimeout>> = [];
+
+  /** Anima la altura del wrap durante un swap interno (A→B con wrap
+      persistente). Workflow:
+        1. $effect.pre captura altura del viejo ANTES del DOM update.
+        2. Aplica height: <viejoH>px inline + transition: none.
+        3. Tras 260ms (contentOut 240ms + buffer), el viejo desmonta y
+           solo queda el nuevo en grid-stack.
+        4. Liberamos height (auto) un instante para medir altura natural
+           del nuevo solo (toH), re-aplicamos viejoH, force reflow.
+        5. Aplicamos transition: height + altura target → animación.
+        6. Tras 420ms, limpiamos los styles inline (vuelve a auto).
+
+      grid-stack en .cp-genius-content y .cp-genius-fragment-anchor hace
+      que ambos elementos coexistan en la misma celda durante el solape;
+      esta función gestiona la altura del CONTENEDOR para que no salte. */
+  function clearHeightTimers() {
+    for (const t of heightAnimTimers) clearTimeout(t);
+    heightAnimTimers = [];
+  }
+
+  $effect.pre(() => {
+    const newId = visibleAnnotation?.id ?? null;
+    const prev = prevDisplayedId;
+    prevDisplayedId = newId;
+    const el = geniusWrapEl;
+    if (!el) return;
+    // Solo swap interno entre dos no-null distintos. Mount/unmount real
+    // los gestionan annIn/annOut del wrap, no esta animación.
+    if (prev === null || newId === null || prev === newId) return;
+    // En expanded el wrap tiene max-height + overflow auto — el alto ya
+    // está cápeado y el cambio de contenido se gestiona vía scroll. Solo
+    // animamos en compact donde el alto sigue al contenido.
+    if (displayedExpanded) return;
+
+    clearHeightTimers();
+    const fromH = el.offsetHeight;
+    el.style.height = `${fromH}px`;
+    el.style.transition = 'none';
+
+    heightAnimTimers.push(setTimeout(() => {
+      if (!el.isConnected) return;
+      el.style.height = '';
+      const toH = el.offsetHeight;
+      if (toH === fromH) {
+        el.style.transition = '';
+        return;
+      }
+      el.style.height = `${fromH}px`;
+      void el.offsetHeight; // force reflow
+      el.style.transition = 'height 380ms cubic-bezier(0.32, 0.72, 0, 1)';
+      el.style.height = `${toH}px`;
+      heightAnimTimers.push(setTimeout(() => {
+        if (!el.isConnected) return;
+        el.style.transition = '';
+        el.style.height = '';
+      }, 420));
+    }, 260));
+  });
+
   $effect(() => {
     const target = requestedAnnotation;
     const targetExpanded = expandedAnnotation !== null;
+    const wasNull = visibleAnnotation === null;
     // Asignación directa siempre. Si target.id === current.id es no-op
     // de id, solo actualiza el flag expanded. Si cambia el id, el {#key}
     // interno gestiona cross-fade del contenido (el wrap se queda).
     visibleAnnotation = target;
     displayedExpanded = target ? targetExpanded : false;
+    if (wasNull && target !== null) {
+      freshMountInProgress = true;
+      if (freshMountResetTimer !== null) clearTimeout(freshMountResetTimer);
+      freshMountResetTimer = setTimeout(() => {
+        freshMountInProgress = false;
+        freshMountResetTimer = null;
+      }, 50);
+    }
+  });
+
+  onMount(() => () => {
+    if (freshMountResetTimer !== null) clearTimeout(freshMountResetTimer);
+    clearHeightTimers();
   });
 
   const displayedAnnotation = $derived<MatchedGeniusAnnotation | null>(visibleAnnotation);
@@ -383,7 +477,9 @@
         const cardScaleX = kf(g, [[0, 0.14], [0.30, 0.14], [0.70, 0.94], [1, 1]]);
         const cardScaleY = kf(g, [[0, 0.50], [0.30, 1.10], [0.70, 0.88], [1, 1]]);
         const iconScale  = kf(g, [[0, 0],    [0.30, 1.16], [0.70, 1.10], [1, 1]]);
-        const iconRotate = kf(g, [[0, -90],  [0.30, -68],  [0.70, -30],  [1, 0]]);
+        // Rotación horaria: el icono nace girado +90° y desrota a 0°
+        // (espejo del annOut que rota 0° → +90°).
+        const iconRotate = kf(g, [[0, 90],   [0.30, 68],   [0.70, 30],   [1, 0]]);
         const overallOp  = kf(g, [[0, 0],    [0.30, 1],    [1, 1]]);
         // --cp-content-opacity NO se controla aquí: contentIn/contentOut
         // de los hijos (fragment, text-stack) gobiernan su propia opacidad.
@@ -425,7 +521,8 @@
         const cardScaleX = kf(u, [[0, 1],    [0.30, 0.94], [0.70, 0.14], [1, 0.14]]);
         const cardScaleY = kf(u, [[0, 1],    [0.30, 0.88], [0.70, 1.10], [1, 0.50]]);
         const iconScale  = kf(u, [[0, 1],    [0.30, 1.10], [0.70, 1.16], [1, 0]]);
-        const iconRotate = kf(u, [[0, 0],    [0.30, -30],  [0.70, -68],  [1, -90]]);
+        // Rotación horaria (clockwise): 0° → +90° en lugar de -90°.
+        const iconRotate = kf(u, [[0, 0],    [0.30, 30],   [0.70, 68],   [1, 90]]);
         const overallOp  = kf(u, [[0, 1],    [0.70, 1],    [1, 0]]);
         // --cp-content-opacity NO se controla aquí — ver comentario en annIn.
         return `
@@ -460,12 +557,22 @@
     };
   }
   function contentIn(_node: Element) {
+    // Delay condicional: 700ms cuando es mount real (wrap acaba de
+    // aparecer desde null — espera a que la caja termine de desenrollarse
+    // ~700ms según los keyframes del annIn), 200ms en swap interno (la
+    // caja no se mueve, solo cross-fade con stagger). Sin esta distinción,
+    // en mount real el texto aparecería dentro de una caja a medio abrir.
+    const isFreshMount = freshMountInProgress;
     if (reducedMotion()) {
-      return { duration: 160, delay: 120, css: (t: number) => `opacity: ${t};` };
+      return {
+        duration: 160,
+        delay: isFreshMount ? 600 : 120,
+        css: (t: number) => `opacity: ${t};`
+      };
     }
     return {
-      duration: 320,
-      delay: 200,
+      duration: isFreshMount ? 280 : 320,
+      delay: isFreshMount ? 700 : 200,
       easing: quintOut,
       css: (t: number, u: number) => `
         opacity: ${t};
@@ -736,6 +843,7 @@
              logo Genius persiste como identidad. annIn/annOut solo
              corren en mount/unmount real (null↔no-null). -->
         <div
+          bind:this={geniusWrapEl}
           class="cp-genius-wrap"
           class:expanded={displayedExpanded}
           class:has-fragment={!!displayedAnnotation.fragment}
@@ -1533,24 +1641,32 @@
   }
   .cp-genius-content {
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    /* Stagger interno controlado por la transition.
-       counter-scale compensa el scaleX del padre overlay durante el
+    /* Grid de UNA celda con grid-template "1 / 1" implícito — durante
+       un swap entre anotaciones, dos `.cp-genius-text-stack` coexisten
+       brevemente (viejo saliendo + nuevo entrando) por culpa del
+       {#key annotation.id}. Sin grid-stack se apilarían verticalmente
+       y el wrap haría jitter de altura. Con `grid-area: 1/1` en cada
+       text-stack se solapan en la misma celda → cross-fade limpio sin
+       reflow. */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    /* counter-scale compensa el scaleX del padre overlay durante el
        unfold para que el texto no se aplaste. translateX da el slide-in
-       sutil desde la izquierda. opacity gestiona el fade del stagger. */
-    opacity: var(--cp-content-opacity, 1);
+       sutil desde la izquierda. opacity ya NO se controla aquí — la
+       gobiernan contentIn/contentOut de los hijos. */
     transform:
       scaleX(var(--cp-icon-counter-scale, 1))
       translateX(var(--cp-content-x, 0));
     transform-origin: left center;
   }
   /* Sub-contenedor envuelto por {#key annotation.id} para el cross-fade
-     interno durante swaps entre anotaciones. Hereda el flex column del
-     padre y mantiene el gap de 3px que tenía .cp-genius-content antes.
-     Debe ser un box real (no display:contents) para que las transitions
-     svelte de opacity+translateY surtan efecto. */
+     interno durante swaps entre anotaciones. grid-area 1/1 → todos los
+     text-stacks (viejo y nuevo durante swap) ocupan la misma celda y
+     se solapan en lugar de apilarse. Debe ser un box real (no
+     display:contents) para que las transitions svelte de opacity +
+     translateY surtan efecto. */
   .cp-genius-text-stack {
+    grid-area: 1 / 1;
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -1565,15 +1681,14 @@
      compact: 1 línea con ellipsis. En expanded: texto entero. */
   .cp-genius-fragment-anchor {
     align-self: stretch;
-    /* La animación annIn vive en el WRAP (no en el overlay) y aplica
-       `scaleX(cardScaleX)` al wrap entero. Para que el texto del
-       fragment no se vea aplastado durante el unfold, le contra-
-       escalamos con `--cp-icon-counter-scale` (1/cardScaleX) — mismo
-       patrón que `.cp-genius-content` usa. Y le aplicamos el mismo
-       `--cp-content-opacity` para que aparezca con stagger fase 3
-       (después de que el icono pop + box unfold ya han ocurrido).
-       Cuando no hay animación, los defaults son 1 / 1 → identidad. */
-    opacity: var(--cp-content-opacity, 1);
+    /* Grid-stack igual que `.cp-genius-content` — durante swap, viejo
+       y nuevo <p class="cp-genius-fragment"> coexisten brevemente por
+       el {#key}; con grid-area 1/1 se solapan en lugar de apilarse. */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    /* counter-scale compensa el scaleX del wrap durante annIn/annOut
+       para que el texto no se aplaste. Opacidad gobernada por
+       contentIn/contentOut del <p> interno, no por var. */
     transform:
       scaleX(var(--cp-icon-counter-scale, 1))
       translateX(var(--cp-content-x, 0));
@@ -1587,6 +1702,7 @@
        sobre el body. La comilla va inline al inicio del texto
        (.cp-genius-quote) — sin decoración absoluta que compita con el
        logo Genius. */
+    grid-area: 1 / 1;
     margin: 0;
     padding: 9px 14px 8px;
     background: transparent;
