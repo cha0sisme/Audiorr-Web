@@ -248,7 +248,7 @@
       generaban un mount nuevo mientras el viejo aún estaba saliendo y
       las dos transitions se solapaban visualmente ("chocan"). */
   let outStartedAt: number | null = null;
-  const ANN_OUT_MS = 640; // annOut(620) + 20ms buffer
+  const ANN_OUT_MS = 660; // annOut(640) + 20ms buffer
 
   /** Flag CSS "está expandida" pintado en el DOM. Desacoplado de
       `expandedAnnotation` deliberadamente: si la anotación visible está
@@ -456,15 +456,28 @@
                               el panel.
         FASE 3 (0.60 → 1.0)   Texto fade-in + slide desde la izquierda. */
   function annIn(_node: Element) {
+    // prefers-reduced-motion: degradar a fade simple, sin rotate/scale/spring.
+    // Las Svelte transitions JS no son cubiertas por @media (prefers-reduced-motion)
+    // del CSS — hay que gatearlo aquí dentro.
+    if (typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      return {
+        duration: 220,
+        easing: quintOut,
+        css: (t: number) => `transform: translateX(-50%); opacity: ${t};`
+      };
+    }
     return {
       duration: 980,
       easing: quintOut,
       css: (t: number, _u: number) => {
-        // Fase 1: icono pop
+        // Fase 1: icono pop + unrotate (espejo del spin-out del annOut).
+        // El icono nace girado -90° y rota hasta 0° mientras hace pop.
         const iconT = Math.max(0, Math.min(1, t / 0.30));
         const iconScale = iconT < 0.65
           ? (iconT / 0.65) * 1.18
           : 1.18 - ((iconT - 0.65) / 0.35) * 0.18;
+        const iconRotate = -90 + iconT * 90; // -90deg → 0deg
 
         // Fase 2: box unfolds
         const cardT = Math.max(0, Math.min(1, (t - 0.35) / 0.45));
@@ -487,6 +500,7 @@
           transform-origin: left center;
           opacity: ${overallOpacity};
           --cp-icon-scale: ${iconScale};
+          --cp-icon-rotate: ${iconRotate}deg;
           --cp-icon-counter-scale: ${1 / Math.max(cardScaleX, 0.001)};
           --cp-content-opacity: ${contentT};
           --cp-content-x: ${(1 - contentT) * -8}px;
@@ -495,45 +509,116 @@
     };
   }
 
-  /** ── Salida coreografiada (espejo invertido) ──────────────────────
-        FASE 1 (u 0    → 0.50)  Box se contrae hacia el icono.
-                                cardScaleX 1 → 0.14. Texto fade-out rápido.
-                                El icono permanece visible (anchor).
-        FASE 2 (u 0.50 → 1.0)   Icono pop-out: scale 1 → 1.20 → 0.
-                                Opacity general baja con el icono. */
+  /** ── Salida coreografiada (squash + suction + spin-out) ─────────────
+      Tres fases pegajosas/gelatinosas — Apple Music / Disney 12-principles
+      "squash & stretch" aplicado a UI:
+
+        FASE 1 (u 0    → 0.35)  Squash: la caja se aplasta antes de
+                                contraerse. scaleY 1 → 0.92, scaleX 1 → 0.95.
+                                Icono empieza a rotar (0° → -25°) y a
+                                crecer (scale 1 → 1.08). Texto fade-out.
+        FASE 2 (u 0.35 → 0.75)  Suction: la caja se contrae a la izquierda
+                                con stretch vertical invertido (scaleY
+                                0.92 → 1.06) — sensación de "ser absorbido"
+                                hacia el icono. Icono rota -25° → -60°,
+                                scale 1.08 → 1.14.
+        FASE 3 (u 0.75 → 1.0)   Spin-out: solo el icono. Rotate -60° → -90°,
+                                scale 1.14 → 0 con chasquido. Opacity
+                                general 1 → 0 en los últimos 160ms.
+
+      transform-origin: left center se mantiene — el icono ES el centro
+      de gravedad, todo colapsa hacia su posición. scaleY del wrap también
+      afecta al icono pero el `--cp-icon-counter-scale` solo neutraliza
+      el scaleX; el squash/stretch vertical se transmite al icono y
+      refuerza la sensación gelatinosa (el icono "respira" con la caja).
+
+      Easings por fase elegidos para que cada momento se sienta distinto:
+        F1: quintOut (squash rápido inicial, decelera al final)
+        F2: cubic-bezier(0.65, 0, 0.35, 1) (succión simétrica)
+        F3: cubic-bezier(0.7, 0, 0.2, 1) (chasquido final) */
   function annOut(_node: Element) {
+    // prefers-reduced-motion: degradar a fade simple (igual que annIn).
+    // Mantiene el contrato del swap logic — duración suficientemente corta
+    // para que ANN_OUT_MS no se quede largo (220ms < 660ms, sin riesgo).
+    if (typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      return {
+        duration: 180,
+        easing: quintIn,
+        css: (t: number) => `transform: translateX(-50%); opacity: ${t};`
+      };
+    }
     return {
-      duration: 620,
+      duration: 640,
       easing: quintIn,
       css: (_t: number, u: number) => {
-        // Fase 1: box contracts (u 0 → 0.50)
-        const phase1T = Math.max(0, Math.min(1, u / 0.50));
-        const cardScaleX = 1 - phase1T * 0.86; // 1 → 0.14
+        // ── Fase 1: Squash (u 0 → 0.35) ──────────────────────────
+        const f1Raw = Math.max(0, Math.min(1, u / 0.35));
+        const f1 = 1 - Math.pow(1 - f1Raw, 5); // quintOut local
 
-        // Texto se va rápido durante la primera mitad de fase 1
-        const contentOpacity = Math.max(0, 1 - phase1T * 3);
+        // ── Fase 2: Suction (u 0.35 → 0.75) ──────────────────────
+        const f2Raw = Math.max(0, Math.min(1, (u - 0.35) / 0.40));
+        // bezier(0.65, 0, 0.35, 1) aproximada con smoothstep
+        const f2 = f2Raw * f2Raw * (3 - 2 * f2Raw);
 
-        // Fase 2: icono pop-out (u 0.50 → 1.0)
-        const phase2T = Math.max(0, Math.min(1, (u - 0.50) / 0.50));
-        // Spring inverso: 1 → 1.20 (overshoot) → 0
-        let iconScale: number;
-        if (phase2T === 0) {
-          iconScale = 1;
-        } else if (phase2T < 0.30) {
-          iconScale = 1 + (phase2T / 0.30) * 0.20;
+        // ── Fase 3: Spin-out (u 0.75 → 1.0) ──────────────────────
+        const f3Raw = Math.max(0, Math.min(1, (u - 0.75) / 0.25));
+        // bezier(0.7, 0, 0.2, 1) — chasquido: arranca lento, acelera fuerte
+        const f3 = Math.pow(f3Raw, 1.6);
+
+        // Wrap scale: X contrae monótonamente; Y hace squash → stretch → collapse
+        let cardScaleX: number;
+        if (u < 0.35) {
+          cardScaleX = 1 - f1 * 0.05; // 1 → 0.95
+        } else if (u < 0.75) {
+          cardScaleX = 0.95 - f2 * 0.81; // 0.95 → 0.14
         } else {
-          iconScale = 1.20 * (1 - (phase2T - 0.30) / 0.70);
+          cardScaleX = 0.14;
         }
 
-        // Overall opacity: 1 durante fase 1, baja en fase 2 con el icono.
-        // Eased con pow para que el icono "se vea" más tiempo antes de irse.
-        const overallOpacity = phase2T === 0 ? 1 : 1 - Math.pow(phase2T, 1.5);
+        let cardScaleY: number;
+        if (u < 0.35) {
+          cardScaleY = 1 - f1 * 0.08; // 1 → 0.92 (squash)
+        } else if (u < 0.75) {
+          cardScaleY = 0.92 + f2 * 0.14; // 0.92 → 1.06 (stretch)
+        } else {
+          cardScaleY = 1.06 - f3 * 0.46; // 1.06 → 0.60 (collapse)
+        }
+
+        // Icon scale: crece suave en F1+F2 (centro de gravedad), colapsa
+        // con chasquido en F3.
+        let iconScale: number;
+        if (u < 0.35) {
+          iconScale = 1 + f1 * 0.08; // 1 → 1.08
+        } else if (u < 0.75) {
+          iconScale = 1.08 + f2 * 0.06; // 1.08 → 1.14
+        } else {
+          iconScale = 1.14 * (1 - f3); // 1.14 → 0
+        }
+
+        // Icon rotate: -25° en F1, -60° en F2, -90° en F3.
+        let iconRotate: number;
+        if (u < 0.35) {
+          iconRotate = -25 * f1;
+        } else if (u < 0.75) {
+          iconRotate = -25 - 35 * f2;
+        } else {
+          iconRotate = -60 - 30 * f3;
+        }
+
+        // Texto fade-out en F1 (rápido)
+        const contentOpacity = Math.max(0, 1 - f1Raw * 3);
+
+        // Overall opacity: 1 hasta últimos 160ms (u > 0.75), donde baja
+        // con curva pow para sensación de chasquido.
+        const overallOpacity = u < 0.75 ? 1 : 1 - Math.pow(f3, 1.4);
 
         return `
-          transform: translateX(-50%) scaleX(${cardScaleX});
+          transform: translateX(-50%) scaleX(${cardScaleX}) scaleY(${cardScaleY});
           transform-origin: left center;
           opacity: ${overallOpacity};
           --cp-icon-scale: ${iconScale};
+          --cp-icon-rotate: ${iconRotate}deg;
           --cp-icon-counter-scale: ${1 / Math.max(cardScaleX, 0.001)};
           --cp-content-opacity: ${contentOpacity};
         `;
@@ -1414,8 +1499,10 @@
     /* UNA SOLA superficie: bg + blur + radius viven AQUÍ. Los hijos
        (fragment + overlay) son transparentes, así no hay dos blurs
        solapados ni dos bgs con leves diferencias de tinte. Apple-grade
-       cohesion: la caja es una y solo una. */
-    background: rgba(0, 0, 0, 0.42);
+       cohesion: la caja es una y solo una. Bg a 0.48 → el panel ES la
+       legibilidad (Apple Music/Spotify Canvas pattern); por eso el
+       body NO lleva drop-shadow — el material vítreo basta. */
+    background: rgba(0, 0, 0, 0.48);
     backdrop-filter: blur(16px) saturate(1.4);
     -webkit-backdrop-filter: blur(16px) saturate(1.4);
     border-radius: 14px;
@@ -1532,9 +1619,15 @@
     width: 26px;
     height: 26px;
     flex-shrink: 0;
+    /* Orden de transforms importante: counter-scale (deshace el scaleX
+       del wrap) → scale (pop spring) → rotate (spin-out). Si rotate
+       fuera ANTES del counter-scale, el eje de rotación quedaría
+       deformado por el scaleX del padre y el icono "se torcería" en
+       lugar de girar limpio. */
     transform:
       scaleX(var(--cp-icon-counter-scale, 1))
-      scale(var(--cp-icon-scale, 1));
+      scale(var(--cp-icon-scale, 1))
+      rotate(var(--cp-icon-rotate, 0deg));
     transform-origin: center;
     will-change: transform;
   }
@@ -1614,20 +1707,22 @@
     transform-origin: left center;
   }
   .cp-genius-fragment {
-    /* Pull-quote: cita textual de la letra. Tipografía recta (no italic
-       — italic en pantalla pequeña pierde legibilidad sobre la lyric
-       subyacente) un punto mayor que el body. La comilla va inline al
-       inicio del texto (.cp-genius-quote) — sin decoración absoluta que
-       compita con el logo de Genius del overlay debajo. */
+    /* Pull-quote: cita textual de la letra. Header del panel — debe
+       pesar más que el body. 15px / Halbfett (600) + line-height 1.35:
+       en Söhne (Klim) la salto Kraftig→Halbfett da un escalón claro
+       de jerarquía sin entrar en Dreiviertelfett (700) que ya gritaría
+       sobre el body. La comilla va inline al inicio del texto
+       (.cp-genius-quote) — sin decoración absoluta que compita con el
+       logo Genius. */
     margin: 0;
     padding: 9px 14px 8px;
     background: transparent;
     font-family: var(--font-sans);
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 1.4;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
     letter-spacing: var(--tracking-snug);
-    color: rgba(255, 255, 255, 0.96);
+    color: rgba(255, 255, 255, 0.98);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1655,14 +1750,15 @@
     margin: 0;
     font-family: var(--font-sans);
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 500; /* Söhne Kraftig — densa de fábrica, lee correcto
+                         sobre overlay sin necesidad de subir peso. */
     line-height: 1.45;
     color: #fff;
-    /* Drop-shadow doble como las lyrics — la legibilidad la garantiza
-       el shadow gaussiano, no un bg sólido. */
-    filter:
-      drop-shadow(0 1px 4px rgba(0, 0, 0, 0.7))
-      drop-shadow(0 2px 10px rgba(0, 0, 0, 0.4));
+    /* Sin drop-shadow: el wrap padre ya provee material vítreo (bg
+       rgba 0.48 + backdrop-blur 16px saturate 1.4). Apple Music /
+       Spotify Canvas pattern: el panel es la legibilidad, no halos
+       sobre los glyphs. Los drop-shadow filter ensucian hairlines en
+       tamaños pequeños y cuestan GPU. */
     display: -webkit-box;
     -webkit-line-clamp: 4;
     line-clamp: 4;
