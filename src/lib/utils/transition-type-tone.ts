@@ -1,10 +1,13 @@
 /**
- * transition-type-tone — paleta OKLCH para los 11 tipos de transición.
+ * transition-type-tone — paleta OKLCH para los 12 tipos de transición.
  *
  * Mirror del mapping de iOS `TransitionDiagnosticsView.swift:937-952`:
  *   CROSSFADE blue · EQ_MIX purple · CUT red · NATURAL_BLEND green ·
  *   BEAT_MATCH_BLEND cyan · CUT_A_FADE_IN_B orange · FADE_OUT_A_CUT_B yellow ·
- *   STEM_MIX mint · DROP_MIX pink · CLEAN_HANDOFF gray · VINYL_STOP indigo.
+ *   STEM_MIX mint · DROP_MIX pink · CLEAN_HANDOFF gray · VINYL_STOP indigo ·
+ *   SEQUENTIAL slate (v13.O.6 F5a — handoff DJ-respetuoso con solape 50ms;
+ *   tono slate cercano a CLEAN_HANDOFF gray pero distinguible — comparten
+ *   "family" de fallbacks no-mix).
  *
  * Defino los colores en OKLCH con L medio (~0.68) y chroma controlado para
  * que funcionen sobre fondo glass dark Y light sin necesidad de override
@@ -33,7 +36,8 @@ const PALETTE: Record<string, TransitionTypeTone> = {
   STEM_MIX:         { color: 'oklch(0.74 0.14 165)', label: 'STEM_MIX' },          // mint
   DROP_MIX:         { color: 'oklch(0.7 0.18 12)',   label: 'DROP_MIX' },          // pink
   CLEAN_HANDOFF:    { color: 'oklch(0.65 0.02 250)', label: 'CLEAN_HANDOFF' },     // gray
-  VINYL_STOP:       { color: 'oklch(0.6 0.16 275)',  label: 'VINYL_STOP' }         // indigo
+  VINYL_STOP:       { color: 'oklch(0.6 0.16 275)',  label: 'VINYL_STOP' },        // indigo
+  SEQUENTIAL:       { color: 'oklch(0.62 0.05 235)', label: 'SEQUENTIAL' }         // slate
 };
 
 const FALLBACK: TransitionTypeTone = {

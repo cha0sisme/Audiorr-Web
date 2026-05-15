@@ -23,7 +23,8 @@ export const TransitionTypeSchema = z.enum([
   'STEM_MIX',
   'DROP_MIX',
   'CLEAN_HANDOFF',
-  'VINYL_STOP'
+  'VINYL_STOP',
+  'SEQUENTIAL'
 ]);
 
 export type TransitionType = z.infer<typeof TransitionTypeSchema>;
