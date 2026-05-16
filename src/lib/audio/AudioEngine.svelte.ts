@@ -40,13 +40,38 @@ export type LoadOptions = {
   startAt?: number | undefined;
   /** ReplayGain track gain en dB. Si undefined, default -8 dB (matches iOS). */
   replayGainDb?: number | undefined;
+  /** ReplayGain multiplier ya computado (incluido cap por peak). Tiene
+      prioridad sobre `replayGainDb` — esta es la vía preferida cuando el
+      caller (player/QueueManager) ya pasó por `computeReplayGainMultiplier`,
+      porque el cap por peak no se puede reconstruir desde solo dB. */
+  replayGainLinear?: number | undefined;
   /** Override de duración (sec). Si undefined, se lee del media element. */
   duration?: number | undefined;
 };
 
 export type PrepareNextOptions = {
   replayGainDb?: number | undefined;
+  /** Mismo significado que en LoadOptions — prioridad sobre `replayGainDb`. */
+  replayGainLinear?: number | undefined;
 };
+
+/** Resuelve el multiplier final a aplicar al chain.gain, dado un par
+    (replayGainLinear, replayGainDb). Linear gana; dB es fallback; si no hay
+    nada, default -8 dB (paridad iOS). Centralizado aquí para que `load` y
+    `prepareNext` no dupliquen la lógica. */
+function resolveRGLinear(opts: {
+  replayGainLinear?: number | undefined;
+  replayGainDb?: number | undefined;
+}): number {
+  if (opts.replayGainLinear !== undefined && Number.isFinite(opts.replayGainLinear)) {
+    // Clamp a no-negativos: un multiplier <0 invertiría la fase y produciría
+    // un GainNode inválido. Nunca debería ocurrir (computeReplayGainMultiplier
+    // siempre devuelve ≥0), defensa contra valores corruptos en restore.
+    return Math.max(0, opts.replayGainLinear);
+  }
+  const db = opts.replayGainDb ?? DEFAULT_REPLAY_GAIN_DB;
+  return dbToLinear(db);
+}
 
 export type AudioEngineEventType =
   | 'ended'
@@ -255,9 +280,9 @@ class AudioEngine {
     this.endedHandled = false;
     this.isCrossfading = false;
 
-    // Reset replay gain.
-    const rgDb = options.replayGainDb ?? DEFAULT_REPLAY_GAIN_DB;
-    chain.replayGainLinear = dbToLinear(rgDb);
+    // Reset replay gain. Acepta linear (con cap por peak ya aplicado por el
+    // caller) o dB; si no viene nada, default -8 dB paridad iOS.
+    chain.replayGainLinear = resolveRGLinear(options);
     chain.gain.gain.value = chain.replayGainLinear;
 
     // Worklet/source se conectan la primera vez que se carga este chain.
@@ -359,8 +384,7 @@ class AudioEngine {
     const chain = this.chainB;
     if (!chain) return;
 
-    const rgDb = options.replayGainDb ?? DEFAULT_REPLAY_GAIN_DB;
-    chain.replayGainLinear = dbToLinear(rgDb);
+    chain.replayGainLinear = resolveRGLinear(options);
     chain.gain.gain.value = 0; // entra en silencio, lo sube el crossfade
 
     this.wireChainNodes(chain);

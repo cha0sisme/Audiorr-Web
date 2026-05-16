@@ -15,6 +15,7 @@
 import { browser } from '$app/environment';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
 import { getStreamUrl } from '$services/NavidromeService';
+import { audioSettings } from '$stores/audio-settings.svelte';
 
 /** Clave de localStorage para el volumen — misma key que iOS UserDefaults
     (`PersistenceService.swift:20`) por coherencia entre clientes, aunque cada
@@ -62,6 +63,10 @@ export type Song = {
   /** True si la canción tiene contenido explícito. Renderiza el badge "E"
       en MiniPlayer / Now Playing. */
   explicit?: boolean | undefined;
+  /** Multiplier ReplayGain lineal ya computado (incluido cap por peak).
+      `player.load` lo pasa al AudioEngine como replayGainLinear si el
+      setting `useReplayGain` está activo. 1.0 = neutral. */
+  replayGainLinear?: number | undefined;
 };
 
 /** El "from where" del playback actual. Permite que cards y listas muestren
@@ -258,9 +263,22 @@ class PlayerStore {
       return;
     }
     this.hasLoadedOnce = true;
-    const loadOpts: { duration?: number; startAt?: number } = {};
+    const loadOpts: {
+      duration?: number;
+      startAt?: number;
+      replayGainLinear?: number;
+    } = {};
     if (song.durationSec !== undefined) loadOpts.duration = song.durationSec;
     if (startAt > 0) loadOpts.startAt = startAt;
+    // ReplayGain: solo si el setting está ON. Mirror QueueManager.swift:80-83
+    // (`useReplayGain`) + `effectiveReplayGain` línea 102-104. Cuando OFF
+    // pasamos 1.0 explícito; sin esto el engine caería a su default -8 dB
+    // que silenciaría todo el catálogo.
+    if (audioSettings.useReplayGain && song.replayGainLinear !== undefined) {
+      loadOpts.replayGainLinear = song.replayGainLinear;
+    } else if (!audioSettings.useReplayGain) {
+      loadOpts.replayGainLinear = 1.0;
+    }
     void audioEngine
       .load(url, loadOpts)
       .then(() => audioEngine.play())

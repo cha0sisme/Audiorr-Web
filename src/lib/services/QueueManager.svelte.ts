@@ -31,7 +31,7 @@ import {
 } from '$services/persistence/queue-db';
 import type { NavidromeSong } from '$types/navidrome';
 import type { SongListItem } from '$utils/navidrome-mappers';
-import { getCoverArtUrl } from '$services/NavidromeService';
+import { getCoverArtUrl, songReplayGainMultiplier } from '$services/NavidromeService';
 import { credentials } from '$stores/credentials.svelte';
 import {
   getLastPlayback,
@@ -86,7 +86,9 @@ export function navidromeSongToPersistable(s: NavidromeSong): PersistableSong {
     ...(s.artistId !== undefined ? { artistId: s.artistId } : {}),
     ...(s.coverArt !== undefined ? { coverArt: s.coverArt } : {}),
     duration: s.duration ?? 0,
-    replayGainMultiplier: 1.0,
+    // Computado real desde los tags Subsonic (track preferido, album fallback,
+    // -8 dB default, cap por peak). Mirror NavidromeModels.swift:58-62.
+    replayGainMultiplier: songReplayGainMultiplier(s),
     ...(s.explicitStatus !== undefined ? { explicitStatus: s.explicitStatus } : {})
   };
 }
@@ -106,7 +108,11 @@ export function songListItemToPersistable(
     ...(item.albumId !== undefined ? { albumId: item.albumId } : {}),
     ...(item.artistId !== undefined ? { artistId: item.artistId } : {}),
     duration: item.durationSec,
-    replayGainMultiplier: 1.0,
+    // SongListItem no carga tags ReplayGain (vienen del shape Subsonic
+    // crudo, no de este DTO). Usamos el helper con objeto vacío → cae al
+    // default -8 dB, coherente con iOS NavidromeModels.swift:58-62 cuando
+    // un track no expone tags RG.
+    replayGainMultiplier: songReplayGainMultiplier({}),
     ...(item.explicit ? { explicitStatus: 'explicit' as const } : {})
   };
 }
@@ -120,6 +126,7 @@ function persistableToPlayerSong(s: PersistableSong): {
   coverUrl?: string | undefined;
   durationSec?: number | undefined;
   explicit?: boolean | undefined;
+  replayGainLinear?: number | undefined;
 } {
   return {
     id: s.id,
@@ -129,7 +136,12 @@ function persistableToPlayerSong(s: PersistableSong): {
     ...(s.album !== undefined ? { album: s.album } : {}),
     ...(s.coverArt ? { coverUrl: getCoverArtUrl(s.coverArt, 300) } : {}),
     durationSec: s.duration > 0 ? s.duration : undefined,
-    explicit: s.explicitStatus === 'explicit'
+    explicit: s.explicitStatus === 'explicit',
+    // El multiplier ya incluye cap por peak (computado en
+    // navidromeSongToPersistable mediante computeReplayGainMultiplier).
+    // Siempre lo propagamos; el setting `useReplayGain` decide en el player
+    // si aplicarlo o sustituirlo por 1.0 (neutral).
+    replayGainLinear: s.replayGainMultiplier
   };
 }
 

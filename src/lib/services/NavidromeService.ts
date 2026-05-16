@@ -199,6 +199,50 @@ function requireCreds(): NavidromeCredentials {
   return c;
 }
 
+/**
+ * Computa el multiplier ReplayGain lineal aplicable al masterGain de un track.
+ *
+ * Mirror exacto de `AudioEngineManager.swift:1589 computeReplayGainMultiplier`
+ * en iOS, replicado aquí para que las dos plataformas suenen igual con la
+ * misma biblioteca:
+ *
+ *   - **Track gain preferido**, album gain como fallback. Si ninguno, -8 dB
+ *     default (consistencia histórica con el cliente React previo).
+ *   - **multiplier = 10^(dB / 20)** — fórmula estándar ReplayGain.
+ *   - **Cap por peak**: si hay `trackPeak > 0`, limitar a `0.99 / peak` para
+ *     evitar clipping cuando el gain positivo amplifica picos cercanos a 0 dBFS.
+ *   - Devuelve `1.0` (neutral) cuando el input está vacío y se prefiere
+ *     desactivar ReplayGain por completo — el caller decide cuándo aplicar
+ *     este "neutral" (ver setting `useReplayGain`).
+ */
+export function computeReplayGainMultiplier(rg: {
+  trackGain?: number | undefined;
+  trackPeak?: number | undefined;
+  albumGain?: number | undefined;
+  albumPeak?: number | undefined;
+}): number {
+  const DEFAULT_DB = -8;
+  const gainCandidate = rg.trackGain ?? rg.albumGain;
+  const db = Number.isFinite(gainCandidate) ? (gainCandidate as number) : DEFAULT_DB;
+  const peak = rg.trackPeak ?? rg.albumPeak ?? 0;
+  let multiplier = Math.pow(10, db / 20);
+  if (peak > 0) {
+    multiplier = Math.min(multiplier, 0.99 / peak);
+  }
+  return multiplier;
+}
+
+/** Convenience: computa el multiplier directo desde un NavidromeSong. Devuelve
+    el default (-8 dB → ≈0.398) cuando la pista no trae tags de ReplayGain. */
+export function songReplayGainMultiplier(song: { replayGain?: {
+  trackGain?: number | undefined;
+  trackPeak?: number | undefined;
+  albumGain?: number | undefined;
+  albumPeak?: number | undefined;
+} | undefined }): number {
+  return computeReplayGainMultiplier(song.replayGain ?? {});
+}
+
 export async function ping(): Promise<{ ok: boolean; version: string }> {
   const creds = requireCreds();
   const env = await call(creds, 'ping');

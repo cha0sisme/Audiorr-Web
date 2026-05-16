@@ -139,7 +139,18 @@ export const NavidromeSongSchema = z.object({
   // OpenSubsonic extension. Lista completa de artistas de la pista
   // (incluyendo features). Si el server no la expone, viene undefined y
   // hay que fallback al string `artist`.
-  artists: z.array(NavidromeItemArtistSchema).optional()
+  artists: z.array(NavidromeItemArtistSchema).optional(),
+  // OpenSubsonic extension. Subsonic envía ReplayGain como objeto anidado
+  // — todos los campos opcionales (pueden faltar en tracks sin tags RG).
+  // Mirror del shape en iOS NavidromeModels.swift:67-72 (ReplayGainData).
+  replayGain: z
+    .object({
+      trackGain: z.number().optional(),
+      trackPeak: z.number().optional(),
+      albumGain: z.number().optional(),
+      albumPeak: z.number().optional()
+    })
+    .optional()
 });
 
 export type NavidromeSong = z.infer<typeof NavidromeSongSchema>;

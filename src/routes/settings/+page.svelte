@@ -1,8 +1,10 @@
 <script lang="ts">
   import { theme } from '$stores/theme.svelte';
+  import { audioSettings } from '$stores/audio-settings.svelte';
   import Toggle from '$components/shared/Toggle.svelte';
 
   let isDark = $derived(theme.current === 'dark');
+  let useReplayGain = $derived(audioSettings.useReplayGain);
 </script>
 
 <div class="page">
@@ -20,6 +22,19 @@
         label="Tema oscuro"
         description="Alterna entre tema oscuro y claro. Se respeta la preferencia del sistema por defecto."
         onchange={(v) => theme.set(v ? 'dark' : 'light')}
+      />
+    </div>
+  </section>
+
+  <!-- ============================================ Audio -->
+  <section class="card">
+    <h2>Audio</h2>
+    <div class="row">
+      <Toggle
+        checked={useReplayGain}
+        label="ReplayGain"
+        description="Normaliza el volumen entre canciones usando los tags ReplayGain de cada pista. Si la pista no los tiene, se aplica una atenuación por defecto para evitar saltos bruscos."
+        onchange={(v) => (audioSettings.useReplayGain = v)}
       />
     </div>
   </section>
