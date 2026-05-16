@@ -16,6 +16,38 @@ import { browser } from '$app/environment';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
 import { getStreamUrl } from '$services/NavidromeService';
 
+/** Clave de localStorage para el volumen — misma key que iOS UserDefaults
+    (`PersistenceService.swift:20`) por coherencia entre clientes, aunque cada
+    device guarda su propio valor (no se sincroniza vía backend a propósito:
+    el volumen depende del altavoz/auricular físico de cada dispositivo). */
+const VOLUME_STORAGE_KEY = 'audiorr_volume';
+/** Default cuando no hay valor persistido. Mismo que iOS
+    (`PersistenceService.swift:95`). */
+const DEFAULT_VOLUME = 0.75;
+
+function loadPersistedVolume(): number {
+  if (!browser) return DEFAULT_VOLUME;
+  try {
+    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (raw === null) return DEFAULT_VOLUME;
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n)) return DEFAULT_VOLUME;
+    return Math.max(0, Math.min(1, n));
+  } catch {
+    // SecurityError en private mode con storage deshabilitado.
+    return DEFAULT_VOLUME;
+  }
+}
+
+function persistVolume(v: number): void {
+  if (!browser) return;
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, v.toString());
+  } catch {
+    // Quota / private mode — silencioso.
+  }
+}
+
 export type Song = {
   id: string;
   title: string;
@@ -52,8 +84,13 @@ class PlayerStore {
 
       En modo remoto: el setter manda `setVolume` al hub en vez de tocar el
       audio local (no estamos reproduciendo aquí — el audio sale del otro
-      device). El slider sigue actualizándose visualmente para feedback. */
-  private _volume = $state(1);
+      device). El slider sigue actualizándose visualmente para feedback.
+
+      Persistencia: cada cambio se escribe en localStorage (key compartida
+      con iOS: `audiorr_volume`). Al recargar la pestaña se restaura el
+      último valor. Device-local intencional — el volumen no se sincroniza
+      cross-device porque depende del altavoz/auricular físico. */
+  private _volume = $state(loadPersistedVolume());
   get volume() {
     return this._volume;
   }
@@ -61,6 +98,7 @@ class PlayerStore {
     const clamped = Math.max(0, Math.min(1, v));
     this._volume = clamped;
     if (!browser) return;
+    persistVolume(clamped);
     if (this.isRemote) {
       void this.sendRemote('setVolume', clamped);
     } else {
@@ -118,6 +156,11 @@ class PlayerStore {
   private wireEngine() {
     if (this.wired) return;
     this.wired = true;
+
+    // Hidrata el masterGain del engine con el volumen persistido. El engine
+    // arranca por defecto a 1.0; sin esto, la primera canción suena al máximo
+    // hasta que el user toque el slider, ignorando el último valor guardado.
+    audioEngine.setVolume(this._volume);
 
     audioEngine.on('progress', (e) => {
       if (e.type !== 'progress') return;
