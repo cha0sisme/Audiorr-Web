@@ -26,6 +26,7 @@
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
+  import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
 
   /** Rutas que se renderizan SIN shell (sin sidebar, sin mini player).
       Login es full-screen — el shell distrae. */
@@ -90,6 +91,24 @@
     };
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
+  });
+
+  /** Refresca `coverContentHash` de todas las playlists cuando la pestaña
+      vuelve a foreground. Mirror de `AppDelegate.swift:219` (didBecomeActive)
+      en iOS — sin esto, una pestaña que llevaba horas en background nunca
+      detecta covers regenerados por el cron del backend.
+      `refreshPlaylistCoverHashes` es idempotente: dos triggers concurrentes
+      reusan la misma promise (visibilitychange + onMount de página recién
+      hidratada al volver). */
+  $effect(() => {
+    if (!browser) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!credentials.isConfigured) return;
+      void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
   });
 
   let { children } = $props();

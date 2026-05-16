@@ -10,10 +10,12 @@
   import SongList from '$components/shared/SongList.svelte';
   import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
+  import { useQueryClient } from '@tanstack/svelte-query';
   import * as nav from '$services/NavidromeService';
   import { songToListItem } from '$utils/navidrome-mappers';
   import { playlistAuthorDetail } from '$utils/playlist-section-mappers';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
+  import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
@@ -28,6 +30,17 @@
   } from '$utils/palette';
 
   const playlistId = $derived(page.params.id ?? '');
+
+  // Trigger un refresh global de hashes al entrar (mirror
+  // PlaylistDetailView.swift:91). Cubre el caso "el backend regeneró este
+  // cover desde la última visita" — `refreshPlaylistCoverHashes` es
+  // idempotente y tiene TTL/inflight, así que múltiples montajes seguidos
+  // no martillean el backend. Se hace fire-and-forget; no bloquea el render.
+  const queryClient = useQueryClient();
+  $effect(() => {
+    if (!credentials.isConfigured) return;
+    void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
+  });
 
   const playlistQ = createQuery(() => ({
     queryKey: ['playlist', playlistId],

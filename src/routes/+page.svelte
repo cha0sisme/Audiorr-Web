@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
@@ -10,6 +10,7 @@
   import * as stats from '$services/stats';
   import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
+  import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { prefetchCover } from '$utils/cover-cache';
   import { albumToCardProps } from '$utils/navidrome-mappers';
@@ -170,6 +171,16 @@
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000
   }));
+
+  // Trigger Layer 2 (HEAD/ETag) para playlists no cubiertas por los bulks
+  // de arriba — editorial, Spotify-synced, "This Is …", playlists del usuario.
+  // Mirror HomeView.swift:91. Idempotente: si el usuario navega Home→Library
+  // en pocos segundos, el segundo trigger comparte la misma promise.
+  const queryClient = useQueryClient();
+  $effect(() => {
+    if (!credentials.isConfigured) return;
+    void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
+  });
 </script>
 
 <div class="home">

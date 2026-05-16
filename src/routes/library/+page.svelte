@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { createQuery } from '@tanstack/svelte-query';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { ArrowsClockwise, CaretRight } from 'phosphor-svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
@@ -12,6 +12,7 @@
   import * as nav from '$services/NavidromeService';
   import { getDailyMixes } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
+  import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
   import {
     getHomepageLayout,
     DEFAULT_HOMEPAGE_LAYOUT
@@ -289,6 +290,17 @@
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000
   }));
+
+  // Layer 2 (HEAD/ETag) para playlists no cubiertas por dailyMixes/
+  // smartPlaylists — editorial, Spotify-synced, "This Is …", del usuario.
+  // Mirror PlaylistsView.swift:67. Solo dispara en la tab Playlists para
+  // no malgastar requests cuando el user está en Álbumes o Artistas.
+  const queryClient = useQueryClient();
+  $effect(() => {
+    if (!credentials.isConfigured) return;
+    if (currentTab !== 'playlists') return;
+    void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
+  });
 
   const layout = $derived<PlaylistSection[]>(layoutQ.data ?? DEFAULT_HOMEPAGE_LAYOUT);
   const allPlaylists = $derived<NavidromePlaylist[]>(allPlaylistsQ.data ?? []);
