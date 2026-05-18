@@ -192,7 +192,12 @@
     try {
       await setHomepageLayout(sections);
       backendSnapshot = JSON.stringify(sections);
+      // Invalidamos ambas keys:
+      //   - ['homepageLayout']           → editor admin (esta misma página)
+      //   - ['playlistsLayout', user]    → /library (consumidor real, layout
+      //     reordenado por afinidad o legacy según ranked-layout endpoint)
       void queryClient.invalidateQueries({ queryKey: ['homepageLayout'] });
+      void queryClient.invalidateQueries({ queryKey: ['playlistsLayout'] });
       recentlySaved = true;
       setTimeout(() => (recentlySaved = false), 1800);
     } catch (err) {

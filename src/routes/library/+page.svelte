@@ -13,10 +13,8 @@
   import { getDailyMixes } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
   import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
-  import {
-    getHomepageLayout,
-    DEFAULT_HOMEPAGE_LAYOUT
-  } from '$services/globalSettings';
+  import { DEFAULT_HOMEPAGE_LAYOUT } from '$services/globalSettings';
+  import { loadPlaylistsLayout } from '$services/userAffinity';
   import {
     albumToCardProps,
     playlistToCardProps,
@@ -283,9 +281,13 @@
     gcTime: 30 * 60 * 1000
   }));
 
+  // Intenta `ranked-layout` (orden por afinidad) primero; fail-soft a
+  // `homepage_layout` legacy y de ahí a DEFAULT. Las secciones dynamic vienen
+  // con las playlists ya ordenadas por `rankPredicted` — no reordenar.
+  // queryKey incluye el username porque el orden depende del usuario.
   const layoutQ = createQuery(() => ({
-    queryKey: ['homepageLayout'],
-    queryFn: () => getHomepageLayout(),
+    queryKey: ['playlistsLayout', credentials.current?.username ?? ''],
+    queryFn: () => loadPlaylistsLayout(credentials.current?.username),
     enabled: credentials.isConfigured && currentTab === 'playlists',
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000

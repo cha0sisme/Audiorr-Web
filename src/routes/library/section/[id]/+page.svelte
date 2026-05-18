@@ -18,7 +18,7 @@
   import SeeAllGrid from '$components/shared/SeeAllGrid.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import * as nav from '$services/NavidromeService';
-  import { getHomepageLayout } from '$services/globalSettings';
+  import { loadPlaylistsLayout } from '$services/userAffinity';
   import { playlistToCardProps } from '$utils/navidrome-mappers';
   import { isSmartPlaylistName } from '$utils/playlist-section-mappers';
   import { credentials } from '$stores/credentials.svelte';
@@ -26,9 +26,12 @@
 
   const sectionId = $derived(page.params.id ?? '');
 
+  // Comparte queryKey con /library (homepageLayout reordenado por afinidad).
+  // El orden de section.playlists viene ya ordenado por rankPredicted desde
+  // el backend para secciones dynamic.
   const layoutQ = createQuery(() => ({
-    queryKey: ['homepageLayout'],
-    queryFn: () => getHomepageLayout(),
+    queryKey: ['playlistsLayout', credentials.current?.username ?? ''],
+    queryFn: () => loadPlaylistsLayout(credentials.current?.username),
     enabled: credentials.isConfigured,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000

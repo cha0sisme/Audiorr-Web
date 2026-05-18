@@ -380,6 +380,63 @@ export const GlobalSettingResponseSchema = z.object({
 });
 
 // ============================================================================
+// Ranked Layout — /api/user/:username/ranked-layout
+// ============================================================================
+
+/**
+ * Layout de playlists reordenado por afinidad. Mismas secciones que
+ * `homepage_layout`, pero las de tipo `dynamic` traen las playlists ya
+ * reordenadas según el perfil del usuario (scrobbles 90d → score por
+ * genre/bpm/energy/longTerm). Las fixed_* vienen con `playlists: []` y un
+ * `note` — sus items se resuelven igual que antes (dailyMixes, smartPlaylists,
+ * myPlaylists). NO reordenar en cliente.
+ *
+ * Backend: GET /api/user/:username/ranked-layout?debug=1
+ *   - Sin `debug`: ~5.5 KB (clean shape).
+ *   - Con `debug=1`: ~62 KB. Solo para Housekeeping admin, NO en home.
+ */
+export const RankedLayoutPlaylistSchema = z.object({
+  playlistId: z.string(),
+  playlistName: z.string(),
+  pinned: z.boolean(),
+  rankOriginal: z.number(),
+  rankPredicted: z.number(),
+  score: z.number()
+});
+export type RankedLayoutPlaylist = z.infer<typeof RankedLayoutPlaylistSchema>;
+
+/** `rowType` se tipa como `string` (no enum) para tolerar valores nuevos
+    del backend sin romper el cliente; el mapper filtra a tipos conocidos. */
+export const RankedLayoutSectionSchema = z.object({
+  sectionId: z.string(),
+  title: z.string(),
+  rowType: z.string(),
+  playlists: z.array(RankedLayoutPlaylistSchema),
+  note: z.string().optional()
+});
+export type RankedLayoutSection = z.infer<typeof RankedLayoutSectionSchema>;
+
+export const RankedLayoutResponseSchema = z.object({
+  username: z.string(),
+  computedAt: z.string(),
+  /** passthrough: con `?debug=1` añade topGenres/avgBPM/avgEnergy/topArtists. */
+  userProfile: z
+    .object({
+      scrobbleCount90d: z.number(),
+      confidence: z.number()
+    })
+    .passthrough(),
+  weights: z.object({
+    genre: z.number(),
+    bpm: z.number(),
+    energy: z.number(),
+    longTerm: z.number()
+  }),
+  sections: z.array(RankedLayoutSectionSchema)
+});
+export type RankedLayoutResponse = z.infer<typeof RankedLayoutResponseSchema>;
+
+// ============================================================================
 // User Stats (Wrapped-lite) — /api/stats/user-stats?username=&period=week|month
 // ============================================================================
 
