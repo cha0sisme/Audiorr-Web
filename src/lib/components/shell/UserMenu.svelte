@@ -8,6 +8,12 @@
   import * as user from '$services/user';
   import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
 
+  type Props = {
+    /** Modo colapsado: solo avatar visible, popover ancla al lateral. */
+    compact?: boolean;
+  };
+  const { compact = false }: Props = $props();
+
   const username = $derived(credentials.current?.username ?? '');
   const initial = $derived(userAvatarInitial(username || '?'));
   const avatarColor = $derived(userAvatarColor(username || '?'));
@@ -92,15 +98,17 @@
   });
 </script>
 
-<div class="wrap">
+<div class="wrap" class:compact>
   <button
     bind:this={triggerEl}
     type="button"
     class="trigger"
     class:open
+    class:compact
     aria-haspopup="menu"
     aria-expanded={open}
     onclick={toggle}
+    title={compact ? username || 'Invitado' : undefined}
   >
     <span class="avatar" style:background={avatarColor.css} aria-hidden="true">
       {#if avatarUrl}
@@ -109,15 +117,17 @@
         {initial}
       {/if}
     </span>
-    <span class="info">
-      <span class="name">{username || 'Invitado'}</span>
-      <span class="hint" class:admin={isAdmin}>{roleLabel}</span>
-    </span>
-    <CaretUp size={14} weight="bold" class="caret" />
+    {#if !compact}
+      <span class="info">
+        <span class="name">{username || 'Invitado'}</span>
+        <span class="hint" class:admin={isAdmin}>{roleLabel}</span>
+      </span>
+      <CaretUp size={14} weight="bold" class="caret" />
+    {/if}
   </button>
 
   {#if open}
-    <div bind:this={menuEl} class="menu" role="menu" aria-label="Menú de usuario">
+    <div bind:this={menuEl} class="menu" class:menu-compact={compact} role="menu" aria-label="Menú de usuario">
       <button type="button" role="menuitem" class="item" onclick={handleProfile}>
         <User size={16} weight="regular" />
         <span>Perfil</span>
@@ -172,6 +182,15 @@
   .trigger:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
+  }
+  /* Compact: solo avatar centrado en el rail estrecho del sidebar. */
+  .trigger.compact {
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    margin: 0 auto;
   }
 
   .avatar {
@@ -247,6 +266,13 @@
     padding: var(--space-1);
     display: grid;
     gap: 1px;
+  }
+  /* Cuando el trigger es compact, el menú no puede ocupar el ancho del
+     trigger (48px) — fuerza un ancho mínimo y se ancla al lateral del rail. */
+  .menu-compact {
+    left: 0;
+    right: auto;
+    min-width: 180px;
   }
 
   .item {

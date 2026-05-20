@@ -8,6 +8,7 @@
   import { setContext, tick } from 'svelte';
   import { page } from '$app/state';
   import Sidebar from '$components/shell/Sidebar.svelte';
+  import { sidebarUI } from '$stores/sidebar-ui.svelte';
   import ToastViewport from '$components/shared/ToastViewport.svelte';
   import MiniPlayer from '$components/now-playing/MiniPlayer.svelte';
   import CanvasPanel from '$components/now-playing/CanvasPanel.svelte';
@@ -400,6 +401,7 @@
       style:--canvas-col-width="{canvasShown ? canvas.width : 0}px"
       style:--canvas-panel-width="{canvas.width}px"
       style:--side-panel-width="{queueUI.isOpen ? 360 : canvasShown ? canvas.width : 0}px"
+      style:--sidebar-width="{sidebarUI.collapsed ? 72 : 240}px"
     >
       <Sidebar />
 
@@ -485,7 +487,7 @@
      columns anima el "displace" del main al abrir/cerrar canvas. */
   .shell {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr) var(--canvas-col-width, 0px);
+    grid-template-columns: var(--sidebar-width, 240px) minmax(0, 1fr) var(--canvas-col-width, 0px);
     grid-template-areas: 'sidebar main canvas';
     height: 100dvh;
     background: var(--bg-canvas);
@@ -514,13 +516,15 @@
   .player-dock {
     position: fixed;
     bottom: var(--space-4);
-    left: 240px;
+    left: var(--sidebar-width, 240px);
     right: 0;
     z-index: var(--z-sticky);
     display: flex;
     justify-content: center;
     pointer-events: none;
-    transition: right var(--duration-normal) var(--ease-ios-default);
+    transition:
+      right var(--duration-normal) var(--ease-ios-default),
+      left var(--duration-normal) var(--ease-ios-default);
   }
   .player-dock.side-panel-open {
     right: var(--side-panel-width);

@@ -58,12 +58,6 @@
   // los reutiliza), por eso la View Transition card→detail no parpadea.
   const coverUrl = $derived(playlistId ? getPlaylistCoverUrl(playlistId) : undefined);
 
-  const fallbackHue = $derived(
-    playlist
-      ? [...playlist.name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0) % 360
-      : 220
-  );
-
   const paletteQ = createQuery(() => ({
     queryKey: ['palette', coverUrl ?? ''],
     queryFn: () => extractPalette(coverUrl!),
@@ -73,18 +67,17 @@
     retry: false
   }));
 
-  const palette = $derived<CoverPalette>(
-    paletteQ.data ?? { hue: fallbackHue, chroma: 0.12 }
-  );
+  // Fallback NEUTRO (no hasheado): si Vibrant aún no ha resuelto o ha fallado
+  // (CORS, network, swatch nulo), usamos HERO_PLACEHOLDER_PALETTE (chroma ≈ 0)
+  // → hero gris/neutro acorde con la UI. Cuando llegue la paleta real, el
+  // chroma se anima del placeholder al accent extraído.
+  const palette = $derived<CoverPalette>(paletteQ.data ?? HERO_PLACEHOLDER_PALETTE);
 
   const isDark = $derived(theme.current === 'dark');
 
-  // Placeholder neutral (chroma ≈ 0) mientras Vibrant extrae la paleta real.
-  // Evita el flash de color hasheado durante la View Transition.
-  const heroBg = $derived.by(() => {
-    const p = paletteQ.data ?? HERO_PLACEHOLDER_PALETTE;
-    return `linear-gradient(180deg, ${heroGradientTop(p)} 0%, ${heroGradientMid(p)} 60%, var(--bg-canvas) 100%)`;
-  });
+  const heroBg = $derived(
+    `linear-gradient(180deg, ${heroGradientTop(palette)} 0%, ${heroGradientMid(palette)} 60%, var(--bg-canvas) 100%)`
+  );
 
   const playBg = $derived(playButtonBg(palette, isDark));
 

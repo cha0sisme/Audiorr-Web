@@ -127,12 +127,6 @@
         : undefined
   );
 
-  const fallbackHue = $derived(
-    artist
-      ? [...artist.name].reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) >>> 0, 0) % 360
-      : 220
-  );
-
   const paletteQ = createQuery(() => ({
     queryKey: ['palette', coverUrl ?? ''],
     queryFn: () => extractPalette(coverUrl!),
@@ -142,19 +136,17 @@
     retry: false
   }));
 
-  const palette = $derived<CoverPalette>(
-    paletteQ.data ?? { hue: fallbackHue, chroma: 0.12 }
-  );
+  // Fallback NEUTRO (no hasheado): si Vibrant aún no ha resuelto o ha fallado
+  // (CORS, network, swatch nulo), usamos HERO_PLACEHOLDER_PALETTE (chroma ≈ 0)
+  // → hero gris/neutro acorde con la UI. Cuando llegue la paleta real, el
+  // chroma se anima del placeholder al accent extraído.
+  const palette = $derived<CoverPalette>(paletteQ.data ?? HERO_PLACEHOLDER_PALETTE);
 
   const isDark = $derived(theme.current === 'dark');
 
-  // Placeholder neutral mientras carga (chroma ≈ 0) — evita flash de color
-  // hasheado durante la View Transition card → detail.
-  const heroBg = $derived.by(() => {
-    if (!coverUrl) return heroBackgroundFlat(palette);
-    if (paletteQ.data) return heroBackgroundLayered(palette);
-    return heroBackgroundLayered(HERO_PLACEHOLDER_PALETTE);
-  });
+  const heroBg = $derived(
+    coverUrl ? heroBackgroundLayered(palette) : heroBackgroundFlat(palette)
+  );
 
   const playBg = $derived(playButtonBg(palette, isDark));
 
@@ -183,6 +175,10 @@
   );
 
   const biography = $derived(cleanNotes(artistInfoQ.data?.biography));
+
+  // Bio toggle (estilo iOS): por defecto una sola línea con ellipsis,
+  // clic en el párrafo lo expande a full text inline.
+  let bioExpanded = $state(false);
 
   function loadTopSong(_track: SongListItem, index: number) {
     if (!artist || allTopSongs.length === 0) return;
@@ -298,11 +294,17 @@
       {:else if artist}
         <p class="kicker">Artista</p>
         <h1 class="title">{artist.name}</h1>
-        {#if albums.length > 0}
-          <p class="meta-line">
-            {albums.length}
-            {albums.length === 1 ? 'álbum' : 'álbumes'}
-          </p>
+
+        {#if artistInfoQ.isPending}
+          <p class="bio-line bio-skeleton" aria-busy="true"></p>
+        {:else if biography}
+          <button
+            type="button"
+            class="bio-line"
+            class:bio-expanded={bioExpanded}
+            onclick={() => (bioExpanded = !bioExpanded)}
+            aria-expanded={bioExpanded}
+          >{biography}</button>
         {/if}
 
         <div class="actions">
@@ -483,20 +485,11 @@
       </section>
     {/if}
 
-    <!-- === About === -->
-    {#if artistInfoQ.isPending}
-      <section class="about-card about-loading" aria-busy="true">
-        <div class="about-skeleton-title"></div>
-        <div class="about-skeleton-line"></div>
-        <div class="about-skeleton-line"></div>
-        <div class="about-skeleton-line"></div>
-        <div class="about-skeleton-line short"></div>
-      </section>
-    {:else if biography && artist}
-      <section class="about-card">
-        <h2 class="about-title">Sobre {artist.name}</h2>
-        <p class="about-body">{biography}</p>
-      </section>
+    {#if artist && albums.length > 0}
+      <p class="end-meta">
+        {albums.length}
+        {albums.length === 1 ? 'álbum' : 'álbumes'}
+      </p>
     {/if}
   </div>
 
@@ -582,12 +575,6 @@
     letter-spacing: var(--tracking-display-lg);
     margin: 0;
     color: var(--hero-text-primary);
-  }
-  .meta-line {
-    margin: 0;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    color: var(--hero-text-secondary);
   }
 
   .actions {
@@ -699,43 +686,55 @@
     animation: pulse 1.5s ease-in-out infinite;
   }
 
-  .about-card {
-    margin: 0 var(--space-4);
-    padding: var(--space-6);
-    border-radius: var(--radius-2xl);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-  }
-  .about-title {
-    margin: 0 0 var(--space-3);
-    font-size: var(--text-xl);
-    font-weight: 700;
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .about-body {
+  /* Bio inline en el hero estilo iOS: 1 línea truncada con ellipsis, clic
+     expande a full text. */
+  .bio-line {
+    appearance: none;
+    background: none;
+    border: 0;
+    padding: 0;
     margin: 0;
-    max-width: none; /* Override del reset (65ch) — queremos full-width del card. */
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: var(--hero-text-secondary);
     font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.6;
+    line-height: 1.5;
+    max-width: 100%;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    overflow: hidden;
+    transition: color var(--duration-fast) var(--ease-ios-default);
     white-space: pre-wrap;
   }
-  .about-loading { display: grid; gap: var(--space-3); }
-  .about-skeleton-title {
-    height: 22px;
-    width: 220px;
-    background: var(--bg-surface-hover);
-    border-radius: var(--radius-sm);
-    animation: pulse 1.5s ease-in-out infinite;
+  .bio-line:hover { color: var(--hero-text-primary); }
+  .bio-line:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
   }
-  .about-skeleton-line {
+  .bio-expanded {
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    display: block;
+  }
+  .bio-skeleton {
+    width: min(420px, 80%);
     height: 14px;
-    background: var(--bg-surface-hover);
+    background: rgb(255 255 255 / 0.12);
     border-radius: var(--radius-sm);
     animation: pulse 1.5s ease-in-out infinite;
+    cursor: default;
   }
-  .about-skeleton-line.short { width: 60%; }
+
+  .end-meta {
+    margin: var(--space-5) 0 0;
+    padding: 0 var(--space-4);
+    font-size: var(--text-sm);
+    color: var(--text-tertiary);
+  }
 
   .bottom-spacer { height: 120px; }
 
@@ -765,6 +764,7 @@
     .section-header { padding: 0 var(--space-4); }
     .popular-list { padding: 0 var(--space-3); }
     .card-row-skeleton { padding: 0 var(--space-4); }
-    .about-card { padding: var(--space-5); }
+    .bio-line { text-align: center; }
+    .end-meta { text-align: center; }
   }
 </style>

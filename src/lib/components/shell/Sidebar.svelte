@@ -4,7 +4,7 @@
   import { createQuery } from '@tanstack/svelte-query';
   import {
     House, MagnifyingGlass, MusicNotes, Heart,
-    ListPlus, Star, X
+    ListPlus, Star, X, SidebarSimple
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
@@ -13,6 +13,9 @@
   import * as user from '$services/user';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { credentials } from '$stores/credentials.svelte';
+  import { sidebarUI } from '$stores/sidebar-ui.svelte';
+
+  const collapsed = $derived(sidebarUI.collapsed);
 
   /** Categorías de navegación. Cada ruta cae en una; cada nav item declara
       la suya. Un solo highlight a la vez sin ambigüedad. */
@@ -177,44 +180,68 @@
   });
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:collapsed>
   <div class="brand-row">
     <a href="/" class="brand-icon" aria-label="Audiorr — Inicio">
       <Logo size={32} />
     </a>
-    <BrandWord />
+    {#if !collapsed}
+      <BrandWord />
+    {/if}
+    <button
+      type="button"
+      class="collapse-toggle"
+      onclick={() => sidebarUI.toggle()}
+      aria-label={collapsed ? 'Expandir sidebar' : 'Contraer sidebar'}
+      aria-pressed={collapsed}
+      title={collapsed ? 'Expandir' : 'Contraer'}
+    >
+      <SidebarSimple size={18} weight="regular" />
+    </button>
   </div>
 
-  <div class="search" class:active={page.url.pathname === '/search'}>
-    <span class="search-icon" aria-hidden="true">
-      <MagnifyingGlass size={18} weight="regular" />
-    </span>
-    <input
-      bind:this={searchInputEl}
-      type="search"
-      value={searchValue}
-      oninput={handleSearchInput}
-      onkeydown={handleSearchKeydown}
-      placeholder="Buscar"
-      aria-label="Buscar artistas, álbumes, playlists"
-      autocomplete="off"
-      autocorrect="off"
-      spellcheck="false"
-    />
-    {#if searchValue}
-      <button
-        type="button"
-        class="clear-btn"
-        onclick={clearSearch}
-        aria-label="Limpiar búsqueda"
-        tabindex="-1"
-      >
-        <X size={12} weight="bold" />
-      </button>
-    {:else}
-      <kbd class="kbd">⌘K</kbd>
-    {/if}
-  </div>
+  {#if collapsed}
+    <a
+      href="/search"
+      class="search-collapsed"
+      class:active={page.url.pathname === '/search'}
+      aria-label="Buscar"
+      title="Buscar"
+    >
+      <MagnifyingGlass size={20} weight="regular" />
+    </a>
+  {:else}
+    <div class="search" class:active={page.url.pathname === '/search'}>
+      <span class="search-icon" aria-hidden="true">
+        <MagnifyingGlass size={18} weight="regular" />
+      </span>
+      <input
+        bind:this={searchInputEl}
+        type="search"
+        value={searchValue}
+        oninput={handleSearchInput}
+        onkeydown={handleSearchKeydown}
+        placeholder="Buscar"
+        aria-label="Buscar artistas, álbumes, playlists"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+      {#if searchValue}
+        <button
+          type="button"
+          class="clear-btn"
+          onclick={clearSearch}
+          aria-label="Limpiar búsqueda"
+          tabindex="-1"
+        >
+          <X size={12} weight="bold" />
+        </button>
+      {:else}
+        <kbd class="kbd">⌘K</kbd>
+      {/if}
+    </div>
+  {/if}
 
   <nav class="nav" aria-label="Navegación principal">
     {#each mainNav as item}
@@ -223,15 +250,16 @@
         class="nav-item"
         class:active={isActive(item)}
         data-sveltekit-preload-data="hover"
+        title={collapsed ? item.label : undefined}
       >
         <item.Icon size={20} weight={isActive(item) ? 'fill' : 'regular'} />
-        <span>{item.label}</span>
+        {#if !collapsed}<span>{item.label}</span>{/if}
       </a>
     {/each}
   </nav>
 
   <div class="section">
-    <p class="section-label">Biblioteca</p>
+    {#if !collapsed}<p class="section-label">Biblioteca</p>{/if}
     <nav class="nav" aria-label="Biblioteca">
       {#each libraryNav as item}
         <a
@@ -239,9 +267,10 @@
           class="nav-item"
           class:active={isActive(item)}
           data-sveltekit-preload-data="hover"
+          title={collapsed ? item.label : undefined}
         >
           <item.Icon size={20} weight={isActive(item) ? 'fill' : 'regular'} />
-          <span>{item.label}</span>
+          {#if !collapsed}<span>{item.label}</span>{/if}
         </a>
       {/each}
     </nav>
@@ -249,7 +278,7 @@
 
   {#if pinnedPlaylists.length > 0}
     <div class="section pinned-section">
-      <p class="section-label">Ancladas</p>
+      {#if !collapsed}<p class="section-label">Ancladas</p>{/if}
       <nav class="pinned-list" aria-label="Playlists ancladas">
         {#each pinnedPlaylists as p (p.id)}
           <a
@@ -266,7 +295,7 @@
                 {/snippet}
               </CoverImage>
             </span>
-            <span class="pinned-name">{p.name}</span>
+            {#if !collapsed}<span class="pinned-name">{p.name}</span>{/if}
           </a>
         {/each}
       </nav>
@@ -274,7 +303,7 @@
   {/if}
 
   <div class="footer">
-    <UserMenu />
+    <UserMenu compact={collapsed} />
   </div>
 </aside>
 
@@ -294,11 +323,17 @@
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
+    transition: padding var(--duration-normal) var(--ease-ios-default);
+  }
+  /* Modo colapsado: padding horizontal mínimo para que los iconos queden
+     centrados en el rail estrecho. */
+  .sidebar.collapsed {
+    padding-left: var(--space-2);
+    padding-right: var(--space-2);
   }
 
-  /* === Logo + BrandWord: icono fijo a la izquierda; el word entra/sale
-     con animation. min-height locka la altura de la fila para que no
-     "salte" cuando BrandWord aparece/desaparece. === */
+  /* === Logo + BrandWord + toggle: en expandido los 3 en fila;
+     en colapsado el logo arriba, toggle debajo (stack). === */
   .brand-row {
     display: flex;
     align-items: center;
@@ -306,10 +341,68 @@
     padding: 0 var(--space-2);
     min-height: 32px;
   }
+  .sidebar.collapsed .brand-row {
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: 0;
+  }
   .brand-icon {
     display: inline-flex;
     line-height: 0;
     flex-shrink: 0;
+  }
+  .collapse-toggle {
+    margin-left: auto;
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .collapse-toggle:hover {
+    background: var(--row-hover);
+    color: var(--text-primary);
+  }
+  .collapse-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .sidebar.collapsed .collapse-toggle {
+    margin-left: 0;
+  }
+
+  /* Search colapsado: solo el icono como botón cuadrado, link a /search. */
+  .search-collapsed {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    margin: 0 auto;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .search-collapsed:hover {
+    background: var(--row-hover);
+    color: var(--text-primary);
+  }
+  .search-collapsed.active {
+    background: var(--row-active);
+    color: var(--text-primary);
+  }
+  .search-collapsed:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   /* === Search button (Raycast/Linear-style con kbd hint) === */
@@ -516,6 +609,27 @@
     transition:
       background var(--duration-fast) var(--ease-ios-default),
       color var(--duration-fast) var(--ease-ios-default);
+  }
+  /* Colapsado: nav items son cuadrados centered con solo el icono. */
+  .sidebar.collapsed .nav-item {
+    justify-content: center;
+    padding: var(--space-2);
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+    margin: 0 auto;
+  }
+  /* Pinned colapsado: solo el cover (40x40) centrado. */
+  .sidebar.collapsed .pinned-item {
+    grid-template-columns: 40px;
+    justify-content: center;
+    padding: var(--space-1);
+    min-height: 48px;
+  }
+  .sidebar.collapsed .pinned-cover {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
   }
   .nav-item:hover {
     background: var(--row-hover);
