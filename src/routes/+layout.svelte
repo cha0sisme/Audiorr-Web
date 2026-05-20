@@ -16,6 +16,8 @@
   import AddToPlaylistSheet from '$components/shared/AddToPlaylistSheet.svelte';
   import CreatePlaylistDialog from '$components/shared/CreatePlaylistDialog.svelte';
   import CanvasQueueModal from '$components/shared/CanvasQueueModal.svelte';
+  import UpdatePlayCountModal from '$components/shared/UpdatePlayCountModal.svelte';
+  import SmartTagsModal from '$components/shared/SmartTagsModal.svelte';
   import ViewArtistsDialog from '$components/shared/ViewArtistsDialog.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
@@ -451,6 +453,8 @@
     <AddToPlaylistSheet />
     <CreatePlaylistDialog />
     <CanvasQueueModal />
+    <UpdatePlayCountModal />
+    <SmartTagsModal />
     <ViewArtistsDialog />
   {/if}
 

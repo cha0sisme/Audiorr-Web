@@ -9,7 +9,9 @@
     User,
     Disc,
     Wrench,
-    YoutubeLogo
+    YoutubeLogo,
+    Hash,
+    Tag
   } from 'phosphor-svelte';
   import NowPlayingIndicator from './NowPlayingIndicator.svelte';
   import ExplicitBadge from './ExplicitBadge.svelte';
@@ -122,6 +124,11 @@
       items.push(...navItems);
     }
     if (authInfo.isAdmin) {
+      const adminTarget = {
+        songId: track.id,
+        songTitle: track.title,
+        songArtist: artist ?? track.artist ?? 'Desconocido'
+      };
       items.push({ divider: true });
       items.push({
         label: 'Admin Tools',
@@ -131,11 +138,21 @@
             label: 'Enviar a la cola de Canvas',
             icon: YoutubeLogo,
             action: () => {
-              adminToolsUI.openCanvasQueue({
-                songId: track.id,
-                songTitle: track.title,
-                songArtist: artist ?? track.artist ?? 'Desconocido'
-              });
+              adminToolsUI.openCanvasQueue(adminTarget);
+            }
+          },
+          {
+            label: 'Editar reproducciones',
+            icon: Hash,
+            action: () => {
+              adminToolsUI.openPlayCount(adminTarget);
+            }
+          },
+          {
+            label: 'Editar smart tags',
+            icon: Tag,
+            action: () => {
+              adminToolsUI.openSmartTags(adminTarget);
             }
           }
         ]
