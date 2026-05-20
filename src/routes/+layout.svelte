@@ -95,24 +95,6 @@
     return () => window.removeEventListener('pagehide', onPageHide);
   });
 
-  /** Refresca `coverContentHash` de todas las playlists cuando la pestaña
-      vuelve a foreground. Mirror de `AppDelegate.swift:219` (didBecomeActive)
-      en iOS — sin esto, una pestaña que llevaba horas en background nunca
-      detecta covers regenerados por el cron del backend.
-      `refreshPlaylistCoverHashes` es idempotente: dos triggers concurrentes
-      reusan la misma promise (visibilitychange + onMount de página recién
-      hidratada al volver). */
-  $effect(() => {
-    if (!browser) return;
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!credentials.isConfigured) return;
-      void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  });
-
   let { children } = $props();
 
   const queryClient = new QueryClient({
@@ -131,6 +113,41 @@
         enabled: browser
       }
     }
+  });
+
+  /** Refresca `coverContentHash` de todas las playlists.
+      Mirror de iOS `AppDelegate.swift:219 didBecomeActive`, que cubre tanto
+      cold launch como vuelta de background.
+
+      Dos triggers:
+      - `visibilitychange` → cuando la pestaña vuelve a fg.
+      - mount inicial / login → cubre cold start, F5 y login-tras-mount.
+        `visibilitychange` solo se emite en TRANSICIONES (al montar
+        `document.visibilityState` ya es 'visible'), así que sin el trigger
+        directo un F5 durante el mismo día con el backend ya regenerado se
+        queda con cover stale hasta el próximo tab-blur o hasta que
+        `stale-while-revalidate=86400` venza.
+
+      Reactividad: el effect lee `credentials.isConfigured` y `username` en
+      su scope. Cuando un user sin sesión carga la app y luego se loguea,
+      el cambio de `isConfigured` re-ejecuta el effect → cleanup viejo +
+      install nuevo listener + trigger inicial. Sin esa lectura reactiva,
+      el primer paint sin auth abortaba y nunca re-disparaba al login.
+
+      `refreshPlaylistCoverHashes` es idempotente (mutex `refreshInFlight`),
+      así que dos triggers concurrentes en la misma ventana se colapsan. */
+  $effect(() => {
+    if (!browser) return;
+    const isConfigured = credentials.isConfigured;
+    const username = credentials.current?.username;
+    if (!isConfigured) return;
+    const trigger = () => {
+      if (document.visibilityState !== 'visible') return;
+      void refreshPlaylistCoverHashes(queryClient, username);
+    };
+    document.addEventListener('visibilitychange', trigger);
+    trigger();
+    return () => document.removeEventListener('visibilitychange', trigger);
   });
 
   // ==========================================================================

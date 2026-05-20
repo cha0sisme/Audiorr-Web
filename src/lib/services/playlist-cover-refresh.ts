@@ -77,34 +77,36 @@ async function doRefresh(
   queryClient: QueryClient,
   username: string | undefined
 ): Promise<void> {
-  // Layer 1: refetch bulk endpoints. invalidateQueries marca stale y, si hay
-  // observers (componentes montados), refetchea inmediatamente. Si no hay
-  // observers (ej. el user no está en /library), no fuerza nada — está bien,
-  // la próxima visita los traerá frescos.
+  // Layer 1: refetch bulk endpoints SIN depender de observers montados.
+  // `refetchQueries` fuerza el fetch aunque la pestaña esté en otra ruta
+  // (ej. /playlist/[id] cuando el backend regeneró daily-mixes). Antes
+  // usábamos `invalidateQueries` que solo marca stale → si no había
+  // observers, el store de hashes quedaba congelado con valores viejos y
+  // la URL `?v=<oldHash>` mantenía el cover stale cacheado immutable.
   if (username) {
-    void queryClient.invalidateQueries({ queryKey: ['dailyMixes', username] });
-    void queryClient.invalidateQueries({ queryKey: ['smartPlaylists', username] });
+    await Promise.allSettled([
+      queryClient.refetchQueries({ queryKey: ['dailyMixes', username] }),
+      queryClient.refetchQueries({ queryKey: ['smartPlaylists', username] })
+    ]);
   }
 
-  // Layer 2: HEAD para uncovered. Solo si tenemos backend URL configurada (en
-  // dev es '' = same-origin con vite proxy, sigue válido para fetch).
+  // Layer 2: HEAD/ETag a TODAS las playlists, sin filtrar por hash existente.
+  // El filtro previo (`!playlistCovers.get(id)`) era el bug raíz: descartaba
+  // playlists con hash registrado, asumiendo "tiene hash = está fresh". Pero
+  // el hash puede estar stale tras una regeneración del backend, y sin HEAD
+  // no nos enteramos. El TTL de 60 s en `lastChecked` ya throttlea spam, así
+  // que es seguro pasar la lista completa.
   let allPlaylists;
   try {
     allPlaylists = await nav.getPlaylists();
   } catch {
-    // Sin Navidrome no podemos listar — abandonamos silenciosamente.
     return;
   }
 
-  // Las playlists ya hidratadas por bulk no necesitan HEAD (más eficiente).
-  // Si el bulk aún no ha completado, las HEADearemos también — coste pequeño.
-  const uncovered = allPlaylists
-    .map((p) => p.id)
-    .filter((id) => !playlistCovers.get(id));
+  const ids = allPlaylists.map((p) => p.id);
+  if (ids.length === 0) return;
 
-  if (uncovered.length === 0) return;
-
-  await revalidateCoverEtags(uncovered);
+  await revalidateCoverEtags(ids);
 }
 
 /**
