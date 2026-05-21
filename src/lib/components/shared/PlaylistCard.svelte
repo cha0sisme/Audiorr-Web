@@ -2,7 +2,7 @@
   import type { HTMLAnchorAttributes } from 'svelte/elements';
   import { Play, Queue } from 'phosphor-svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import NowPlayingIndicator from './NowPlayingIndicator.svelte';
+  import EqualizerIcon from './EqualizerIcon.svelte';
   import CoverImage from './CoverImage.svelte';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -43,7 +43,7 @@
       const songs = playlist.entry ?? [];
       if (songs.length === 0) return;
       player.context = { type: 'playlist', id };
-      queueManager.play(songs, 0);
+      queueManager.play(songs, 0, { contextUri: `playlist:${id}` });
     } catch {
       // Silencioso — fallar no debería notificar al usuario.
     } finally {
@@ -153,8 +153,7 @@
 
       {#if isCurrent}
         <div class="playing-overlay" aria-hidden="true">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
+          <EqualizerIcon
             color="#fff"
             height={20}
             barWidth={3}

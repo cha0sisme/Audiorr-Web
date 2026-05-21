@@ -148,7 +148,7 @@
     if (topWeekly.length === 0) return;
     const songs = topWeekly.map(topWeeklyToNavidromeSong);
     player.context = { type: 'playlist', id: 'top-weekly' };
-    queueManager.play(songs, index);
+    queueManager.play(songs, index, { contextUri: 'playlist:top-weekly' });
   }
 
   // Side effect: pre-cargar los `coverContentHash` de daily mixes + smart

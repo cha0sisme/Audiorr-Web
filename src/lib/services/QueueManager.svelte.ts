@@ -736,7 +736,9 @@ class QueueManager {
         artist: item.artist,
         album: item.album,
         albumId: item.albumId ?? '',
-        artistId: '',
+        // Restauramos artistId persistido — antes se hardcodeaba '' (legacy
+        // iOS), lo que rompía el link al artista del MiniPlayer tras restore.
+        artistId: item.artistId ?? '',
         coverArt: item.coverArt ?? '',
         duration: item.duration,
         replayGainMultiplier: 1.0
@@ -761,7 +763,7 @@ class QueueManager {
           artist: last.artist,
           album: last.album,
           albumId: last.albumId ?? '',
-          artistId: '',
+          artistId: last.artistId ?? '',
           coverArt: last.coverArt ?? '',
           duration: last.duration,
           replayGainMultiplier: 1.0
@@ -1026,7 +1028,18 @@ class QueueManager {
     if (!cur) return;
 
     player.currentSong = persistableToPlayerSong(cur);
-    player.context = parseContextUri(this.contextUri);
+    // Context: solo sobrescribimos si tenemos un `contextUri` válido en el
+    // queueManager. Cuando es null (la mayoría de callers actuales —
+    // AlbumDetail, PlaylistDetail, ArtistDetail, *Card.handlePlay — setean
+    // `player.context = {...}` directamente ANTES de queueManager.play() sin
+    // pasar `options.contextUri`), preservamos ese contexto manual. Sin
+    // este guard, el `parseContextUri(null) === null` los machacaba y rompía
+    // el EqualizerIcon en cards / heroes que dependen de `isPlayingFrom`.
+    // Migrar callers a options.contextUri es task futura — este guard
+    // mantiene compat hasta entonces.
+    if (this.contextUri !== null) {
+      player.context = parseContextUri(this.contextUri);
+    }
     player.playbackMode = this.playbackMode;
     player.contextUri = this.contextUri;
     player.isPlaying = false; // restore es siempre paused — user pulsa play
@@ -1128,6 +1141,10 @@ class QueueManager {
         artist: s.artist,
         album: s.album ?? '',
         albumId: s.albumId ?? null,
+        // artistId opcional — persistido para que el MiniPlayer y otros
+        // surfaces que dependen del link al artista (artist-link) sigan
+        // funcionando tras un restore de lastPlayback.
+        artistId: s.artistId ?? null,
         coverArt: s.coverArt ?? null,
         duration: s.duration
       }));
@@ -1137,6 +1154,7 @@ class QueueManager {
       artist: cur.artist,
       album: cur.album ?? '',
       albumId: cur.albumId ?? null,
+      artistId: cur.artistId ?? null,
       coverArt: cur.coverArt ?? null,
       path: '',
       duration: cur.duration,

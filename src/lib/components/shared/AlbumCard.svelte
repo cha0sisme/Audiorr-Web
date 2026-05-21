@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
   import { Play, MusicNote } from 'phosphor-svelte';
-  import NowPlayingIndicator from './NowPlayingIndicator.svelte';
+  import EqualizerIcon from './EqualizerIcon.svelte';
   import ExplicitBadge from './ExplicitBadge.svelte';
   import NewArrivalBadge from './NewArrivalBadge.svelte';
   import CoverImage from './CoverImage.svelte';
@@ -86,7 +86,7 @@
       const songs = album.song ?? [];
       if (songs.length === 0) return;
       player.context = { type: 'album', id };
-      queueManager.play(songs, 0);
+      queueManager.play(songs, 0, { contextUri: `album:${id}` });
     } catch {
       // Silencioso — un fallo en la card no debería notificar al usuario.
     } finally {
@@ -119,8 +119,7 @@
 
       {#if isCurrent}
         <div class="playing-overlay" aria-hidden="true">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
+          <EqualizerIcon
             color="#fff"
             height={20}
             barWidth={3}

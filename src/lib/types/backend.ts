@@ -542,6 +542,12 @@ export const LastPlaybackQueueItemSchema = z
     artist: z.string(),
     album: z.string(),
     albumId: z.string().nullable().optional(),
+    // `artistId` opcional — el backend lo trata como blob passthrough, así
+    // que añadirlo no rompe nada. iOS legacy hardcodeaba "" porque no lo
+    // necesitaba (MiniPlayer iOS no tenía link al artist). En web SÍ lo
+    // necesitamos para que el nombre del artista del MiniPlayer siga siendo
+    // clickeable tras un restore de lastPlayback.
+    artistId: z.string().nullable().optional(),
     coverArt: z.string().nullable().optional(),
     duration: z.number()
   })
@@ -565,6 +571,8 @@ export const LastPlaybackStateSchema = z
     album: z.string(),
     coverArt: z.string().nullable().optional(),
     albumId: z.string().nullable().optional(),
+    /** Ver nota en LastPlaybackQueueItemSchema. */
+    artistId: z.string().nullable().optional(),
     path: z.string().optional(),
     duration: z.number(),
     position: z.number(),
