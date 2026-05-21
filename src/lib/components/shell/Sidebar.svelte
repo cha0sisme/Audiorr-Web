@@ -3,8 +3,8 @@
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
   import {
-    House, MagnifyingGlass, MusicNotes, Heart,
-    ListPlus, Star, X, SidebarSimple
+    House, MagnifyingGlass, VinylRecord, Heart,
+    ListPlus, UsersThree, X, SidebarSimple
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
@@ -36,13 +36,13 @@
 
   const mainNav: NavItem[] = [
     { href: '/', label: 'Inicio', Icon: House, category: 'home' },
-    { href: '/library', label: 'Tu librería', Icon: MusicNotes, category: 'library' },
+    { href: '/library', label: 'Tu librería', Icon: VinylRecord, category: 'library' },
     { href: '/favorites', label: 'Favoritos', Icon: Heart, category: 'favorites' }
   ];
 
   const libraryNav: NavItem[] = [
     { href: '/library?tab=playlists', label: 'Playlists', Icon: ListPlus, category: 'playlists' },
-    { href: '/library?tab=artists', label: 'Artistas', Icon: Star, category: 'artists' }
+    { href: '/library?tab=artists', label: 'Artistas', Icon: UsersThree, category: 'artists' }
   ];
 
   /** Mapea la URL actual a una categoría única. Centraliza las reglas de

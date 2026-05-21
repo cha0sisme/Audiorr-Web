@@ -18,13 +18,15 @@
     onPlay: (track: SongListItem, index: number) => void;
   };
 
-  let { tracks, contextType, contextId, showCover = false, onPlay }: Props = $props();
+  // `contextId` se conserva en el Props type por simetría con `contextType`
+  // (algún caller futuro podría querer restringir el highlight al contexto),
+  // pero hoy no lo desestructuramos: iOS / Apple Music highlightean la
+  // canción actual en CUALQUIER lista donde aparezca, no solo donde se
+  // inició el playback.
+  let { tracks, contextType, showCover = false, onPlay }: Props = $props();
 
   function isCurrent(trackId: string): boolean {
-    return (
-      player.currentSong?.id === trackId &&
-      player.isPlayingFrom(contextType, contextId)
-    );
+    return player.currentSong?.id === trackId;
   }
 </script>
 

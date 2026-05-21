@@ -49,7 +49,26 @@
   let triggerEl: HTMLButtonElement | undefined = $state();
   let menuEl: HTMLDivElement | undefined = $state();
 
+  // En modo `compact` el menú se renderiza con `position: fixed` calculado
+  // desde el bounding rect del trigger. Razón: el sidebar tiene
+  // `overflow-x: hidden` (para evitar bleed horizontal de cards/pinned) y un
+  // menú `position: absolute` de 180px dentro del rail estrecho (~64px) se
+  // recorta. `position: fixed` escapa del contexto de clipping del sidebar
+  // sin tener que renderizar en un portal.
+  let menuPos = $state<{ left: number; bottom: number } | null>(null);
+
   function toggle() {
+    // Pre-cómputo síncrono de la posición fixed cuando se va a abrir en
+    // compact. Sin esto, el primer frame del menú renderiza con menuPos
+    // null → fallback a top:0 left:0 (flicker). El $effect posterior se
+    // encarga de updates en resize/scroll.
+    if (!open && compact && triggerEl) {
+      const r = triggerEl.getBoundingClientRect();
+      menuPos = {
+        left: Math.round(r.right + 8),
+        bottom: Math.round(window.innerHeight - r.bottom)
+      };
+    }
     open = !open;
   }
 
@@ -96,6 +115,36 @@
       document.removeEventListener('keydown', onKey);
     };
   });
+
+  // Posicionamiento fixed para modo compact. Re-calcula en open, resize y
+  // scroll del sidebar (el sidebar tiene overflow-y: auto, así que el
+  // trigger se mueve si el user scrollea con el menú abierto).
+  $effect(() => {
+    if (!open || !compact) {
+      menuPos = null;
+      return;
+    }
+    function updatePos() {
+      if (!triggerEl) return;
+      const r = triggerEl.getBoundingClientRect();
+      menuPos = {
+        // 8px gap a la derecha del avatar — separa visualmente del rail.
+        left: Math.round(r.right + 8),
+        // Bottom del menú alineado con el bottom del trigger → el menú
+        // crece hacia arriba (igual que el caso no-compact, que es bottom
+        // del trigger via `bottom: calc(100% + space-2)`).
+        bottom: Math.round(window.innerHeight - r.bottom)
+      };
+    }
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    // capture: capturamos scrolls de cualquier ancestro (incl. el sidebar).
+    window.addEventListener('scroll', updatePos, true);
+    return () => {
+      window.removeEventListener('resize', updatePos);
+      window.removeEventListener('scroll', updatePos, true);
+    };
+  });
 </script>
 
 <div class="wrap" class:compact>
@@ -127,7 +176,15 @@
   </button>
 
   {#if open}
-    <div bind:this={menuEl} class="menu" class:menu-compact={compact} role="menu" aria-label="Menú de usuario">
+    <div
+      bind:this={menuEl}
+      class="menu"
+      class:menu-compact={compact}
+      role="menu"
+      aria-label="Menú de usuario"
+      style:left={compact && menuPos ? `${menuPos.left}px` : null}
+      style:bottom={compact && menuPos ? `${menuPos.bottom}px` : null}
+    >
       <button type="button" role="menuitem" class="item" onclick={handleProfile}>
         <User size={16} weight="regular" />
         <span>Perfil</span>
@@ -267,10 +324,11 @@
     display: grid;
     gap: 1px;
   }
-  /* Cuando el trigger es compact, el menú no puede ocupar el ancho del
-     trigger (48px) — fuerza un ancho mínimo y se ancla al lateral del rail. */
+  /* Cuando el trigger es compact, el menú se renderiza con `position: fixed`
+     (left/bottom inline desde el JS) para escapar del clipping `overflow-x:
+     hidden` del sidebar. El ancho fijo evita que el menú colapse a 48px. */
   .menu-compact {
-    left: 0;
+    position: fixed;
     right: auto;
     min-width: 180px;
   }
