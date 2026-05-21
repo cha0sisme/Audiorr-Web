@@ -123,6 +123,8 @@ export const NavidromeSongSchema = z.object({
   artist: z.string().optional(),
   artistId: z.string().optional(),
   track: z.number().optional(),
+  /** Multi-disc albums — disco al que pertenece la pista. OpenSubsonic. */
+  discNumber: z.number().optional(),
   year: z.number().optional(),
   genre: z.string().optional(),
   coverArt: z.string().optional(),
@@ -131,8 +133,26 @@ export const NavidromeSongSchema = z.object({
   suffix: z.string().optional(),
   duration: z.number().optional(),
   bitRate: z.number().optional(),
+  /** Sampling rate en Hz (44100, 48000, 96000, 192000). OpenSubsonic. */
+  samplingRate: z.number().optional(),
+  /** Bit depth (16, 24). OpenSubsonic. */
+  bitDepth: z.number().optional(),
+  /** Canales: 1=mono, 2=estéreo, 6=5.1. OpenSubsonic. */
+  channelCount: z.number().optional(),
   path: z.string().optional(),
   starred: z.string().optional(),
+  /** Total de reproducciones (Navidrome). */
+  playCount: z.number().optional(),
+  /** Fecha ISO 8601 de la última reproducción. */
+  played: z.string().optional(),
+  /** Fecha ISO 8601 de cuando el archivo entró en la biblioteca. */
+  created: z.string().optional(),
+  /** BPM si está etiquetado en el archivo. OpenSubsonic. */
+  bpm: z.number().optional(),
+  /** Tag `comment` del archivo. OpenSubsonic. */
+  comment: z.string().optional(),
+  /** MusicBrainz Recording ID. */
+  musicBrainzId: z.string().optional(),
   // OpenSubsonic extension. 'explicit' marca contenido explícito;
   // 'clean' es la edición limpia; vacío/undefined = no etiquetado.
   explicitStatus: z.string().optional(),

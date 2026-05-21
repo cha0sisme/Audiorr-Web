@@ -20,6 +20,7 @@
   import UpdatePlayCountModal from '$components/shared/UpdatePlayCountModal.svelte';
   import SmartTagsModal from '$components/shared/SmartTagsModal.svelte';
   import ViewArtistsDialog from '$components/shared/ViewArtistsDialog.svelte';
+  import SongInfoDialog from '$components/shared/SongInfoDialog.svelte';
   import { player } from '$stores/player.svelte';
   import { canvas } from '$stores/canvas.svelte';
   import { queueUI } from '$stores/queue-ui.svelte';
@@ -475,6 +476,7 @@
     <UpdatePlayCountModal />
     <SmartTagsModal />
     <ViewArtistsDialog />
+    <SongInfoDialog />
   {/if}
 
   <!-- ToastViewport siempre montado, también en /login -->

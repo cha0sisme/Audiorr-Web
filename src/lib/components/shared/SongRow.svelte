@@ -11,9 +11,10 @@
     Wrench,
     YoutubeLogo,
     Hash,
-    Tag
+    Tag,
+    Info
   } from 'phosphor-svelte';
-  import NowPlayingIndicator from './NowPlayingIndicator.svelte';
+  import EqualizerIcon from './EqualizerIcon.svelte';
   import ExplicitBadge from './ExplicitBadge.svelte';
   import CoverImage from './CoverImage.svelte';
   import ContextMenu, { type ContextMenuItem } from './ContextMenu.svelte';
@@ -23,6 +24,7 @@
   import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
   import { adminToolsUI } from '$stores/admin-tools-ui.svelte';
   import { viewArtistsUI } from '$stores/view-artists-ui.svelte';
+  import { songInfoUI } from '$stores/song-info-ui.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
   import { formatTime } from '$utils/format';
   import type { SongListItem } from '$utils/navidrome-mappers';
@@ -154,6 +156,22 @@
             action: () => {
               adminToolsUI.openSmartTags(adminTarget);
             }
+          },
+          {
+            label: 'Información detallada',
+            icon: Info,
+            action: () => {
+              songInfoUI.open(track.id, {
+                id: track.id,
+                title: track.title,
+                artist: artist ?? track.artist,
+                album: track.album,
+                albumId: track.albumId,
+                artistId: track.artistId,
+                duration: track.durationSec,
+                explicitStatus: track.explicit ? 'explicit' : undefined
+              });
+            }
           }
         ]
       });
@@ -202,8 +220,8 @@
       </CoverImage>
       {#if isCurrent}
         <span class="cover-overlay">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
+          <EqualizerIcon
+            bars={4}
             color="#fff"
             height={14}
             barWidth={2}
@@ -214,8 +232,8 @@
   {:else}
     <span class="indicator" aria-hidden="true">
       {#if isCurrent}
-        <NowPlayingIndicator
-          isPlaying={player.isPlaying}
+        <EqualizerIcon
+          bars={4}
           height={14}
           barWidth={2}
         />
