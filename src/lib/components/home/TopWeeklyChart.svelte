@@ -25,7 +25,7 @@
   import CoverImage from '$components/shared/CoverImage.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
+  import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import * as nav from '$services/NavidromeService';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -198,8 +198,7 @@
         </CoverImage>
         {#if isCurrent}
           <span class="cover-overlay" aria-hidden="true">
-            <NowPlayingIndicator
-              isPlaying={player.isPlaying}
+            <EqualizerIcon
               color="#fff"
               height={14}
               barWidth={2}

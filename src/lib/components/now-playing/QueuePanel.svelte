@@ -20,7 +20,7 @@
   import { player } from '$stores/player.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import CoverImage from '$components/shared/CoverImage.svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
+  import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import { formatTime } from '$utils/format';
   import type { PersistableSong } from '$services/QueueManager.svelte';
@@ -97,8 +97,7 @@
               {/snippet}
             </CoverImage>
             <span class="qp-thumb-overlay">
-              <NowPlayingIndicator
-                isPlaying={player.isPlaying}
+              <EqualizerIcon
                 color="#fff"
                 height={14}
                 barWidth={2}

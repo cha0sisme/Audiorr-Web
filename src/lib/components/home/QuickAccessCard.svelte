@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
   import { MusicNote, Play } from 'phosphor-svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
+  import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import { player, type PlaybackContext } from '$stores/player.svelte';
 
@@ -62,11 +62,10 @@
 
     {#if isCurrent}
       <div class="playing-overlay" aria-hidden="true">
-        <NowPlayingIndicator
-          isPlaying={player.isPlaying}
+        <EqualizerIcon
           color="#fff"
           height={18}
-          barWidth={2.5}
+          barWidth={2}
         />
       </div>
     {/if}

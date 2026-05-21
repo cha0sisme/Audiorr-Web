@@ -1,13 +1,14 @@
 <script lang="ts">
   import {
     Play, Pause, SkipForward, SkipBack, Shuffle, Repeat,
-    MusicNote, Heart, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple,
+    MusicNote, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple,
     Broadcast
   } from 'phosphor-svelte';
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import { formatTime } from '$utils/format';
   import WaveText from '$components/shared/WaveText.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
+  import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import DevicePicker from '$components/now-playing/DevicePicker.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { player } from '$stores/player.svelte';
@@ -99,9 +100,9 @@
   // Flash pop+halo al activar un control. Reutiliza el lenguaje visual del
   // panel de diagnostics ("just rated"). Cada key se resetea a 700ms para
   // dejar terminar el keyframe antes de poder repetirlo.
-  type FlashKey = 'heart' | 'playpause' | 'connect' | 'queue' | 'canvas' | 'volume';
+  type FlashKey = 'playpause' | 'connect' | 'queue' | 'canvas' | 'volume';
   let just = $state<Record<FlashKey, boolean>>({
-    heart: false, playpause: false, connect: false, queue: false, canvas: false, volume: false
+    playpause: false, connect: false, queue: false, canvas: false, volume: false
   });
   const flashTimers: Partial<Record<FlashKey, ReturnType<typeof setTimeout>>> = {};
   function flash(k: FlashKey) {
@@ -185,16 +186,14 @@
           <p class="artist">{artist}</p>
         {/if}
       </div>
-      <button
-        type="button"
-        class="icon-btn heart-btn"
-        class:just-clicked={just.heart}
-        aria-label="Añadir a favoritos"
-        tabindex={compact ? -1 : 0}
-        onclick={() => flash('heart')}
-      >
-        <Heart size={18} weight="regular" />
-      </button>
+      <!-- EqualizerIcon: indicador visual del audio en vivo. Reactivo al
+           AnalyserNode del AudioEngine; coste compartido entre todas las
+           instancias de la app (1 FFT global, no por componente). Mirror
+           del Now Playing Indicator de iOS Music — 3 barras delgadas,
+           bottom-anchored, envelope follower con release lento. -->
+      <span class="eq-slot" aria-hidden={!isPlaying}>
+        <EqualizerIcon bars={4} height={19} barWidth={3} />
+      </span>
     </div>
 
     <div class="center">
@@ -393,6 +392,14 @@
         <p class="artist">{artist}</p>
       {/if}
     </div>
+
+    <!-- EQ icon en compact también — paridad iOS Control Center pill, donde
+         el indicador sigue visible aunque el player esté minimizado.
+         Tamaño un poco menor que en expanded para que case con el footprint
+         del pill (60px tall). -->
+    <span class="eq-slot eq-slot-compact" aria-hidden={!isPlaying}>
+      <EqualizerIcon bars={4} height={14} barWidth={2} />
+    </span>
 
     <div class="compact-controls">
       <button
@@ -680,12 +687,20 @@
      ========================================================================== */
   .compact-layer {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    /* 4 cols: cover | meta | EQ indicator | controls. */
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
     align-items: center;
     column-gap: var(--space-3);
     /* Padding horizontal grande (16px) porque el pill tiene radius 30px —
        con menos, el cover queda parcialmente clippeado por la curva. */
     padding: 8px 16px;
+  }
+  /* Compact EQ: gap reducido respecto a controls para que se agrupe
+     visualmente con el meta-text (es indicator del título, no control). */
+  .eq-slot-compact {
+    width: 18px;
+    height: 18px;
+    margin-right: calc(-1 * var(--space-1));
   }
   .cover-compact {
     width: 44px;
@@ -943,57 +958,20 @@
      evitando jank durante el spring. Se limpia automáticamente al terminar.
      ========================================================================== */
 
-  /* ── Heart "like burst" ──────────────────────────────────────────────────
-     Apple Music style. Pre-squash (anticipation), explosión 1.55× con tinte
-     coral en el peak (filter saturate+hue), settling con oscilación. Halo
-     doble: ring exterior coral expandiéndose + glow radial cálido detrás.
-     -------------------------------------------------------------------- */
-  .heart-btn.just-clicked > :global(svg) {
-    animation: mp-heart-burst 760ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
-    transform-origin: center;
-    will-change: transform, filter;
+  /* ── EqualizerIcon slot ─────────────────────────────────────────────────
+     Ocupa el mismo footprint que ocupaba el .heart-btn (32x32) para no
+     romper el rytmo visual del .track. Color hereda de text-secondary →
+     primary on hover del player, mismo lenguaje que los .icon-btn. */
+  .eq-slot {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary);
+    transition: color var(--duration-fast) var(--ease-ios-default);
   }
-  .heart-btn.just-clicked::before {
-    content: '';
-    position: absolute;
-    inset: -2px;
-    border-radius: var(--radius-full);
-    border: 1.5px solid oklch(0.7 0.2 12);
-    pointer-events: none;
-    opacity: 0;
-    animation: mp-heart-ring 620ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .heart-btn.just-clicked::after {
-    content: '';
-    position: absolute;
-    inset: -10px;
-    border-radius: var(--radius-full);
-    background:
-      radial-gradient(circle at center,
-        oklch(0.72 0.22 14 / 0.55) 0%,
-        oklch(0.72 0.22 14 / 0.28) 28%,
-        transparent 62%);
-    filter: blur(2px);
-    pointer-events: none;
-    animation: mp-heart-glow 820ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  @keyframes mp-heart-burst {
-    0%   { transform: scale(1); filter: none; }
-    14%  { transform: scale(0.62); filter: brightness(0.95); }
-    34%  { transform: scale(1.55) rotate(-4deg); filter: brightness(1.25) saturate(1.6) drop-shadow(0 0 6px oklch(0.7 0.2 12 / 0.7)); }
-    58%  { transform: scale(0.88) rotate(3deg); filter: brightness(1.08) saturate(1.2); }
-    80%  { transform: scale(1.04) rotate(-1deg); filter: none; }
-    100% { transform: scale(1); }
-  }
-  @keyframes mp-heart-ring {
-    0%   { transform: scale(0.7); opacity: 0; }
-    18%  { opacity: 0.9; }
-    100% { transform: scale(1.9); opacity: 0; }
-  }
-  @keyframes mp-heart-glow {
-    0%   { transform: scale(0.6); opacity: 0; }
-    25%  { transform: scale(1.1); opacity: 0.85; }
-    100% { transform: scale(2.0); opacity: 0; }
+  .player:hover .eq-slot {
+    color: var(--text-primary);
   }
 
   /* ── Play/Pause "tactile pulse" ─────────────────────────────────────────
@@ -1207,14 +1185,11 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .heart-btn.just-clicked > :global(svg),
     .play-pause.just-clicked,
     .connect-btn.just-clicked > :global(svg),
     .queue-btn.just-clicked > :global(svg),
     .canvas-btn.just-clicked > :global(svg),
     .volume-btn.just-clicked > :global(svg) { animation: none; }
-    .heart-btn.just-clicked::before,
-    .heart-btn.just-clicked::after,
     .connect-btn.just-clicked::before,
     .connect-btn.just-clicked::after,
     .queue-btn.just-clicked::after,

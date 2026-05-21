@@ -144,6 +144,11 @@ class AudioEngine {
   private workletReadyForCtx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private limiter: DynamicsCompressorNode | null = null;
+  /** AnalyserNode lazy — creado por `getAnalyser()` la primera vez que un
+      consumidor (visualizer) lo pide. Conectado en paralelo a masterGain:
+      ve el audio post-EQ post-volumen pre-limiter (≈ lo que el usuario oye)
+      sin propagar a destination (es un sink). */
+  private analyser: AnalyserNode | null = null;
 
   private chainA: Chain | null = null;
   private chainB: Chain | null = null;
@@ -362,6 +367,24 @@ class AudioEngine {
     this.duration = 0;
     this.stopProgressTimer();
     this.emit({ type: 'playstate', isPlaying: false, currentTime: 0 });
+  }
+
+  /** Devuelve un AnalyserNode conectado al masterGain. Lazy: se crea en la
+      primera llamada (cuando el visualizer se suscribe la primera vez).
+      Retorna null si el AudioContext aún no se inicializó — el visualizer
+      en ese caso queda en su animación CSS idle hasta que arranque el
+      playback. `fftSize=256` da 128 bins (~187 Hz/bin a 48 kHz), suficiente
+      para 3-5 bandas perceptuales. `smoothingTimeConstant=0.8` aplica un
+      EMA en el propio AnalyserNode (ahorra trabajo JS). */
+  getAnalyser(): AnalyserNode | null {
+    if (!this.ctx || !this.masterGain) return null;
+    if (!this.analyser) {
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.8;
+      this.masterGain.connect(this.analyser);
+    }
+    return this.analyser;
   }
 
   setVolume(v: number): void {
@@ -715,6 +738,10 @@ class AudioEngine {
       this.detachAudioElementListeners(this.chainB);
       this.chainB.audio.pause();
       this.chainB.audio.removeAttribute('src');
+    }
+    if (this.analyser) {
+      try { this.analyser.disconnect(); } catch { /* ignore */ }
+      this.analyser = null;
     }
     if (this.ctx) {
       try {
