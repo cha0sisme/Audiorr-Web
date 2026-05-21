@@ -50,6 +50,11 @@
     /** Ancho mínimo de cada item en px. Mismo número que pasarías a
         `minmax(min(<n>px, 100%), 1fr)` en CSS grid normal. */
     minItemWidth: number;
+    /** Ancho MÁXIMO de cada item en px. CRÍTICO: sin un cap, las cells
+        crecen a `1fr` y los covers con aspect-ratio:1 superan la altura
+        del `estimateRowHeight`, causando que las filas (position:absolute)
+        se solapen visualmente. Por defecto = `minItemWidth + 20`. */
+    maxItemWidth?: number;
     /** Gap entre items y entre filas (px). Default 20 (= --space-5). */
     gap?: number;
     /** Filas extra renderizadas fuera del viewport para evitar pop-in
@@ -64,11 +69,14 @@
     items,
     estimateRowHeight,
     minItemWidth,
+    maxItemWidth,
     gap = 20,
     overscan = 4,
     getKey,
     item
   }: Props = $props();
+
+  const effectiveMaxWidth = $derived(maxItemWidth ?? minItemWidth + 20);
 
   /** Scroll container — provisto por el layout via context. Si no existe
       (e.g. /design-system standalone), caemos al window. */
@@ -140,6 +148,7 @@
       style:transform="translateY({vRow.start}px)"
       style:--col-count={columnCount}
       style:--vgap="{gap}px"
+      style:--cell-max="{effectiveMaxWidth}px"
     >
       {#each Array(columnCount) as _, colIdx}
         {@const itemIdx = vRow.index * columnCount + colIdx}
@@ -160,14 +169,22 @@
     width: 100%;
     min-width: 0;
   }
+  /* Cells con ancho CAPADO (--cell-max). Sin esto, las cells crecían con
+     `1fr` y los covers (aspect-ratio:1) generaban filas más altas que el
+     `estimateRowHeight` — al ser cada fila position:absolute con translateY
+     calculado por el estimate, las filas se solapaban visualmente.
+     `justify-content: start` deja el sobrante a la derecha (paridad Apple
+     Music / Spotify). */
   .vrow {
     position: absolute;
     top: 0;
     left: 0;
     right: 0;
     display: grid;
-    grid-template-columns: repeat(var(--col-count), minmax(0, 1fr));
+    grid-template-columns: repeat(var(--col-count), minmax(0, var(--cell-max)));
     gap: var(--vgap);
+    justify-content: start;
+    align-items: start;
   }
   .vcell {
     min-width: 0;

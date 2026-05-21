@@ -60,7 +60,7 @@
     <VirtualGrid
       items={similar}
       minItemWidth={140}
-      estimateRowHeight={200}
+      estimateRowHeight={230}
       gap={24}
       getKey={(a) => a.id ?? a.name}
     >

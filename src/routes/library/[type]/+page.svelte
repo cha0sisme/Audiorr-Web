@@ -3,6 +3,7 @@
   import { error } from '@sveltejs/kit';
   import { createQuery } from '@tanstack/svelte-query';
   import SeeAllGrid from '$components/shared/SeeAllGrid.svelte';
+  import VirtualGrid from '$components/shared/VirtualGrid.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
@@ -155,6 +156,14 @@
     queryFn: () => nav.getArtists(),
     enabled: credentials.isConfigured && kind === 'artist'
   }));
+
+  // Para vistas con N potencialmente grande (cientos de items) virtualizamos
+  // — bibliotecas serias pueden tener 500+ playlists o artistas. Para los
+  // tipos cap-30 (recent, most-played, etc.) un grid normal es suficiente
+  // y evita el overhead arquitectural del VirtualGrid.
+  const shouldVirtualize = $derived(
+    type === 'playlists' || type === 'my-playlists' || kind === 'artist'
+  );
 </script>
 
 <svelte:head>
@@ -168,11 +177,49 @@
 <SeeAllGrid
   {title}
   {kind}
+  wrapper={shouldVirtualize ? 'plain' : 'grid'}
   headerAction={type === 'playlists' || type === 'my-playlists'
     ? createPlaylistAction
     : undefined}
 >
-  {#if kind === 'album'}
+  {#if type === 'playlists' && allPlaylistsQ.data}
+    <VirtualGrid
+      items={allPlaylistsQ.data}
+      minItemWidth={180}
+      estimateRowHeight={285}
+      getKey={(p) => p.id}
+    >
+      {#snippet item(p)}
+        {@const props = playlistToCardProps(p)}
+        <PlaylistCard {...props} />
+      {/snippet}
+    </VirtualGrid>
+  {:else if type === 'my-playlists'}
+    <VirtualGrid
+      items={myPlaylists}
+      minItemWidth={180}
+      estimateRowHeight={285}
+      getKey={(p) => p.id}
+    >
+      {#snippet item(p)}
+        {@const props = playlistToCardProps(p)}
+        <PlaylistCard {...props} />
+      {/snippet}
+    </VirtualGrid>
+  {:else if kind === 'artist' && artistsQ.data}
+    <VirtualGrid
+      items={artistsQ.data}
+      minItemWidth={140}
+      estimateRowHeight={230}
+      gap={24}
+      getKey={(a) => a.id}
+    >
+      {#snippet item(a)}
+        {@const props = artistToCardProps(a)}
+        <ArtistCard {...props} />
+      {/snippet}
+    </VirtualGrid>
+  {:else if kind === 'album'}
     {#if albumsQ.data}
       {#each albumsQ.data as a (a.id)}
         {@const props = albumToCardProps(a)}
@@ -194,25 +241,6 @@
       {#each smartPlaylistsQ.data as sp (sp.navidromeId ?? sp.playlistKey)}
         {@const props = smartPlaylistToProps(sp)}
         <PlaylistCard {...props} />
-      {/each}
-    {/if}
-  {:else if type === 'my-playlists'}
-    {#each myPlaylists as p (p.id)}
-      {@const props = playlistToCardProps(p)}
-      <PlaylistCard {...props} />
-    {/each}
-  {:else if type === 'playlists'}
-    {#if allPlaylistsQ.data}
-      {#each allPlaylistsQ.data as p (p.id)}
-        {@const props = playlistToCardProps(p)}
-        <PlaylistCard {...props} />
-      {/each}
-    {/if}
-  {:else if kind === 'artist'}
-    {#if artistsQ.data}
-      {#each artistsQ.data as a (a.id)}
-        {@const props = artistToCardProps(a)}
-        <ArtistCard {...props} />
       {/each}
     {/if}
   {/if}

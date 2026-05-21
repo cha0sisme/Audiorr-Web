@@ -45,7 +45,7 @@
     <VirtualGrid
       items={albums}
       minItemWidth={180}
-      estimateRowHeight={250}
+      estimateRowHeight={285}
       getKey={(a) => a.id}
     >
       {#snippet item(a)}

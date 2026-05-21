@@ -432,12 +432,15 @@
           {#each Array(12) as _}<div class="card-sk"></div>{/each}
         </div>
       {:else if albumsQ.data}
-        <!-- minItemWidth y estimateRowHeight calibrados para 180px cover
-             + margin-bottom + 2 líneas de texto (title + artist) ≈ 250px. -->
+        <!-- minItemWidth 180 + cap default a 200px (VirtualGrid default
+             maxItemWidth = minItemWidth + 20). Cover 200×200 + margin-bottom
+             12 + title ~24 + artist ~24 + holgura ≈ 285px. Si el estimate
+             es menor que la altura real, las filas (position:absolute) se
+             solapan visualmente — bug clásico de VirtualGrid mal calibrado. -->
         <VirtualGrid
           items={albumsQ.data}
           minItemWidth={180}
-          estimateRowHeight={250}
+          estimateRowHeight={285}
           getKey={(a) => a.id}
         >
           {#snippet item(a)}
