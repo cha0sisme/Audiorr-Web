@@ -2,16 +2,16 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
-  import { MusicNote, Shuffle, DotsThree, Plus, ListPlus, User } from 'phosphor-svelte';
+  import { MusicNote, Shuffle, Pause, DotsThree, Plus, ListPlus, User } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
   import { smartMixManager } from '$services/SmartMixManager.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import SongList from '$components/shared/SongList.svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
+  import ImageLightbox from '$components/shared/ImageLightbox.svelte';
   import Marquee from '$components/shared/Marquee.svelte';
   import * as nav from '$services/NavidromeService';
   import { songToListItem, type SongListItem } from '$utils/navidrome-mappers';
@@ -26,6 +26,7 @@
     playButtonBg,
     heroBackgroundLayered,
     heroBackgroundFlat,
+    isGifUrl,
     HERO_PLACEHOLDER_PALETTE,
     type CoverPalette
   } from '$utils/palette';
@@ -72,12 +73,19 @@
   // chroma se anima del placeholder al accent extraído.
   const palette = $derived<CoverPalette>(paletteQ.data ?? HERO_PLACEHOLDER_PALETTE);
 
+  // GIF detection: covers GIF (raros pero posibles si un usuario sube uno
+  // animado) hacen del hero un escenario visual ruidoso si combinamos
+  // gradiente diagonal + animación. Con GIF → flat fill, el GIF protagonista.
+  const isGifCover = $derived(isGifUrl(coverUrl));
   const heroBg = $derived(
-    coverUrl ? heroBackgroundLayered(palette) : heroBackgroundFlat(palette)
+    !coverUrl || isGifCover ? heroBackgroundFlat(palette) : heroBackgroundLayered(palette)
   );
 
   const isDark = $derived(theme.current === 'dark');
   const playBg = $derived(playButtonBg(palette, isDark));
+
+  // Lightbox state — cover clickeable abre el visor fullscreen.
+  let lightboxOpen = $state(false);
 
   const tracks = $derived(songs.map((s, i) => songToListItem(s, i, false)));
 
@@ -106,27 +114,62 @@
 
   const isCurrentAlbum = $derived(player.isPlayingFrom('album', albumId));
 
+  // Estados reactivos de los botones del hero. Cada botón refleja UN modo
+  // específico de playback "desde este álbum" — paridad Apple Music:
+  //   - Reproducir activo ↔ playback aquí en modo normal (no shuffle, no SM)
+  //   - Shuffle activo    ↔ playback aquí con shuffle on (no SM)
+  //   - SmartMix activo   ↔ ya gestionado por SmartMixButton internamente
+  const isPlayingNormalHere = $derived(
+    isCurrentAlbum &&
+      !player.isSmartMixContext(albumId) &&
+      !queueManager.shuffleMode &&
+      player.isPlaying
+  );
+  const isPlayingShuffleHere = $derived(
+    isCurrentAlbum &&
+      !player.isSmartMixContext(albumId) &&
+      queueManager.shuffleMode &&
+      player.isPlaying
+  );
+
+  // Nota sobre `contextUri`: lo pasamos formal a queueManager.play (en vez
+  // de solo setear player.context). Esto permite que se persista en
+  // lastPlayback y que tras un restore el player.context se reconstruya
+  // correctamente — sin esto, cards/heroes perdían el EQ icon y los botones
+  // Reproducir no mostraban Pause al recuperar sesión.
+
   function loadTrack(_track: SongListItem, index: number) {
     if (!album) return;
-    // Cargamos TODAS las canciones del álbum a la queue, arrancando en `index`.
-    // El context queda como 'album' para que cards/listas pinten el indicator.
+    // Click en row específica = play normal sin shuffle (paridad Apple Music:
+    // la canción elegida arranca y la queue sigue en orden secuencial).
+    if (queueManager.shuffleMode) queueManager.toggleShuffle();
     player.context = { type: 'album', id: album.id };
-    queueManager.play(songs, index);
+    queueManager.play(songs, index, { contextUri: `album:${album.id}` });
   }
 
   function playAll() {
     if (!album || tracks.length === 0) return;
+    // Toggle si ya está sonando este modo aquí — Reproducir actúa como
+    // play/pause cuando es el modo activo del contexto actual.
+    if (isPlayingNormalHere) {
+      player.toggle();
+      return;
+    }
     player.context = { type: 'album', id: album.id };
     if (queueManager.shuffleMode) queueManager.toggleShuffle();
-    queueManager.play(songs, 0);
+    queueManager.play(songs, 0, { contextUri: `album:${album.id}` });
   }
 
   function shuffleAll() {
     if (!album || tracks.length === 0) return;
+    if (isPlayingShuffleHere) {
+      player.toggle();
+      return;
+    }
     player.context = { type: 'album', id: album.id };
     if (!queueManager.shuffleMode) queueManager.toggleShuffle();
     // play() reaplica shuffle si está activo, pinneando startIndex=0.
-    queueManager.play(songs, 0);
+    queueManager.play(songs, 0, { contextUri: `album:${album.id}` });
   }
 
   // ─── SmartMix hand-off (mirror iOS PlaylistDetailView lines 420-475) ───
@@ -180,27 +223,32 @@
 
 <div class="album-detail">
   <header class="hero" style:--hero-bg={heroBg}>
-    <div
-      class="hero-cover"
-      style:view-transition-name={albumId ? `album-${albumId}` : undefined}
-    >
-      <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
-        {#snippet fallback()}
-          <MusicNote size="100%" weight="regular" />
-        {/snippet}
-      </CoverImage>
-
-      {#if isCurrentAlbum}
-        <div class="hero-playing-overlay" aria-hidden="true">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
-            color="#fff"
-            height={32}
-            barWidth={4}
-          />
-        </div>
-      {/if}
-    </div>
+    {#if coverUrl}
+      <button
+        type="button"
+        class="hero-cover hero-cover-btn"
+        style:view-transition-name={albumId ? `album-${albumId}` : undefined}
+        onclick={() => (lightboxOpen = true)}
+        aria-label={album ? `Ampliar portada de ${album.name}` : 'Ampliar portada'}
+      >
+        <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
+          {#snippet fallback()}
+            <MusicNote size="100%" weight="regular" />
+          {/snippet}
+        </CoverImage>
+      </button>
+    {:else}
+      <div
+        class="hero-cover"
+        style:view-transition-name={albumId ? `album-${albumId}` : undefined}
+      >
+        <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
+          {#snippet fallback()}
+            <MusicNote size="100%" weight="regular" />
+          {/snippet}
+        </CoverImage>
+      </div>
+    {/if}
 
     <div class="hero-meta">
       {#if albumQ.isPending}
@@ -231,7 +279,10 @@
             {#if album.artist}<span class="meta-sep">·</span>{/if}{album.year}
           {/if}
           {#if album.genre}
-            {#if album.artist || album.year}<span class="meta-sep">·</span>{/if}{album.genre}
+            {#if album.artist || album.year}<span class="meta-sep">·</span>{/if}<a
+              class="meta-link"
+              href={`/genre/${encodeURIComponent(album.genre)}`}
+            >{album.genre}</a>
           {/if}
         </p>
 
@@ -253,16 +304,19 @@
             onclick={playAll}
             disabled={tracks.length === 0}
             collapsed={collapsePlay}
-          >
-            Reproducir
-          </HeroPlayButton>
+            isActive={isPlayingNormalHere}
+          />
           <HeroCircleButton
             bgColor={playBg}
             onclick={shuffleAll}
             disabled={tracks.length === 0}
-            aria-label="Shuffle"
+            aria-label={isPlayingShuffleHere ? 'Pausar' : 'Shuffle'}
           >
-            <Shuffle size={15} weight="bold" />
+            {#if isPlayingShuffleHere}
+              <Pause size={15} weight="fill" />
+            {:else}
+              <Shuffle size={15} weight="bold" />
+            {/if}
           </HeroCircleButton>
           <SmartMixButton
             bgColor={playBg}
@@ -327,6 +381,14 @@
   <div class="bottom-spacer" aria-hidden="true"></div>
 </div>
 
+{#if lightboxOpen && coverUrl}
+  <ImageLightbox
+    src={coverUrl}
+    alt={album?.name ?? ''}
+    onClose={() => (lightboxOpen = false)}
+  />
+{/if}
+
 <style>
   .album-detail {
     min-height: 100%;
@@ -366,14 +428,28 @@
     box-shadow: var(--shadow-2xl);
     flex-shrink: 0;
   }
-  .hero-playing-overlay {
-    position: absolute;
-    inset: 0;
-    background: var(--scrim-on-art);
-    display: grid;
-    place-items: center;
+  /* Variante <button> cuando el cover es clickable (abre lightbox). Reset
+     del chrome de button + cursor zoom-in + hover scale sutil. */
+  .hero-cover-btn {
+    border: none;
+    padding: 0;
+    background: transparent;
+    cursor: zoom-in;
+    transition: transform var(--duration-fast) var(--ease-ios-default);
   }
-
+  .hero-cover-btn:hover {
+    transform: scale(1.025);
+  }
+  .hero-cover-btn:active {
+    transform: scale(0.98);
+    transition-duration: var(--duration-instant);
+  }
+  .hero-cover-btn:focus-visible {
+    outline: none;
+    box-shadow:
+      var(--shadow-2xl),
+      0 0 0 3px rgb(255 255 255 / 0.6);
+  }
   .hero-meta {
     min-width: 0;
     display: grid;

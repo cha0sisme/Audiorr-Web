@@ -21,7 +21,7 @@
    */
   import type { HTMLButtonAttributes } from 'svelte/elements';
   import type { Snippet } from 'svelte';
-  import { Play } from 'phosphor-svelte';
+  import { Play, Pause } from 'phosphor-svelte';
 
   type Props = HTMLButtonAttributes & {
     /** Color de fondo. OKLCH recomendado vía playButtonBg(palette, isDark). */
@@ -30,6 +30,10 @@
         Usado para el hand-off con SmartMixButton — mientras éste expande a
         cápsula, el Play colapsa para mantener prominencia visual. */
     collapsed?: boolean;
+    /** True cuando este contexto es el que está reproduciendo en modo normal
+        (no shuffle, no smartmix). Cambia el icono Play → Pause y el label
+        para que el caller pueda atar el onclick a player.toggle(). */
+    isActive?: boolean;
     children?: Snippet;
   };
 
@@ -38,6 +42,7 @@
     type = 'button',
     disabled,
     collapsed = false,
+    isActive = false,
     children,
     ...rest
   }: Props = $props();
@@ -50,11 +55,19 @@
   style:--play-bg-dynamic={bgColor}
   class="hero-play"
   class:collapsed
-  aria-label={collapsed ? 'Reproducir' : undefined}
+  aria-label={collapsed ? (isActive ? 'Pausar' : 'Reproducir') : undefined}
 >
-  <Play size={18} weight="fill" />
+  {#if isActive}
+    <Pause size={18} weight="fill" />
+  {:else}
+    <Play size={18} weight="fill" />
+  {/if}
   <span class="label" aria-hidden={collapsed}>
-    {#if children}{@render children()}{:else}Reproducir{/if}
+    {#if children}
+      {@render children()}
+    {:else}
+      {isActive ? 'Pausar' : 'Reproducir'}
+    {/if}
   </span>
 </button>
 

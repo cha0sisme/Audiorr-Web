@@ -178,3 +178,24 @@ export const HERO_PLACEHOLDER_PALETTE: CoverPalette = Object.freeze({
   hue: 220,
   chroma: 0.02
 });
+
+/**
+ * Detecta si una URL de cover/avatar apunta a un GIF. Usado por
+ * AlbumDetail/ArtistDetail para simplificar el background del hero cuando
+ * la imagen es animada — un gradiente diagonal complejo + GIF moviéndose
+ * compite visualmente y resulta ruidoso. Con GIF preferimos un flat fill
+ * (un solo color sólido), el GIF es el protagonista.
+ *
+ * Funciona por extensión en la URL — válido para URLs directas (e.g.
+ * Last.fm artist images vía `artistImageUrl`). Para URLs que no exponen
+ * la extensión (Subsonic `/rest/getCoverArt.view?id=...`) no detecta,
+ * pero esos covers son JPEGs/PNGs servidos por Navidrome — nunca GIFs.
+ *
+ * Robusto a query strings y paths con punto antes del extension.
+ */
+export function isGifUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  // Quita la query/hash y normaliza a lowercase.
+  const path = url.split(/[?#]/)[0]?.toLowerCase() ?? '';
+  return path.endsWith('.gif');
+}

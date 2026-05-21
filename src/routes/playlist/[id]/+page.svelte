@@ -1,14 +1,13 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { DotsThree, Queue, Plus, ListPlus, Shuffle } from 'phosphor-svelte';
+  import { DotsThree, Queue, Plus, ListPlus, Shuffle, Pause } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
   import { smartMixManager } from '$services/SmartMixManager.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import SongList from '$components/shared/SongList.svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import * as nav from '$services/NavidromeService';
@@ -81,8 +80,12 @@
 
   const playBg = $derived(playButtonBg(palette, isDark));
 
-  // Playlist tracks vienen con artist propio (varios artistas en la lista)
-  const tracks = $derived(songs.map((s, i) => songToListItem(s, i, true)));
+  // Playlist tracks vienen con artist propio (varios artistas en la lista) y
+  // con cover de su álbum — en playlists no tiene sentido pintar un número de
+  // pista (la "posición N en la playlist" no es una propiedad musical), así
+  // que el slot izquierdo se llena con el cover del álbum de cada canción
+  // (paridad iOS PlaylistDetailView).
+  const tracks = $derived(songs.map((s, i) => songToListItem(s, i, true, true)));
 
   const totalDuration = $derived(tracks.reduce((sum, t) => sum + t.durationSec, 0));
 
@@ -96,24 +99,53 @@
 
   const isCurrentPlaylist = $derived(player.isPlayingFrom('playlist', playlistId));
 
+  // Estados reactivos de los botones del hero — ver explicación en
+  // album/[id]/+page.svelte (mismo patrón).
+  const isPlayingNormalHere = $derived(
+    isCurrentPlaylist &&
+      !player.isSmartMixContext(playlistId) &&
+      !queueManager.shuffleMode &&
+      player.isPlaying
+  );
+  const isPlayingShuffleHere = $derived(
+    isCurrentPlaylist &&
+      !player.isSmartMixContext(playlistId) &&
+      queueManager.shuffleMode &&
+      player.isPlaying
+  );
+
+  // Pasamos `contextUri` formal a queueManager.play para que se persista en
+  // lastPlayback — sin esto, tras un restore se pierde el context y las
+  // cards/heroes no marcan el EQ icon ni los botones reaccionan.
+
   function loadTrack(_track: ReturnType<typeof songToListItem>, index: number) {
     if (!playlist) return;
+    // Click en row específica = play normal (paridad Apple Music).
+    if (queueManager.shuffleMode) queueManager.toggleShuffle();
     player.context = { type: 'playlist', id: playlist.id };
-    queueManager.play(songs, index);
+    queueManager.play(songs, index, { contextUri: `playlist:${playlist.id}` });
   }
 
   function playAll() {
     if (!playlist || tracks.length === 0) return;
+    if (isPlayingNormalHere) {
+      player.toggle();
+      return;
+    }
     player.context = { type: 'playlist', id: playlist.id };
     if (queueManager.shuffleMode) queueManager.toggleShuffle();
-    queueManager.play(songs, 0);
+    queueManager.play(songs, 0, { contextUri: `playlist:${playlist.id}` });
   }
 
   function shuffleAll() {
     if (!playlist || tracks.length === 0) return;
+    if (isPlayingShuffleHere) {
+      player.toggle();
+      return;
+    }
     player.context = { type: 'playlist', id: playlist.id };
     if (!queueManager.shuffleMode) queueManager.toggleShuffle();
-    queueManager.play(songs, 0);
+    queueManager.play(songs, 0, { contextUri: `playlist:${playlist.id}` });
   }
 
   // ─── SmartMix hand-off (mirror iOS PlaylistDetailView lines 420-475) ───
@@ -158,17 +190,6 @@
           <Queue size="100%" weight="regular" />
         {/snippet}
       </CoverImage>
-
-      {#if isCurrentPlaylist}
-        <div class="hero-playing-overlay" aria-hidden="true">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
-            color="#fff"
-            height={32}
-            barWidth={4}
-          />
-        </div>
-      {/if}
     </div>
 
     <div class="hero-meta">
@@ -196,14 +217,19 @@
             onclick={playAll}
             disabled={tracks.length === 0}
             collapsed={collapsePlay}
+            isActive={isPlayingNormalHere}
           />
           <HeroCircleButton
             bgColor={playBg}
             onclick={shuffleAll}
             disabled={tracks.length === 0}
-            aria-label="Shuffle"
+            aria-label={isPlayingShuffleHere ? 'Pausar' : 'Shuffle'}
           >
-            <Shuffle size={15} weight="bold" />
+            {#if isPlayingShuffleHere}
+              <Pause size={15} weight="fill" />
+            {:else}
+              <Shuffle size={15} weight="bold" />
+            {/if}
           </HeroCircleButton>
           <SmartMixButton
             bgColor={playBg}
@@ -244,6 +270,7 @@
         {tracks}
         contextType="playlist"
         contextId={playlistId}
+        showCover
         onPlay={loadTrack}
       />
     {:else if playlist}
@@ -289,14 +316,6 @@
     box-shadow: var(--shadow-2xl);
     flex-shrink: 0;
   }
-  .hero-playing-overlay {
-    position: absolute;
-    inset: 0;
-    background: var(--scrim-on-art);
-    display: grid;
-    place-items: center;
-  }
-
   .hero-meta {
     min-width: 0;
     display: grid;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { User, DotsThree, Plus, ListPlus, Shuffle } from 'phosphor-svelte';
+  import { User, DotsThree, Plus, ListPlus, Shuffle, Pause } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
@@ -12,8 +12,8 @@
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
   import SongList from '$components/shared/SongList.svelte';
-  import NowPlayingIndicator from '$components/shared/NowPlayingIndicator.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
+  import ImageLightbox from '$components/shared/ImageLightbox.svelte';
   import * as nav from '$services/NavidromeService';
   import {
     albumToCardProps,
@@ -34,6 +34,7 @@
     playButtonBg,
     heroBackgroundLayered,
     heroBackgroundFlat,
+    isGifUrl,
     HERO_PLACEHOLDER_PALETTE,
     type CoverPalette
   } from '$utils/palette';
@@ -144,8 +145,13 @@
 
   const isDark = $derived(theme.current === 'dark');
 
+  // GIF detection — cuando el avatar es un GIF (típico de Last.fm artist
+  // images animadas), simplificamos el hero a un flat fill. El gradiente
+  // diagonal layered + GIF en movimiento compiten visualmente; con flat
+  // el GIF queda como protagonista único.
+  const isGifAvatar = $derived(isGifUrl(coverUrl));
   const heroBg = $derived(
-    coverUrl ? heroBackgroundLayered(palette) : heroBackgroundFlat(palette)
+    !coverUrl || isGifAvatar ? heroBackgroundFlat(palette) : heroBackgroundLayered(palette)
   );
 
   const playBg = $derived(playButtonBg(palette, isDark));
@@ -153,6 +159,9 @@
   const isCurrentArtist = $derived(player.isPlayingFrom('artist', artistId));
 
   const initial = $derived(artist?.name?.charAt(0).toUpperCase() ?? '?');
+
+  // Lightbox state — avatar clickeable abre el visor fullscreen.
+  let lightboxOpen = $state(false);
 
   let showAllSongs = $state(false);
   const allTopSongs = $derived(topSongsQ.data ?? []);
@@ -180,18 +189,43 @@
   // clic en el párrafo lo expande a full text inline.
   let bioExpanded = $state(false);
 
+  // Estados reactivos de los botones del hero (paridad con AlbumDetail /
+  // PlaylistDetail).
+  const isPlayingNormalHere = $derived(
+    isCurrentArtist &&
+      !player.isSmartMixContext(artistId) &&
+      !queueManager.shuffleMode &&
+      player.isPlaying
+  );
+  const isPlayingShuffleHere = $derived(
+    isCurrentArtist &&
+      !player.isSmartMixContext(artistId) &&
+      queueManager.shuffleMode &&
+      player.isPlaying
+  );
+
+  // Pasamos `contextUri` formal a queueManager.play para que se persista
+  // en lastPlayback y se restaure correctamente (ver nota en AlbumDetail).
+
   function loadTopSong(_track: SongListItem, index: number) {
     if (!artist || allTopSongs.length === 0) return;
+    // Click en row específica = play normal (paridad Apple Music).
+    if (queueManager.shuffleMode) queueManager.toggleShuffle();
     player.context = { type: 'artist', id: artist.id };
-    queueManager.play(allTopSongs, index);
+    queueManager.play(allTopSongs, index, { contextUri: `artist:${artist.id}` });
   }
 
   async function playArtist() {
     if (!artist) return;
+    if (isPlayingNormalHere) {
+      player.toggle();
+      return;
+    }
     if (queueManager.shuffleMode) queueManager.toggleShuffle();
+    const ctxUri = `artist:${artist.id}`;
     if (allTopSongs.length > 0) {
       player.context = { type: 'artist', id: artist.id };
-      queueManager.play(allTopSongs, 0);
+      queueManager.play(allTopSongs, 0, { contextUri: ctxUri });
       return;
     }
     // Sin top songs: cargamos el primer álbum y disparamos su queue.
@@ -201,15 +235,20 @@
     const albumSongs = alb.song ?? [];
     if (albumSongs.length === 0) return;
     player.context = { type: 'artist', id: artist.id };
-    queueManager.play(albumSongs, 0);
+    queueManager.play(albumSongs, 0, { contextUri: ctxUri });
   }
 
   async function shuffleArtist() {
     if (!artist) return;
+    if (isPlayingShuffleHere) {
+      player.toggle();
+      return;
+    }
     if (!queueManager.shuffleMode) queueManager.toggleShuffle();
+    const ctxUri = `artist:${artist.id}`;
     if (allTopSongs.length > 0) {
       player.context = { type: 'artist', id: artist.id };
-      queueManager.play(allTopSongs, 0);
+      queueManager.play(allTopSongs, 0, { contextUri: ctxUri });
       return;
     }
     const firstAlbum = albums[0];
@@ -218,7 +257,7 @@
     const albumSongs = alb.song ?? [];
     if (albumSongs.length === 0) return;
     player.context = { type: 'artist', id: artist.id };
-    queueManager.play(albumSongs, 0);
+    queueManager.play(albumSongs, 0, { contextUri: ctxUri });
   }
 
   // ─── SmartMix hand-off ─────────────────────────────────────────────────
@@ -257,31 +296,28 @@
 
 <div class="artist-detail">
   <header class="hero" style:--hero-bg={heroBg}>
-    <div
-      class="hero-avatar"
-      style:view-transition-name={artistId ? `artist-${artistId}` : undefined}
-    >
-      {#if coverUrl}
+    {#if coverUrl}
+      <button
+        type="button"
+        class="hero-avatar hero-avatar-btn"
+        style:view-transition-name={artistId ? `artist-${artistId}` : undefined}
+        onclick={() => (lightboxOpen = true)}
+        aria-label={artist ? `Ampliar foto de ${artist.name}` : 'Ampliar foto'}
+      >
         <CoverImage src={coverUrl} alt="" shape="circle" lazy={false} priority="high">
           {#snippet fallback()}
             <User size="100%" weight="regular" />
           {/snippet}
         </CoverImage>
-      {:else}
+      </button>
+    {:else}
+      <div
+        class="hero-avatar"
+        style:view-transition-name={artistId ? `artist-${artistId}` : undefined}
+      >
         <span class="avatar-initial" aria-hidden="true">{initial}</span>
-      {/if}
-
-      {#if isCurrentArtist}
-        <div class="hero-playing-overlay" aria-hidden="true">
-          <NowPlayingIndicator
-            isPlaying={player.isPlaying}
-            color="#fff"
-            height={32}
-            barWidth={4}
-          />
-        </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
 
     <div class="hero-meta">
       {#if artistQ.isPending}
@@ -294,6 +330,12 @@
       {:else if artist}
         <p class="kicker">Artista</p>
         <h1 class="title">{artist.name}</h1>
+
+        {#if albums.length > 0}
+          <p class="meta-line">
+            {albums.length} {albums.length === 1 ? 'álbum' : 'álbumes'}
+          </p>
+        {/if}
 
         {#if artistInfoQ.isPending}
           <p class="bio-line bio-skeleton" aria-busy="true"></p>
@@ -313,16 +355,19 @@
             onclick={playArtist}
             disabled={albums.length === 0 && allTopSongs.length === 0}
             collapsed={collapsePlay}
-          >
-            Reproducir
-          </HeroPlayButton>
+            isActive={isPlayingNormalHere}
+          />
           <HeroCircleButton
             bgColor={playBg}
             onclick={shuffleArtist}
             disabled={albums.length === 0 && allTopSongs.length === 0}
-            aria-label="Shuffle"
+            aria-label={isPlayingShuffleHere ? 'Pausar' : 'Shuffle'}
           >
-            <Shuffle size={15} weight="bold" />
+            {#if isPlayingShuffleHere}
+              <Pause size={15} weight="fill" />
+            {:else}
+              <Shuffle size={15} weight="bold" />
+            {/if}
           </HeroCircleButton>
           <SmartMixButton
             bgColor={playBg}
@@ -485,16 +530,19 @@
       </section>
     {/if}
 
-    {#if artist && albums.length > 0}
-      <p class="end-meta">
-        {albums.length}
-        {albums.length === 1 ? 'álbum' : 'álbumes'}
-      </p>
-    {/if}
   </div>
 
   <div class="bottom-spacer" aria-hidden="true"></div>
 </div>
+
+{#if lightboxOpen && coverUrl}
+  <ImageLightbox
+    src={coverUrl}
+    alt={artist?.name ?? ''}
+    shape="circle"
+    onClose={() => (lightboxOpen = false)}
+  />
+{/if}
 
 <style>
   .artist-detail {
@@ -538,6 +586,28 @@
     place-items: center;
     color: #fff;
   }
+  /* Variante <button> cuando el avatar es clickable (abre lightbox).
+     Reset del chrome de button + cursor zoom-in + hover scale sutil
+     (paridad Apple Music). */
+  .hero-avatar-btn {
+    border: none;
+    padding: 0;
+    cursor: zoom-in;
+    transition: transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .hero-avatar-btn:hover {
+    transform: scale(1.025);
+  }
+  .hero-avatar-btn:active {
+    transform: scale(0.98);
+    transition-duration: var(--duration-instant);
+  }
+  .hero-avatar-btn:focus-visible {
+    outline: none;
+    box-shadow:
+      0 8px 20px rgb(0 0 0 / 0.45),
+      0 0 0 3px rgb(255 255 255 / 0.6);
+  }
   .avatar-initial {
     font-size: 80px;
     font-weight: 800;
@@ -545,15 +615,6 @@
     letter-spacing: var(--tracking-display-lg);
     user-select: none;
   }
-  .hero-playing-overlay {
-    position: absolute;
-    inset: 0;
-    background: var(--scrim-on-art);
-    border-radius: inherit;
-    display: grid;
-    place-items: center;
-  }
-
   .hero-meta {
     min-width: 0;
     display: grid;
@@ -729,11 +790,14 @@
     cursor: default;
   }
 
-  .end-meta {
-    margin: var(--space-5) 0 0;
-    padding: 0 var(--space-4);
+  /* Meta-line del hero (count de álbumes). Mismo lenguaje visual que la
+     meta-line de PlaylistDetail ("X canciones · Y h Z min") — tipografía
+     pequeña, color hero-text-tertiary, sin margen propio (el gap del
+     .hero-meta grid se encarga). */
+  .meta-line {
+    margin: 0;
     font-size: var(--text-sm);
-    color: var(--text-tertiary);
+    color: var(--hero-text-tertiary);
   }
 
   .bottom-spacer { height: 120px; }
@@ -765,6 +829,5 @@
     .popular-list { padding: 0 var(--space-3); }
     .card-row-skeleton { padding: 0 var(--space-4); }
     .bio-line { text-align: center; }
-    .end-meta { text-align: center; }
   }
 </style>
