@@ -526,7 +526,7 @@ class SmartMixManagerImpl {
     // ── 2. BPM penalty — confidence-gated, Essentia cross-validated ──────
     const harmonicB = harmonicBPM(bpmA, bpmB);
     const bpmDiff = Math.abs(bpmA - harmonicB);
-    let bpmPenalty = Math.pow(bpmDiff, 1.4) / 8;
+    let bpmPenalty = Math.pow(bpmDiff, 1.7) / 8; // Stronger penalty for large BPM gaps (>30bpm)
 
     const minConf = Math.min(a.bpmConfidence, b.bpmConfidence);
     if (minConf < 0.5) bpmPenalty *= minConf / 0.5;
