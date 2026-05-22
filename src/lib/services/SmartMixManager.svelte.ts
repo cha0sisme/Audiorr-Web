@@ -306,6 +306,16 @@ class SmartMixManagerImpl {
     const unmixed = [...valid];
     const mixed: AnalyzedSong[] = [];
 
+    // Pre-compute pool artist counts para artist penalty proporcional.
+    // Permite al round-robin saber cuántas pistas hay del mismo artista en
+    // el conjunto y separar en consecuencia (4 Biggies de 27 ≈ 1 cada 6-7).
+    const poolArtistCounts: Record<string, number> = {};
+    for (const s of valid) {
+      const artistKey = s.song.artist;
+      if (!artistKey) continue;
+      poolArtistCounts[artistKey] = (poolArtistCounts[artistKey] ?? 0) + 1;
+    }
+
     // 1. Starting song: moderate energy, gentle intro, comfortable BPM.
     const startIdx = SmartMixManagerImpl.bestStartingIndex(unmixed);
     mixed.push(unmixed.splice(startIdx, 1)[0]!);
@@ -328,7 +338,8 @@ class SmartMixManagerImpl {
           unmixed[i]!,
           mixed,
           mixed.length,
-          total
+          total,
+          poolArtistCounts
         );
         if (forceDiversity && mixed.length >= 2) {
           const recentKeys = mixed
@@ -423,6 +434,22 @@ class SmartMixManagerImpl {
   }
 
   private static bestClosingIndex(songs: AnalyzedSong[]): number {
+    // Cool-down real anclado al pool: cuartiles del catálogo concreto en
+    // lugar de thresholds absolutos. Los bonos energy<0.40 / bpm<90 fallan
+    // en catálogos donde la mayoría de pistas ya están en ese rango (Hip-Hop
+    // lento) o donde casi nada lo cumple (workout) — el closer siempre debe
+    // ser lo más bajo disponible del pool concreto.
+    const analyzed = songs.filter((s) => s.analysis != null);
+    if (analyzed.length === 0) return 0;
+
+    const energies = analyzed.map((s) => s.energy).sort((a, b) => a - b);
+    const bpms = analyzed.map((s) => s.perceivedBPM).sort((a, b) => a - b);
+    const n = analyzed.length;
+    const p25Energy = energies[Math.max(0, Math.floor(n / 4) - 1)]!;
+    const p50Energy = energies[Math.max(0, Math.floor(n / 2) - 1)]!;
+    const p25Bpm = bpms[Math.max(0, Math.floor(n / 4) - 1)]!;
+    const p75Bpm = bpms[Math.min(n - 1, Math.floor((3 * n) / 4))]!;
+
     let bestIdx = 0;
     let bestScore = Number.NEGATIVE_INFINITY;
 
@@ -431,15 +458,18 @@ class SmartMixManagerImpl {
       if (song.analysis == null) continue;
       let score = 0;
 
-      // Prefer low energy.
-      if (song.energy < 0.4) score += 8;
-      if (song.energy < 0.55) score += 4;
+      // Energy relativa al pool: cuartil bajo = bonus fuerte, peak = penalty.
+      if (song.energy <= p25Energy) score += 10;
+      else if (song.energy <= p50Energy) score += 4;
       if (song.energy > 0.8) score -= 20;
 
-      // Comfortable / slow BPM.
+      // BPM relativo al pool: cuartil bajo = bonus, cuartil alto = penalty
+      // (un closer no debería ser el track más rápido del set).
       const bpm = song.perceivedBPM;
-      if (bpm >= 70 && bpm <= 110) score += 5;
-      if (bpm < 90) score += 3;
+      if (bpm <= p25Bpm) score += 10;
+      if (bpm >= p75Bpm) score -= 12;
+      // Bonus extra si BPM en zona absoluta de cool-down (70-100 bpm).
+      if (bpm >= 70 && bpm <= 100) score += 4;
 
       // Low danceability is fine for closing.
       if (song.danceability < 0.5) score += 3;
@@ -471,6 +501,11 @@ class SmartMixManagerImpl {
         score -= 4;
       }
 
+      // Bonus por duración ≥3 min — un closer de 1:30 corta abrupto la
+      // sesión, dificulta el "cierre natural" que el listener espera.
+      if (song.duration >= 180) score += 4;
+      else if (song.duration < 120) score -= 8;
+
       if (score > bestScore) {
         bestScore = score;
         bestIdx = i;
@@ -488,7 +523,8 @@ class SmartMixManagerImpl {
     b: AnalyzedSong,
     history: AnalyzedSong[],
     position = 0,
-    total = 0
+    total = 0,
+    poolArtistCounts?: Record<string, number>
   ): number {
     if (a.analysis == null || b.analysis == null) return Number.POSITIVE_INFINITY;
 
@@ -579,9 +615,33 @@ class SmartMixManagerImpl {
     }
 
     // ── 5. Artist penalty ────────────────────────────────────────────────
+    // Proporcional al peso del artista en el pool cuando se pasa
+    // `poolArtistCounts`: round-robin con backoff calculado según
+    // `expectedSpacing = poolSize / artistCount`. Si el artista vuelve a
+    // aparecer más cerca que el spacing esperado, penalty proporcional al
+    // déficit. Sin el dict (callers legacy), fallback a fórmula fija
+    // histórica (distancia recientes 4).
     let artistPenalty = 0;
     if (a.song.artist === b.song.artist) {
       artistPenalty = 10;
+    } else if (poolArtistCounts && b.song.artist) {
+      const artistKey = b.song.artist;
+      const artistCount = poolArtistCounts[artistKey] ?? 1;
+      const poolSize = Object.values(poolArtistCounts).reduce((acc, v) => acc + v, 0);
+      if (artistCount > 1 && poolSize > 0) {
+        const expectedSpacing = Math.max(2, poolSize / artistCount);
+        let lastDistance: number | null = null;
+        for (let idx = history.length - 1; idx >= 0; idx--) {
+          if (history[idx]!.song.artist === artistKey) {
+            lastDistance = history.length - idx;
+            break;
+          }
+        }
+        if (lastDistance != null && lastDistance < expectedSpacing) {
+          const deficit = (expectedSpacing - lastDistance) / expectedSpacing;
+          artistPenalty = 10 * deficit;
+        }
+      }
     } else {
       const recent = history.slice(-4).reverse();
       const idx = recent.findIndex((h) => h.song.artist === b.song.artist);
