@@ -408,6 +408,27 @@ export type DJFilterResult = {
   readonly reason: string;
 };
 
+export type EntryPointResult = {
+  /** Final entry point of B (seconds from B's t=0). */
+  readonly entryPoint: number;
+  /** Human-readable beat-sync info (downbeat alignment, grid snap, cross-phase). */
+  readonly beatSyncInfo: string;
+  /** True when next analysis is missing/errored and we fell back to defaults. */
+  readonly usedFallback: boolean;
+  readonly isBeatSynced: boolean;
+  /** Path that picked this entry — used for diagnostics. */
+  readonly entrySource: EntryPointSource;
+  /** Chorus cap telemetry from `calculatePunchEntry`:
+      - `undefined` → path didn't evaluate cap (vocal avoidance / vocalTarget / energyBoost overrode).
+      - `false` → cap evaluated but NOT applied (chorus ≤ 50 or B drop-driven exempt).
+      - `true` → cap applied (chorus capped at 50 in promotion non-drop or fallback). */
+  readonly genreCapApplied?: boolean;
+  /** Final defensive cap (POST snap + beat sync). `true` when entry > 50s
+      and B not drop-driven percussive. `undefined` when entry ≤ 50 (cap
+      never evaluated). */
+  readonly entryFinalCapApplied?: boolean;
+};
+
 export type AnticipationResult = {
   readonly needsAnticipation: boolean;
   /** Seconds of tease/pre-fade before the main fade actually starts. */

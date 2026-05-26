@@ -30,6 +30,8 @@ import {
   type DJEffectsResult,
   type DJFilterResult,
   type EnergyFlow,
+  type EntryPointResult,
+  type EntryPointSource,
   type FadeDurationResult,
   type FilterDecisionResult,
   type HarmonicCompatibility,
@@ -2086,6 +2088,911 @@ export function calculateAdaptiveFadeDuration(
   }
 
   return { duration: Math.max(2, fadeDuration), decision };
+}
+
+// ============================================================================
+// MARK: - SongAnalysis sanitize (DJMixingService.swift:2343)
+// ============================================================================
+
+/**
+ * Clamps and cross-validates a `SongAnalysis` to the [0, duration] window
+ * and to internal-consistency invariants. Mirrors
+ * `DJMixingService.swift:2343 sanitize`.
+ *
+ * Pure: returns a new object, doesn't mutate the input.
+ *
+ * Cleans:
+ *   - All time fields clamped to [0, duration].
+ *   - speechSegments + phraseBoundaries + downbeatTimes filtered to range.
+ *   - BPM in [30, 300] (else fallback 120).
+ *   - energy / danceability / energyProfile in [0, 1].
+ *   - lastVocalTime > outroStartTime+3 → outroStartTime := lastVocalTime.
+ *   - chorus < introEnd − 5 → introEnd capped to chorus.
+ *   - Vocal segment (length > 3) starts < introEnd − 5 → introEnd capped.
+ *   - introEnd > 30s → hard cap to 30s.
+ *   - beatInterval diverges >15% from 60/BPM → use BPM-derived.
+ *   - downbeat spacing diverges >30% from beatInterval*4 → clear downbeats.
+ *
+ * Notes on `vocalStartTime == 0` semantics: backend confirms 0.0 is LITERAL
+ * ("vocal at t=0"), NOT a "value missing" sentinel. Earlier sanitize wrote
+ * `vocalStart = chorus - 8` as fallback which poisoned the field. That
+ * fallback is removed — `undefined` means unknown, `0` means literal vocal
+ * at t=0.
+ */
+export function sanitizeAnalysis(
+  analysis: SongAnalysis,
+  duration: number
+): SongAnalysis {
+  const maxT = Math.max(0, duration);
+  const clamp = (v: number) => Math.min(Math.max(0, v), maxT);
+
+  let introEndTime = clamp(analysis.introEndTime);
+  let outroStartTime = clamp(analysis.outroStartTime);
+  const vocalStartTime =
+    analysis.vocalStartTime !== undefined ? clamp(analysis.vocalStartTime) : undefined;
+  const chorusStartTime = clamp(analysis.chorusStartTime);
+  const cuePoint = analysis.hasCuePoint ? clamp(analysis.cuePoint) : analysis.cuePoint;
+  let lastVocalTime = analysis.hasVocalEndData
+    ? clamp(analysis.lastVocalTime)
+    : analysis.lastVocalTime;
+
+  const phraseBoundaries = analysis.phraseBoundaries.filter((t) => t >= 0 && t <= maxT);
+  const downbeatTimesRaw = analysis.downbeatTimes.filter((t) => t >= 0 && t <= maxT);
+  const speechSegments = analysis.speechSegments
+    .map((seg) => {
+      const s = Math.max(0, seg.start);
+      const e = Math.min(maxT, seg.end);
+      return s < e ? { start: s, end: e } : null;
+    })
+    .filter((s): s is { start: number; end: number } => s !== null);
+
+  let bpm = analysis.bpm;
+  if (bpm < 30 || bpm > 300) bpm = 120;
+  const energy = Math.min(Math.max(0, analysis.energy), 1);
+  let energyIntro = analysis.energyIntro;
+  let energyMain = analysis.energyMain;
+  let energyOutro = analysis.energyOutro;
+  if (analysis.hasEnergyProfile) {
+    energyIntro = Math.min(Math.max(0, energyIntro), 1);
+    energyMain = Math.min(Math.max(0, energyMain), 1);
+    energyOutro = Math.min(Math.max(0, energyOutro), 1);
+  }
+
+  // Outro must end at or after lastVocal.
+  if (
+    analysis.hasOutroData &&
+    analysis.hasVocalEndData &&
+    lastVocalTime > outroStartTime + 3
+  ) {
+    outroStartTime = lastVocalTime;
+  }
+
+  // ── introEnd cross-validation ──
+  // 1a. Chorus before introEnd by >5s → cap introEnd to chorus.
+  if (
+    analysis.hasIntroData &&
+    chorusStartTime > 4 &&
+    chorusStartTime < introEndTime - 5
+  ) {
+    introEndTime = chorusStartTime;
+  }
+
+  // 1b. Vocal speech segment (length > 3) starts well before introEnd → cap.
+  if (analysis.hasIntroData && speechSegments.length > 0) {
+    const earlyVocal = speechSegments.find(
+      (s) => s.end - s.start > 3 && s.start < introEndTime - 5
+    );
+    if (earlyVocal) {
+      const cappedIntro = earlyVocal.start;
+      if (cappedIntro < introEndTime - 5 && cappedIntro >= 2) {
+        introEndTime = cappedIntro;
+      }
+    }
+  }
+
+  // 1c. Hard cap: intros > 30s are extremely rare outside ambient/classical.
+  if (analysis.hasIntroData && introEndTime > 30) {
+    introEndTime = Math.min(introEndTime, 30);
+  }
+
+  // ── beatInterval / downbeats sanity ──
+  let beatInterval = analysis.beatInterval;
+  if (beatInterval > 0 && bpm > 0) {
+    const bpmDerived = 60.0 / bpm;
+    if (Math.abs(beatInterval - bpmDerived) / bpmDerived > 0.15) {
+      beatInterval = bpmDerived;
+    }
+  }
+  if (beatInterval < 0.15 || beatInterval > 3.0) {
+    beatInterval = bpm > 0 ? 60.0 / bpm : 0;
+  }
+
+  let downbeatTimes: readonly number[] = downbeatTimesRaw;
+  if (beatInterval > 0 && downbeatTimes.length >= 4) {
+    const expectedMeasure = beatInterval * 4;
+    const spacings: number[] = [];
+    for (let i = 1; i < downbeatTimes.length; i++) {
+      const a = downbeatTimes[i] ?? 0;
+      const b = downbeatTimes[i - 1] ?? 0;
+      spacings.push(a - b);
+    }
+    spacings.sort((a, b) => a - b);
+    const median = spacings[Math.floor(spacings.length / 2)] ?? 0;
+    if (
+      expectedMeasure > 0 &&
+      Math.abs(median - expectedMeasure) / expectedMeasure > 0.30
+    ) {
+      downbeatTimes = [];
+    }
+  }
+
+  const danceability = Math.min(Math.max(0, analysis.danceability), 1);
+
+  // exactOptionalPropertyTypes makes `vocalStartTime?: number` reject
+  // assignment of `number | undefined`. Build the result and only set
+  // vocalStartTime when it has a concrete value, matching iOS semantics
+  // (nil → field absent in the analysis, not explicit undefined).
+  const result: SongAnalysis = {
+    ...analysis,
+    bpm,
+    beatInterval,
+    energy,
+    danceability,
+    introEndTime,
+    outroStartTime,
+    chorusStartTime,
+    cuePoint,
+    lastVocalTime,
+    phraseBoundaries,
+    downbeatTimes,
+    speechSegments,
+    energyIntro,
+    energyMain,
+    energyOutro
+  };
+  if (vocalStartTime !== undefined) {
+    result.vocalStartTime = vocalStartTime;
+  } else {
+    delete result.vocalStartTime;
+  }
+  return result;
+}
+
+// ============================================================================
+// MARK: - Beat sync helpers (DJMixingService.swift:2455, :2550)
+// ============================================================================
+
+/**
+ * Snap a time value to the nearest beat / measure boundary on a regular
+ * grid. Mirrors `DJMixingService.swift:2550 snapToMeasureGrid`.
+ *
+ * Returns the SHIFT (positive or negative) needed to align — caller adds
+ * it to the original time. Returns 0 when no snap fits within the
+ * tolerance (beatInterval × 0.5 for measure, × 0.25/0.75 for beat).
+ */
+export function snapToMeasureGrid(
+  time: number,
+  measureLength: number,
+  beatInterval: number
+): number {
+  if (measureLength <= 0) return 0;
+  const timeIntoMeasure = time % measureLength;
+  if (timeIntoMeasure < beatInterval * 0.5 && timeIntoMeasure > 0.001) {
+    return -timeIntoMeasure;
+  }
+  const distToNext = measureLength - timeIntoMeasure;
+  if (distToNext < beatInterval * 0.5) {
+    return distToNext;
+  }
+  const timeIntoBeat = timeIntoMeasure % beatInterval;
+  if (timeIntoBeat < beatInterval * 0.25) {
+    return -timeIntoBeat || 0; // normalize -0 → 0 for stable equality.
+  } else if (timeIntoBeat > beatInterval * 0.75) {
+    return beatInterval - timeIntoBeat;
+  }
+  return 0;
+}
+
+export type BeatSyncResult = {
+  readonly adjustedEntryPoint: number;
+  readonly info: string;
+  readonly isSynced: boolean;
+};
+
+/**
+ * Snap the entry point of B to its nearest downbeat (or measure grid when
+ * downbeats aren't available), then (DJ mode only) align A's phase to B's
+ * phase within ±1 beat. Mirrors `DJMixingService.swift:2455 applyBeatSync`.
+ *
+ * Phase 1: tight snap to B's downbeats within ±1 beatIntervalB. Falls back
+ * to `snapToMeasureGrid` when no downbeat candidates.
+ * Phase 2 (DJ mode + valid A beats + currentPlaybackTimeA): cross-phase
+ * adjust so A's beat phase lines up with B's. Picks the downbeat candidate
+ * (or raw phase delta, no downbeats) that minimizes phase error, capped
+ * at ±beatIntervalB × 0.5.
+ */
+export function applyBeatSync(args: {
+  entryPoint: number;
+  currentAnalysis: SongAnalysis | undefined;
+  nextAnalysis: SongAnalysis;
+  currentPlaybackTimeA: number | undefined;
+  mode: MixMode;
+}): BeatSyncResult {
+  const { entryPoint, currentAnalysis, nextAnalysis, currentPlaybackTimeA, mode } = args;
+
+  if (nextAnalysis.hasError || nextAnalysis.beatInterval <= 0) {
+    return { adjustedEntryPoint: entryPoint, info: '', isSynced: false };
+  }
+
+  const hasCurrentBeats =
+    currentAnalysis !== undefined &&
+    !currentAnalysis.hasError &&
+    currentAnalysis.beatInterval > 0;
+  const beatIntervalA = currentAnalysis?.beatInterval ?? nextAnalysis.beatInterval;
+  const beatIntervalB = nextAnalysis.beatInterval;
+  const targetBeats = nextAnalysis.downbeatTimes;
+  const searchRange = beatIntervalB * 1.0;
+
+  let adjustedEntryPoint = entryPoint;
+  let info = '';
+  let isBeatSynced = false;
+
+  const fmt3 = (n: number) => n.toFixed(3);
+  const signed = (n: number) => `${n >= 0 ? '+' : ''}${fmt3(n)}`;
+
+  // ── Phase 1: align B to its nearest downbeat ──
+  if (targetBeats.length > 0) {
+    const candidates = targetBeats.filter((t) => Math.abs(t - entryPoint) <= searchRange);
+    if (candidates.length > 0) {
+      const best = candidates.reduce((a, b) =>
+        Math.abs(a - entryPoint) < Math.abs(b - entryPoint) ? a : b
+      );
+      const adj = best - entryPoint;
+      adjustedEntryPoint = best;
+      isBeatSynced = true;
+      info = `Downbeat real: ${signed(adj)}s`;
+    } else {
+      const gridSnap = snapToMeasureGrid(entryPoint, beatIntervalB * 4, beatIntervalB);
+      if (Math.abs(gridSnap) <= beatIntervalB * 0.5) {
+        adjustedEntryPoint = entryPoint + gridSnap;
+        isBeatSynced = true;
+        info = `Grid snap: ${signed(gridSnap)}s`;
+      }
+    }
+  } else {
+    const gridSnap = snapToMeasureGrid(entryPoint, beatIntervalB * 4, beatIntervalB);
+    if (Math.abs(gridSnap) <= beatIntervalB * 0.5) {
+      adjustedEntryPoint = entryPoint + gridSnap;
+      isBeatSynced = true;
+      info = `Grid snap: ${signed(gridSnap)}s`;
+    }
+  }
+
+  // ── Phase 2: cross-phase A↔B (DJ mode only) ──
+  if (
+    mode === 'dj' &&
+    hasCurrentBeats &&
+    currentPlaybackTimeA !== undefined &&
+    currentPlaybackTimeA > 0
+  ) {
+    const beatFractionA = (currentPlaybackTimeA % beatIntervalA) / beatIntervalA;
+    const targetPhaseOffsetB = beatFractionA * beatIntervalB;
+    const currentPhaseB = adjustedEntryPoint % beatIntervalB;
+    let phaseError = targetPhaseOffsetB - currentPhaseB;
+    if (phaseError > beatIntervalB / 2) phaseError -= beatIntervalB;
+    if (phaseError < -beatIntervalB / 2) phaseError += beatIntervalB;
+
+    if (Math.abs(phaseError) > beatIntervalB * 0.15) {
+      if (targetBeats.length > 0) {
+        const cands = targetBeats.filter(
+          (t) => Math.abs(t - adjustedEntryPoint) <= searchRange && t >= 0
+        );
+        let bestCandidate = adjustedEntryPoint;
+        let bestError = Math.abs(phaseError);
+        for (const c of cands) {
+          const candPhase = c % beatIntervalB;
+          let candError = targetPhaseOffsetB - candPhase;
+          if (candError > beatIntervalB / 2) candError -= beatIntervalB;
+          if (candError < -beatIntervalB / 2) candError += beatIntervalB;
+          if (Math.abs(candError) < bestError) {
+            bestError = Math.abs(candError);
+            bestCandidate = c;
+          }
+        }
+        const phaseAdj = bestCandidate - adjustedEntryPoint;
+        if (Math.abs(phaseAdj) <= beatIntervalB * 0.5) {
+          adjustedEntryPoint = bestCandidate;
+          info += ` + fase A↔B: ${signed(phaseAdj)}s`;
+        }
+      } else {
+        const phaseAdj = Math.max(-searchRange, Math.min(searchRange, phaseError));
+        if (Math.abs(phaseAdj) <= beatIntervalB * 0.5) {
+          adjustedEntryPoint += phaseAdj;
+          info += ` + fase A↔B: ${signed(phaseAdj)}s`;
+        }
+      }
+    }
+  }
+
+  return {
+    adjustedEntryPoint: Math.max(0, adjustedEntryPoint),
+    info,
+    isSynced: isBeatSynced
+  };
+}
+
+// ============================================================================
+// MARK: - applyVlfsCap (DJMixingService.swift:2327)
+// ============================================================================
+
+/**
+ * Defensive cap against vocal-late-from-swap (vlfs) going strongly
+ * negative — i.e. entry landing well after B's first vocal event.
+ *
+ * Mirrors `DJMixingService.swift:2327 applyVlfsCap`. If `entry` is more
+ * than 5s past the first vocal of B (`vocalStart - entry < -5`), retract
+ * to `max(2, vocalStart - 2)` and tag the source as
+ * `punchVocalCappedRollback`.
+ *
+ * Guards (return unchanged):
+ *   - vocalStartReliable=false (chorusLikelyMislabeled or vocalStart
+ *     outside [3, 20] without an instrumental intro).
+ *   - vocalStart < 3 (track with vocal at t≈0; cap would give entry=2
+ *     sub-musical over the very first ad-lib/sample).
+ */
+export function applyVlfsCap(args: {
+  entry: number;
+  source: EntryPointSource;
+  vocalStart: number;
+  vocalStartReliable: boolean;
+}): { entry: number; source: EntryPointSource } {
+  const { entry, source, vocalStart, vocalStartReliable } = args;
+  if (!vocalStartReliable || vocalStart < 3.0) return { entry, source };
+  const vlfs = vocalStart - entry;
+  if (vlfs >= -5.0) return { entry, source };
+  const cappedEntry = Math.max(2.0, vocalStart - 2.0);
+  return { entry: cappedEntry, source: 'punchVocalCappedRollback' };
+}
+
+// ============================================================================
+// MARK: - calculateDramaticEntry (DJMixingService.swift:1937)
+// ============================================================================
+
+/**
+ * Entry for `dramatic` character — big energy changes or harmonic clash.
+ * Mirrors `DJMixingService.swift:1937 calculateDramaticEntry`.
+ *
+ *   - **energyUp**: chorus or vocalStart for impact (the energy jump
+ *     benefits from a strong moment). 2s margin before chorus/vocal.
+ *   - **energyDown**: early entry (≤4s) — B needs space to breathe as A
+ *     fades.
+ *   - **steady (harmonic clash)**: moderate entry, avoid extending overlap.
+ */
+function calculateDramaticEntry(
+  next: SongAnalysis,
+  profile: TransitionProfile,
+  bufferDuration: number,
+  config: { fallbackMaxSeconds: number }
+): { entry: number; source: EntryPointSource } {
+  const vocalStart = next.vocalStartTime ?? 0;
+  const chorusStart = next.chorusStartTime;
+
+  // Vocal-aware entry reference chain.
+  const entryRef = (() => {
+    if (next.vocalStartTime !== undefined && next.vocalStartTime > 0) return next.vocalStartTime;
+    if (next.introEndTimeHeuristic !== undefined && next.introEndTimeHeuristic > 0) {
+      return next.introEndTimeHeuristic;
+    }
+    if (next.speechSegments.length > 0 && (next.speechSegments[0]?.start ?? 0) > 0) {
+      return next.speechSegments[0]?.start ?? 0;
+    }
+    if (next.hasIntroData) return next.introEndTime;
+    return 0;
+  })();
+
+  // 2s margin before vocalStart — vocalStartTime is "first vocal event"
+  // (shout, chorus, sample), not "first verse". Entering 2s earlier lets
+  // the event surface as the fade progresses. Floor 2 so we don't push
+  // pre-musical entries on tracks with very early ad-libs.
+  const vocalEntryTarget = Math.max(2, vocalStart - 2);
+
+  switch (profile.energyFlow) {
+    case 'energyUp':
+      // Energy rising — prefer chorus or vocalStart for impact.
+      if (chorusStart > 4 && chorusStart < bufferDuration * 0.4) {
+        return { entry: Math.max(2, chorusStart - 2), source: 'dramaticChorus' };
+      }
+      if (vocalStart > 3) {
+        return { entry: vocalEntryTarget, source: 'dramaticVocal' };
+      }
+      if (entryRef > 3) {
+        return { entry: entryRef, source: 'dramaticReference' };
+      }
+      return {
+        entry: Math.min(config.fallbackMaxSeconds, bufferDuration * 0.03),
+        source: 'dramaticFallback'
+      };
+
+    case 'energyDown':
+      // Energy dropping — early entry, let B build gradually as A fades.
+      return {
+        entry: Math.min(4.0, bufferDuration * 0.02),
+        source: 'dramaticFallback'
+      };
+
+    case 'steady':
+      // Harmonic clash with steady energy — moderate entry, avoid overlap.
+      if (vocalStart > 3) {
+        return { entry: vocalEntryTarget, source: 'dramaticVocal' };
+      }
+      if (entryRef > 3) {
+        return { entry: entryRef, source: 'dramaticReference' };
+      }
+      return {
+        entry: Math.min(config.fallbackMaxSeconds, bufferDuration * 0.02),
+        source: 'dramaticFallback'
+      };
+  }
+}
+
+// ============================================================================
+// MARK: - calculatePunchEntry (DJMixingService.swift:2016)
+// ============================================================================
+
+const kChorusCap = 50.0;
+
+type PunchEntryResult = {
+  entry: number;
+  source: EntryPointSource;
+  // `boolean | undefined` (no `?:`) — exactOptionalPropertyTypes treats
+  // `?: boolean` as "absent or boolean", which would reject explicit
+  // undefined assignments in early returns. Three-state semantics
+  // (undefined/false/true) is intentional.
+  genreCapApplied: boolean | undefined;
+};
+
+/**
+ * Entry for `punch` character — compatible BPMs, targeting a structural
+ * moment in B. Mirrors `DJMixingService.swift:2016 calculatePunchEntry`.
+ *
+ * Decision graph (high level):
+ *   1. Detect chorus-likely-mislabeled (chorus 4-15s past introEndHeuristic).
+ *   2. Vocal-aware entry reference (chain: vocalStart → introEndHeuristic
+ *      → speechSegments → introEnd). Prefer heuristic when chorus
+ *      mislabeled.
+ *   3. Vocal overlap avoidance (both have vocals + instrumental intro
+ *      confirmed → enter `vocalStart - 6`).
+ *   4. Chorus promotion (danceable + buffer > 90s + chorus > 35s +
+ *      chorus far from reference + chorus in first half + vocalStart NOT
+ *      usable as alt). Caps at `kChorusCap=50` unless B is drop-driven
+ *      percussive (ratio ≥ 2.0).
+ *   5. StyleAffinity branching: > 0.7 (aggressive vocalTarget /
+ *      entryReference / chorusFallback with cap / fallbacks) vs ≤ 0.7
+ *      (moderate — prefer entryReference).
+ *   6. Energy boost (energyUp + gap > 0.25 + chorus within 30s of entry →
+ *      shift entry to chorus − 2).
+ *   7. applyVlfsCap final defensive cap.
+ */
+function calculatePunchEntry(
+  next: SongAnalysis,
+  profile: TransitionProfile,
+  bufferDuration: number,
+  config: { fallbackMaxSeconds: number; fallbackPercent: number }
+): PunchEntryResult {
+  const introEnd = next.introEndTime;
+  const vocalStart = next.vocalStartTime ?? 0;
+  const chorusStart = next.chorusStartTime;
+
+  // ── Early-vocal-in-intro detection ──
+  // vocalStartTime is the first vocal EVENT (shout, chorus, sample, ad-lib),
+  // not the first verse — intros frequently contain such events.
+  // When this fires, downstream branches prefer chorusStart over vocalStart
+  // as the entry target (chorus is a stronger landing point).
+  const hasReliableIntro = next.hasIntroData && introEnd > 3;
+  const introVocalDiverge =
+    hasReliableIntro && vocalStart > 0 && vocalStart < introEnd - 8;
+
+  // ── Chorus-mislabeled safeguard ──
+  // Backend chorusStartB sometimes points to a verse drop instead of the
+  // structural chorus. Detection: chorus is 4-15s past heuristic intro
+  // end. Larger gaps (>15s) are genuine deep-chorus tracks.
+  const chorusLikelyMislabeled =
+    next.introEndTimeHeuristic !== undefined &&
+    next.introEndTimeHeuristic > 4 &&
+    chorusStart - next.introEndTimeHeuristic > 4 &&
+    chorusStart - next.introEndTimeHeuristic < 15;
+
+  // Vocal-aware entry reference. Chain ordered so the safest signal wins.
+  const entryReference = (() => {
+    if (
+      chorusLikelyMislabeled &&
+      next.introEndTimeHeuristic !== undefined &&
+      next.introEndTimeHeuristic > 0
+    ) {
+      return next.introEndTimeHeuristic;
+    }
+    if (next.vocalStartTime !== undefined && next.vocalStartTime > 0) return next.vocalStartTime;
+    if (next.introEndTimeHeuristic !== undefined && next.introEndTimeHeuristic > 0) {
+      return next.introEndTimeHeuristic;
+    }
+    if (next.speechSegments.length > 0 && (next.speechSegments[0]?.start ?? 0) > 0) {
+      return next.speechSegments[0]?.start ?? 0;
+    }
+    if (next.hasIntroData) return next.introEndTime;
+    return 0;
+  })();
+
+  const introIsInstrumental = entryReference > 8.0;
+  // Sanitize-inferred vocalStart (chorus-8) is poisoned when chorus itself
+  // is mislabeled — refuse to trust as target in that case.
+  const vocalStartReliable =
+    !chorusLikelyMislabeled &&
+    vocalStart > 0 &&
+    (introIsInstrumental || vocalStart < 20);
+
+  // ── Vocal overlap avoidance ──
+  // Only when intro is confirmed instrumental (otherwise B has vocals in
+  // the intro and there's no clean instrumental window).
+  if (
+    profile.vocalOverlapRisk === 'both' &&
+    vocalStart > 3 &&
+    introIsInstrumental &&
+    vocalStartReliable
+  ) {
+    const safeEntry = Math.max(0, vocalStart - 6);
+    if (safeEntry > 2) {
+      return { entry: safeEntry, source: 'punchVocalAvoidance', genreCapApplied: undefined };
+    }
+  }
+
+  // ── Chorus promotion ──
+  // Enter at the chorus when it's clearly the payoff for hip-hop / drill /
+  // trap-style tracks where the chorus is the real impact (vs verse 1).
+  // Tight conditions to avoid mis-firing on pop / rock.
+  const referenceForGap = vocalStart > 0 ? vocalStart : entryReference;
+  const isDanceable = profile.avgDanceability > 0.55;
+  const bufferLongEnough = bufferDuration > 90;
+  const chorusDeepEnough = chorusStart > 35;
+  const chorusFarFromReference =
+    referenceForGap > 0 && chorusStart > referenceForGap + 20;
+  const chorusInUsableHalf = chorusStart < bufferDuration * 0.5;
+
+  // Guard: when vocalStart is itself in a reasonable window AND clearly
+  // earlier than chorus (>=15s away), prefer vocalStart over chorus
+  // promotion. Promotion only fires when vocalStart is NOT usable
+  // (< 8s = sub-musical, > 40s = late vocal where chorus wins).
+  const vocalStartUsable =
+    vocalStart >= 8.0 && vocalStart <= 40.0 && chorusStart - vocalStart >= 15.0;
+
+  if (
+    isDanceable &&
+    bufferLongEnough &&
+    chorusDeepEnough &&
+    chorusFarFromReference &&
+    chorusInUsableHalf &&
+    !chorusLikelyMislabeled &&
+    !vocalStartUsable
+  ) {
+    // Percussive-based cap (genre-agnostic): ratio main/intro ≥ 2.0 → B is
+    // drop-driven and chorus targeting is the right call. Otherwise cap at
+    // kChorusCap=50. Default conservative when curve missing (fall to cap).
+    const { isDrop } = isBDropDrivenByPercussive(next.percussiveCurve);
+    const needsCap = chorusStart > kChorusCap && !isDrop;
+    const chorusEntryTarget = needsCap ? kChorusCap : Math.max(2, chorusStart - 2);
+    const cap = applyVlfsCap({
+      entry: chorusEntryTarget,
+      source: 'punchChorusPromotion',
+      vocalStart,
+      vocalStartReliable
+    });
+    return {
+      entry: cap.entry,
+      source: cap.source,
+      genreCapApplied: chorusStart > kChorusCap ? needsCap : false
+    };
+  }
+
+  // 2s margin before vocalStart — same rationale as dramatic.
+  const vocalEntryTarget = Math.max(2, vocalStart - 2);
+
+  let entry: number;
+  let source: EntryPointSource;
+  let genreCapApplied: boolean | undefined;
+
+  if (profile.styleAffinity > 0.7) {
+    // High affinity — aggressive targeting.
+    if (vocalStartReliable && vocalStart > 3 && !introVocalDiverge) {
+      entry = vocalEntryTarget;
+      source = 'punchVocalTarget';
+    } else if (entryReference > 3 && !introVocalDiverge) {
+      entry = entryReference;
+      source = 'punchEntryReference';
+    } else if (chorusStart > 6) {
+      // Defensive cap without exempt (deliberate). Floor 4→6 because
+      // chorus<6 is ad-lib/noise — fall to buffer fallback instead.
+      const cappedChorus = Math.min(chorusStart, kChorusCap);
+      entry = Math.max(2, cappedChorus - 2);
+      source = 'punchChorusFallback';
+      genreCapApplied = chorusStart > kChorusCap;
+    } else if (vocalStartReliable && vocalStart > 2) {
+      entry = vocalEntryTarget;
+      source = 'punchVocalTarget';
+    } else if (entryReference > 3) {
+      entry = entryReference;
+      source = 'punchEntryReference';
+    } else {
+      entry = Math.min(config.fallbackMaxSeconds, bufferDuration * config.fallbackPercent);
+      source = 'punchBufferFallback';
+    }
+  } else {
+    // Moderate affinity — less aggressive, prefer entryReference.
+    if (entryReference > 3 && !introVocalDiverge) {
+      entry = entryReference;
+      source = 'punchEntryReference';
+    } else if (vocalStartReliable && vocalStart > 3 && !introVocalDiverge) {
+      entry = vocalEntryTarget;
+      source = 'punchVocalTarget';
+    } else if (vocalStartReliable && vocalStart > 2) {
+      entry = vocalEntryTarget;
+      source = 'punchVocalTarget';
+    } else if (entryReference > 3) {
+      entry = entryReference;
+      source = 'punchEntryReference';
+    } else {
+      entry = Math.min(config.fallbackMaxSeconds, bufferDuration * config.fallbackPercent);
+      source = 'punchBufferFallback';
+    }
+  }
+
+  // ── Energy boost: rising energy → prefer chorus if nearby ──
+  if (profile.energyFlow === 'energyUp' && profile.energyGap > 0.25) {
+    if (chorusStart > entry && chorusStart < entry + 30) {
+      entry = Math.max(2, chorusStart - 2);
+      source = 'punchEnergyBoost';
+      // Reset cap flag — chorus override invalidates the previous cap.
+      genreCapApplied = false;
+    }
+  }
+
+  const cap = applyVlfsCap({ entry, source, vocalStart, vocalStartReliable });
+  return { entry: cap.entry, source: cap.source, genreCapApplied };
+}
+
+// ============================================================================
+// MARK: - calculateSmartEntryPoint (DJMixingService.swift:1744)
+// ============================================================================
+
+/**
+ * Calculate where B starts playing. Mirrors
+ * `DJMixingService.swift:1744 calculateSmartEntryPoint`.
+ *
+ * Driven by the A↔B relationship profile. The same B will get different
+ * entry points depending on what A precedes it.
+ *
+ * Pipeline:
+ *   1. Fallback when next analysis is missing/errored.
+ *   2. Sanitize next analysis (clamp to buffer, cross-validate intro/chorus).
+ *   3. Character-driven entry strategy (minimal inline / smooth inline /
+ *      dramatic / punch).
+ *   4. Phrase snapping (punch + dramatic only, max 8s / 4s ahead).
+ *   5. Beat sync when BPMs compatible AND trusted.
+ *   6. Clamp to [0, bufferDuration − 1].
+ *   7. Final defensive cap (`kEntryFinalCap=50s`) — exempt when B is
+ *      drop-driven percussive (preserves intentional deep-chorus tracks).
+ */
+export function calculateSmartEntryPoint(args: {
+  nextAnalysis?: SongAnalysis;
+  currentAnalysis?: SongAnalysis;
+  bufferDuration: number;
+  profile: TransitionProfile;
+  currentPlaybackTimeA?: number;
+}): EntryPointResult {
+  const { nextAnalysis: rawNext, currentAnalysis, bufferDuration, profile, currentPlaybackTimeA } =
+    args;
+  const config = MIX_MODE_CONFIGS[profile.mode];
+
+  if (!rawNext || rawNext.hasError) {
+    const fallbackEntry = Math.min(
+      config.fallbackMaxSeconds,
+      bufferDuration * config.fallbackPercent
+    );
+    return {
+      entryPoint: fallbackEntry,
+      beatSyncInfo: '',
+      usedFallback: true,
+      isBeatSynced: false,
+      entrySource: 'unknown'
+    };
+  }
+
+  const next = sanitizeAnalysis(rawNext, bufferDuration);
+
+  let entryPoint = 0;
+  let beatSyncInfo = '';
+  let isBeatSynced = false;
+  let entrySource: EntryPointSource = 'unknown';
+  let genreCapApplied: boolean | undefined;
+
+  // ── Character-driven entry strategy ──
+  switch (profile.character) {
+    case 'minimal': {
+      // Both low energy — gentle handoff. Prefer the heuristic intro end
+      // (percussive/energy-based, robust against backend mislabeling) so
+      // B enters at the start of "real content".
+      const earlyEntry = Math.min(2.0, bufferDuration * config.fallbackPercent);
+      // Early chorus (<8s) → real content starts almost immediately;
+      // don't trust the heuristic when chorus contradicts it.
+      const chorusEarly = next.chorusStartTime > 0 && next.chorusStartTime < 8;
+      const candidates: { time: number; tag: string }[] = [];
+      if (
+        next.introEndTimeHeuristic !== undefined &&
+        next.introEndTimeHeuristic > 4 &&
+        next.introEndTimeHeuristic < 35 &&
+        !chorusEarly
+      ) {
+        candidates.push({
+          time: Math.max(earlyEntry, next.introEndTimeHeuristic - 1.0),
+          tag: 'introEndHeuristic'
+        });
+      }
+      if (
+        next.chorusStartTime > 5 &&
+        next.chorusStartTime < 35 &&
+        next.chorusStartTime > earlyEntry + 3
+      ) {
+        candidates.push({
+          time: Math.max(earlyEntry, next.chorusStartTime - 2.0),
+          tag: 'chorus-aligned'
+        });
+      }
+      const pick = candidates.reduce<{ time: number; tag: string } | undefined>(
+        (acc, c) => (acc === undefined || c.time < acc.time ? c : acc),
+        undefined
+      );
+      if (pick !== undefined) {
+        entryPoint = Math.max(0, Math.min(pick.time, bufferDuration - 1));
+        return {
+          entryPoint,
+          beatSyncInfo: `Minimal (${pick.tag})`,
+          usedFallback: false,
+          isBeatSynced: false,
+          entrySource: 'minimal'
+        };
+      }
+      entryPoint = Math.max(0, earlyEntry);
+      return {
+        entryPoint,
+        beatSyncInfo: 'Minimal (low energy)',
+        usedFallback: false,
+        isBeatSynced: false,
+        entrySource: 'minimal'
+      };
+    }
+
+    case 'smooth': {
+      // Incompatible BPMs / low affinity — no punch targeting, but skip
+      // past boring intros so listener hears real content.
+      const baseEntry = Math.min(
+        config.fallbackMaxSeconds,
+        bufferDuration * config.fallbackPercent
+      );
+      const entryRef = (() => {
+        if (next.vocalStartTime !== undefined && next.vocalStartTime > 0) {
+          return next.vocalStartTime;
+        }
+        if (next.introEndTimeHeuristic !== undefined && next.introEndTimeHeuristic > 0) {
+          return next.introEndTimeHeuristic;
+        }
+        if (next.speechSegments.length > 0 && (next.speechSegments[0]?.start ?? 0) > 0) {
+          return next.speechSegments[0]?.start ?? 0;
+        }
+        if (next.hasIntroData) return next.introEndTime;
+        return 0;
+      })();
+
+      let smoothEntry: number;
+      let smoothSource: EntryPointSource;
+      if (entryRef > baseEntry + 3) {
+        smoothEntry = entryRef;
+        smoothSource = 'smooth';
+      } else if (
+        next.chorusStartTime > baseEntry + 3 &&
+        next.chorusStartTime < bufferDuration * 0.25
+      ) {
+        smoothEntry = next.chorusStartTime;
+        smoothSource = 'smoothChorusFallback';
+      } else {
+        smoothEntry = baseEntry;
+        smoothSource = 'smooth';
+      }
+      smoothEntry = Math.max(0, Math.min(smoothEntry, bufferDuration - 1));
+
+      // Vocal landmark alignment: if entry past a clear chorus, shift back
+      // ~2s so the chorus becomes the "reveal" of the new track.
+      if (next.chorusStartTime > 5 && smoothEntry > next.chorusStartTime) {
+        smoothEntry = Math.max(0, next.chorusStartTime - 2.0);
+        smoothSource = 'smoothVocalAligned';
+      }
+      return {
+        entryPoint: smoothEntry,
+        beatSyncInfo: 'Smooth blend',
+        usedFallback: false,
+        isBeatSynced: false,
+        entrySource: smoothSource
+      };
+    }
+
+    case 'dramatic': {
+      const r = calculateDramaticEntry(next, profile, bufferDuration, config);
+      entryPoint = r.entry;
+      entrySource = r.source;
+      break;
+    }
+
+    case 'punch': {
+      const r = calculatePunchEntry(next, profile, bufferDuration, config);
+      entryPoint = r.entry;
+      entrySource = r.source;
+      genreCapApplied = r.genreCapApplied;
+      break;
+    }
+  }
+
+  // ── Phrase snapping (punch + dramatic only) ──
+  if (next.phraseBoundaries.length > 0) {
+    const maxAhead = profile.character === 'dramatic' ? 4 : 8;
+    const nextPhrase = next.phraseBoundaries.find(
+      (p) => p >= entryPoint && p <= entryPoint + maxAhead
+    );
+    if (nextPhrase !== undefined) {
+      entryPoint = nextPhrase;
+    }
+  }
+
+  // ── Beat sync (only when BPMs compatible AND trusted) ──
+  if (profile.bpmRelationship !== 'incompatible' && profile.bpmTrusted) {
+    const beatResult = applyBeatSync({
+      entryPoint,
+      currentAnalysis,
+      nextAnalysis: next,
+      currentPlaybackTimeA,
+      mode: profile.mode
+    });
+    entryPoint = beatResult.adjustedEntryPoint;
+    beatSyncInfo = beatResult.info;
+    isBeatSynced = beatResult.isSynced;
+  }
+
+  entryPoint = Math.max(0, Math.min(entryPoint, bufferDuration - 1));
+
+  // ── Final defensive cap: kEntryFinalCap=50 unless B is drop-driven ──
+  let entryFinalCapApplied: boolean | undefined;
+  if (entryPoint > kEntryFinalCap) {
+    const { isDrop } = isBDropDrivenByPercussive(next.percussiveCurve);
+    if (!isDrop) {
+      entryPoint = kEntryFinalCap;
+      entryFinalCapApplied = true;
+    } else {
+      entryFinalCapApplied = false;
+    }
+  }
+
+  // Build the result conditionally — exactOptionalPropertyTypes rejects
+  // assigning `undefined` to a `?:` field. We only attach
+  // genreCapApplied / entryFinalCapApplied when they have a concrete
+  // boolean value.
+  const result: EntryPointResult = {
+    entryPoint,
+    beatSyncInfo,
+    usedFallback: false,
+    isBeatSynced,
+    entrySource
+  };
+  return {
+    ...result,
+    ...(genreCapApplied !== undefined ? { genreCapApplied } : {}),
+    ...(entryFinalCapApplied !== undefined ? { entryFinalCapApplied } : {})
+  };
 }
 
 // Re-export the BPMRelationship type for convenience — callers building a

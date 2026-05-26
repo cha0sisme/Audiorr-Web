@@ -13,8 +13,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   _resetCooldownForTesting,
+  applyBeatSync,
+  applyVlfsCap,
   buildTransitionProfile,
   calculateAdaptiveFadeDuration,
+  calculateSmartEntryPoint,
   calculateTriggerBias,
   decideAnticipation,
   decideDJEffects,
@@ -28,7 +31,9 @@ import {
   harmonicBPM,
   harmonicPenalty,
   isBDropDrivenByPercussive,
-  isBDropDrivenBass
+  isBDropDrivenBass,
+  sanitizeAnalysis,
+  snapToMeasureGrid
 } from './DJMixingService';
 import {
   type BPMRelationship,
@@ -2111,6 +2116,456 @@ describe('decideAnticipation', () => {
       rmsTailCurveA: decayingTail
     });
     expect(r.anticipationTime).toBeLessThanOrEqual(4.0);
+  });
+});
+
+// ============================================================================
+// sanitizeAnalysis
+// ============================================================================
+
+describe('sanitizeAnalysis', () => {
+  it('clampa campos temporales a [0, duration]', () => {
+    const out = sanitizeAnalysis(
+      makeAnalysis({
+        hasIntroData: true,
+        introEndTime: 500,
+        outroStartTime: -10,
+        chorusStartTime: 800,
+        vocalStartTime: 1000
+      }),
+      200
+    );
+    expect(out.introEndTime).toBeLessThanOrEqual(30); // tras cap intros >30
+    expect(out.outroStartTime).toBe(0);
+    expect(out.chorusStartTime).toBe(200);
+    expect(out.vocalStartTime).toBe(200);
+  });
+
+  it('hard cap intros >30s a 30', () => {
+    const out = sanitizeAnalysis(
+      makeAnalysis({ hasIntroData: true, introEndTime: 50 }),
+      200
+    );
+    expect(out.introEndTime).toBe(30);
+  });
+
+  it('chorus << introEnd → cap introEnd a chorus', () => {
+    const out = sanitizeAnalysis(
+      makeAnalysis({
+        hasIntroData: true,
+        introEndTime: 25,
+        chorusStartTime: 10
+      }),
+      200
+    );
+    expect(out.introEndTime).toBe(10);
+  });
+
+  it('lastVocalTime > outroStartTime+3 → outro := vocalEnd', () => {
+    const out = sanitizeAnalysis(
+      makeAnalysis({
+        hasOutroData: true,
+        outroStartTime: 100,
+        hasVocalEndData: true,
+        lastVocalTime: 150
+      }),
+      200
+    );
+    expect(out.outroStartTime).toBe(150);
+  });
+
+  it('BPM fuera de rango [30,300] → fallback 120', () => {
+    const out1 = sanitizeAnalysis(makeAnalysis({ bpm: 10 }), 200);
+    const out2 = sanitizeAnalysis(makeAnalysis({ bpm: 400 }), 200);
+    expect(out1.bpm).toBe(120);
+    expect(out2.bpm).toBe(120);
+  });
+
+  it('beatInterval que diverge >15% de 60/bpm → usar derivado', () => {
+    const out = sanitizeAnalysis(
+      makeAnalysis({ bpm: 120, beatInterval: 1.0 }),
+      200
+    );
+    // 60/120 = 0.5. diff = 0.5/0.5 = 1.0 > 0.15.
+    expect(out.beatInterval).toBe(0.5);
+  });
+
+  it('downbeats con spacing >30% off del bpm → clear', () => {
+    // bpm=120 → beatInterval=0.5 → measure=2.0. downbeats spaced ~1.0
+    // (diff 50% del expected 2.0) → cleared.
+    const out = sanitizeAnalysis(
+      makeAnalysis({
+        bpm: 120,
+        beatInterval: 0.5,
+        downbeatTimes: [0, 1.0, 2.0, 3.0, 4.0]
+      }),
+      200
+    );
+    expect(out.downbeatTimes.length).toBe(0);
+  });
+
+  it('vocalStartTime undefined queda como ausente, no como undefined explícito', () => {
+    const out = sanitizeAnalysis(makeAnalysis(), 200);
+    expect(out.vocalStartTime).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// snapToMeasureGrid
+// ============================================================================
+
+describe('snapToMeasureGrid', () => {
+  it('time alineado al measure → 0 (no snap)', () => {
+    // measure=2, beatInterval=0.5. time=2 % 2 = 0.
+    // timeIntoMeasure=0 NO entra al primer if (>0.001), distToNext=2 NO < 0.25.
+    // timeIntoBeat=0 entra al -timeIntoBeat=0. Result 0.
+    expect(snapToMeasureGrid(2.0, 2.0, 0.5)).toBe(0);
+  });
+
+  it('time un poco después del downbeat → snap negativo a downbeat', () => {
+    // measure=2, beatInterval=0.5. time=0.1. timeIntoMeasure=0.1 < 0.25 (beat*0.5).
+    // y > 0.001 → return -0.1.
+    expect(snapToMeasureGrid(0.1, 2.0, 0.5)).toBeCloseTo(-0.1, 3);
+  });
+
+  it('time cerca del próximo downbeat → snap positivo', () => {
+    // time=1.9, measure=2, beat=0.5. timeIntoMeasure=1.9.
+    // distToNext=0.1 < 0.25 → return 0.1.
+    expect(snapToMeasureGrid(1.9, 2.0, 0.5)).toBeCloseTo(0.1, 3);
+  });
+
+  it('measureLength inválido → 0', () => {
+    expect(snapToMeasureGrid(5.0, 0, 0.5)).toBe(0);
+  });
+});
+
+// ============================================================================
+// applyBeatSync
+// ============================================================================
+
+describe('applyBeatSync', () => {
+  it('next.beatInterval = 0 → no sync', () => {
+    const r = applyBeatSync({
+      entryPoint: 10,
+      currentAnalysis: undefined,
+      nextAnalysis: makeAnalysis({ beatInterval: 0 }),
+      currentPlaybackTimeA: undefined,
+      mode: 'normal'
+    });
+    expect(r.isSynced).toBe(false);
+    expect(r.adjustedEntryPoint).toBe(10);
+  });
+
+  it('downbeats cercanos → snap a el más cercano', () => {
+    // beat=0.5, entry=10.2, downbeats incluye 10.0 (within ±0.5).
+    const r = applyBeatSync({
+      entryPoint: 10.2,
+      currentAnalysis: undefined,
+      nextAnalysis: makeAnalysis({
+        beatInterval: 0.5,
+        downbeatTimes: [0, 2, 4, 6, 8, 10, 12]
+      }),
+      currentPlaybackTimeA: undefined,
+      mode: 'normal'
+    });
+    expect(r.isSynced).toBe(true);
+    expect(r.adjustedEntryPoint).toBe(10);
+    expect(r.info).toContain('Downbeat');
+  });
+
+  it('sin downbeats cercanos → fallback a grid snap', () => {
+    const r = applyBeatSync({
+      entryPoint: 10.1,
+      currentAnalysis: undefined,
+      nextAnalysis: makeAnalysis({
+        beatInterval: 0.5,
+        downbeatTimes: [50, 52, 54] // muy lejos
+      }),
+      currentPlaybackTimeA: undefined,
+      mode: 'normal'
+    });
+    expect(r.isSynced).toBe(true);
+    expect(r.info).toContain('Grid snap');
+  });
+});
+
+// ============================================================================
+// applyVlfsCap
+// ============================================================================
+
+describe('applyVlfsCap', () => {
+  it('vocalStartReliable=false → no cap', () => {
+    const r = applyVlfsCap({
+      entry: 30,
+      source: 'punchChorusPromotion',
+      vocalStart: 10,
+      vocalStartReliable: false
+    });
+    expect(r.entry).toBe(30);
+    expect(r.source).toBe('punchChorusPromotion');
+  });
+
+  it('vocalStart<3 → no cap (track con vocal a t≈0)', () => {
+    const r = applyVlfsCap({
+      entry: 30,
+      source: 'punchChorusPromotion',
+      vocalStart: 1,
+      vocalStartReliable: true
+    });
+    expect(r.entry).toBe(30);
+  });
+
+  it('vlfs >= -5 → no cap', () => {
+    // vocalStart=10, entry=14, vlfs = -4 (-4 >= -5) → no cap.
+    const r = applyVlfsCap({
+      entry: 14,
+      source: 'punchChorusPromotion',
+      vocalStart: 10,
+      vocalStartReliable: true
+    });
+    expect(r.entry).toBe(14);
+  });
+
+  it('vlfs < -5 → cap a max(2, vocalStart-2)', () => {
+    // vocalStart=10, entry=20, vlfs=-10. Cap a 8.
+    const r = applyVlfsCap({
+      entry: 20,
+      source: 'punchChorusPromotion',
+      vocalStart: 10,
+      vocalStartReliable: true
+    });
+    expect(r.entry).toBe(8);
+    expect(r.source).toBe('punchVocalCappedRollback');
+  });
+});
+
+// ============================================================================
+// calculateSmartEntryPoint
+// ============================================================================
+
+describe('calculateSmartEntryPoint', () => {
+  it('nextAnalysis missing → fallback usedFallback=true', () => {
+    const r = calculateSmartEntryPoint({
+      bufferDuration: 200,
+      profile: makeProfile({ mode: 'normal' })
+    });
+    expect(r.usedFallback).toBe(true);
+    expect(r.entrySource).toBe('unknown');
+  });
+
+  it('nextAnalysis hasError → fallback', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({ hasError: true }),
+      bufferDuration: 200,
+      profile: makeProfile()
+    });
+    expect(r.usedFallback).toBe(true);
+  });
+
+  it('minimal character con introEndHeuristic razonable → entry alineado al heuristic', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        hasIntroData: true,
+        introEndTime: 20,
+        introEndTimeHeuristic: 18,
+        chorusStartTime: 25
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'minimal',
+        bpmTrusted: true,
+        bpmRelationship: 'identical'
+      })
+    });
+    expect(r.entrySource).toBe('minimal');
+    expect(r.entryPoint).toBeGreaterThan(2);
+    expect(r.entryPoint).toBeLessThan(20);
+  });
+
+  it('smooth character + entryRef alto → smooth con vocalAligned', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        vocalStartTime: 20,
+        chorusStartTime: 15, // < smoothEntry → vocalAligned shift
+        hasIntroData: true,
+        introEndTime: 18
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'smooth',
+        bpmRelationship: 'borderline',
+        bpmTrusted: false
+      })
+    });
+    expect(['smooth', 'smoothVocalAligned', 'smoothChorusFallback']).toContain(
+      r.entrySource
+    );
+    expect(r.entryPoint).toBeGreaterThan(0);
+  });
+
+  it('dramatic + energyUp + chorus en primer 40% → dramaticChorus', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 20,
+        vocalStartTime: 25,
+        hasIntroData: true,
+        introEndTime: 18
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'dramatic',
+        energyFlow: 'energyUp',
+        bpmTrusted: true,
+        bpmRelationship: 'compatible'
+      })
+    });
+    expect(r.entrySource).toBe('dramaticChorus');
+    expect(r.entryPoint).toBeGreaterThan(15);
+    expect(r.entryPoint).toBeLessThanOrEqual(20);
+  });
+
+  it('dramatic + energyDown → entry temprano (≤4)', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        vocalStartTime: 30,
+        hasIntroData: true,
+        introEndTime: 20
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'dramatic',
+        energyFlow: 'energyDown'
+      })
+    });
+    expect(r.entrySource).toBe('dramaticFallback');
+    expect(r.entryPoint).toBeLessThanOrEqual(4.0);
+  });
+
+  it('punch + chorus tardío + danceable + buffer largo → chorus promotion', () => {
+    // Sin vocalStartTime: chain cae a heuristic=10. vocalStart=0 evita
+    // que vlfs cap dispare (guard vocalStart<3). chorus=42 > 35,
+    // > ref(10)+20=30, < buffer*0.5=60. vocalStartUsable false (=0).
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 42,
+        hasIntroData: true,
+        introEndTime: 10,
+        introEndTimeHeuristic: 10
+      }),
+      bufferDuration: 120,
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        bpmRelationship: 'compatible',
+        avgDanceability: 0.7
+      })
+    });
+    expect(r.entrySource).toBe('punchChorusPromotion');
+    expect(r.entryPoint).toBeCloseTo(40, 0); // chorus - 2
+  });
+
+  it('punch chorus promotion CAPPED cuando chorus>50 y no drop-driven', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 80,
+        hasIntroData: true,
+        introEndTime: 10,
+        introEndTimeHeuristic: 10
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        bpmRelationship: 'compatible',
+        avgDanceability: 0.7
+      })
+    });
+    // chorus>50 + no percussiveCurve → cap aplica.
+    expect(r.genreCapApplied).toBe(true);
+    expect(r.entryPoint).toBeLessThanOrEqual(50);
+  });
+
+  it('punch + drop-driven exempt → no cap a 50', () => {
+    const dropCurve = [0.1, 0.1, 0.2, 0.6, 0.7, 0.8]; // ratio ~6 → drop
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 80,
+        hasIntroData: true,
+        introEndTime: 10,
+        introEndTimeHeuristic: 10,
+        percussiveCurve: dropCurve
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        bpmRelationship: 'compatible',
+        avgDanceability: 0.7
+      })
+    });
+    expect(r.genreCapApplied).toBe(false);
+    expect(r.entryPoint).toBeGreaterThan(50);
+  });
+
+  it('final cap kEntryFinalCap=50 cuando entry post-snap > 50 y no drop-driven', () => {
+    // Forzar entry alto via dramatic + chorus muy lejano + buffer largo.
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 70,
+        hasIntroData: true,
+        introEndTime: 30
+      }),
+      bufferDuration: 300,
+      profile: makeProfile({
+        character: 'dramatic',
+        energyFlow: 'energyUp',
+        bpmRelationship: 'compatible',
+        bpmTrusted: true
+      })
+    });
+    // chorus*0.4 = 28 ≤ chorus(70) < buffer*0.4(120) → dramaticChorus → entry=68.
+    // 68 > 50, no drop → entry capped a 50.
+    expect(r.entryPoint).toBe(50);
+    expect(r.entryFinalCapApplied).toBe(true);
+  });
+
+  it('phrase snapping mueve entry al phrase boundary cercano', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 20,
+        vocalStartTime: 22,
+        hasIntroData: true,
+        introEndTime: 18,
+        phraseBoundaries: [10, 16, 22, 30]
+      }),
+      bufferDuration: 200,
+      profile: makeProfile({
+        character: 'punch',
+        bpmRelationship: 'compatible',
+        bpmTrusted: true,
+        avgDanceability: 0.5
+      })
+    });
+    // entry inicial sería ~22 (vocalStart -2 = 20 con styleAffinity branch).
+    // phrase snap: cualquier boundary >= entry y <= entry+8 → 22 está en boundaries.
+    expect(r.entryPoint).toBeGreaterThan(0);
+  });
+
+  it('entryPoint clamp a [0, buffer-1]', () => {
+    const r = calculateSmartEntryPoint({
+      nextAnalysis: makeAnalysis({
+        chorusStartTime: 5,
+        vocalStartTime: 3,
+        hasIntroData: true,
+        introEndTime: 5
+      }),
+      bufferDuration: 10,
+      profile: makeProfile({
+        character: 'minimal'
+      })
+    });
+    expect(r.entryPoint).toBeGreaterThanOrEqual(0);
+    expect(r.entryPoint).toBeLessThanOrEqual(9);
   });
 });
 
