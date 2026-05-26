@@ -393,6 +393,76 @@ describe('applyFiltersB — invariantes', () => {
     expect(applyFiltersA(tBefore, ctx).set).toBe(false);
   });
 
+  it('anticipation extension v15.d: bassKill activo en [anticipationStart, preRollStart]', () => {
+    // CROSSFADE + useBassKill + anticipationTime=2.0 + filterLead suficiente.
+    // anticipationStart=0, preRollStart=filterStart - 0.9.
+    // En t entre 0 y preRollStart, branch extension dispara.
+    const ctx = makeContext(
+      {
+        transitionType: 'CROSSFADE',
+        fadeDuration: 10,
+        anticipationTime: 2.0,
+        needsAnticipation: true
+      },
+      { useBassKill: true }
+    );
+    // filterStart = anticipationStart + anticipationTime = 0 + 2 = 2.
+    // preRollStart = 2 - 0.9 = 1.1.
+    // t en [0, 1.1] → extension branch.
+    const tInExtension = 1.0;
+    const r = applyFiltersA(tInExtension, ctx);
+    expect(r.set).toBe(true);
+    // Band 1 ya tiene bassKill en marcha (algún gain negativo aplicado).
+    expect(isPassthrough(r.stages[1])).toBe(false);
+  });
+
+  it('anticipation extension NO aplica para tipos non-blendy', () => {
+    // CUT + useBassKill + anticipation → CUT family no entra a extension
+    // (filtros completamente skipped antes del cutStart).
+    const ctx = makeContext(
+      {
+        transitionType: 'CUT',
+        fadeDuration: 10,
+        anticipationTime: 2.0,
+        needsAnticipation: true
+      },
+      { useBassKill: true }
+    );
+    expect(applyFiltersA(1.0, ctx).set).toBe(false);
+  });
+
+  it('snap bassKill al downbeat: con realDownbeatsA, rampStart se alinea', () => {
+    // Sin downbeats, rampStart = preRollStart raw. Con downbeats cercanos
+    // (cap 1 bar backward), rampStart se snappea al downbeat más cercano.
+    // Esto desplaza el inicio del bassKill, cambiando los coeficientes
+    // en t cerca del rampStart.
+    const ctxNoSnap = makeContext(
+      { transitionType: 'CROSSFADE', fadeDuration: 10 },
+      { useBassKill: true }
+    );
+    const preRollStart = ctxNoSnap.timings.filterStartTime - 0.9;
+    // realDownbeats con un downbeat 0.3s antes de preRollStart (dentro del
+    // cap 1 bar a 120 BPM → 2s).
+    const ctxWithSnap = makeContext(
+      {
+        transitionType: 'CROSSFADE',
+        fadeDuration: 10,
+        beatIntervalA: 0.5, // 120 BPM
+        realDownbeatsA: [preRollStart - 0.3]
+      },
+      { useBassKill: true }
+    );
+    // En t lo bastante adentro de la rampa (cuando bassKill tiene avance
+    // significativo), el offset de 0.3s entre rampStarts produce coefs
+    // perceptiblemente distintos.
+    const tTest = preRollStart + 3.0;
+    const rNoSnap = applyFiltersA(tTest, ctxNoSnap);
+    const rWithSnap = applyFiltersA(tTest, ctxWithSnap);
+    expect(rNoSnap.set && rWithSnap.set).toBe(true);
+    // Mismo lowshelf frequency, distinto gain → b0 distinto.
+    expect(rNoSnap.stages[1].b0).not.toBeCloseTo(rWithSnap.stages[1].b0, 4);
+  });
+
   it('useNotchSweep + anticipation: band 2 passthrough en primera mitad, activo en segunda', () => {
     // Anticipation re-mapea [0.5, 1.0] → [0.0, 1.0]. Antes de fadeIn+50%
     // del window, effective progress = max(0, (p - 0.5) * 2) = 0 → bell

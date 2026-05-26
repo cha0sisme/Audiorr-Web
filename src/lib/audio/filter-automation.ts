@@ -3,24 +3,25 @@
  * biquad worklet on A and B.
  *
  * Port de `applyFiltersA` / `applyFiltersB` en iOS
- * `CrossfadeExecutor.swift` v15.m:2479-3118. **Incluido tras Fase 2C-3b**:
+ * `CrossfadeExecutor.swift` v15.m:2479-3118. **Incluido tras Fase 2C-4a**:
  *   - Branch principal: sweep base por banda con expInterp (freq) +
  *     linInterp (gain) + pivot al 40%.
  *   - bassKill cosSquared ramp (lowshelf A/B).
  *   - dynamicQ Gaussian bell sweep en highpass A/B.
  *   - Phaser notch sweep en B band 2 (parametric con freq exp +
  *     gain bell, con re-map [0.5, 1.0] en anticipation).
- *   - Pre-roll bands 0-3 con cascade staggering 150/300 ms — ventana
- *     [preRollStart, filterStartTime] donde las bandas ya curvan desde
- *     su initial state. Band 0 constante en startFreq (≥60 Hz) o sweep
- *     20→startFreq (gentle). Bands 1/2/3 con rampStart efectivo
- *     adelantado a preRollStart (+ cascade offsets) para continuidad
- *     C0 con el branch principal.
+ *   - Pre-roll bands 0-3 con cascade staggering 150/300 ms.
+ *   - bassKill rampStart snapped al downbeat A más cercano (backward,
+ *     cap 1 bar, clamp inferior a timings.startTime).
+ *   - Anticipation extension v15.d: cuando `useBassKill` +
+ *     `anticipationTime ≥ 1.5 s` en tipos blendy (CROSSFADE / EQ_MIX /
+ *     BMB), el bassKill rampStart se adelanta hasta
+ *     `anticipationStartTime` (en lugar de `preRollStart`). Branch
+ *     dedicado para `[anticipationStart, preRollStart]` aplica la
+ *     cosSquared bassKill con bands 0/2/3 en initial state.
  *
  * **No incluido todavía**:
  *   - Stutter cut runtime gate.
- *   - Anticipation extension v15.d (bassKill arranca en anticipationStart).
- *   - snappedRampStart al downbeat en bassKill (cap 1 bar).
  *
  * CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL → todas las bandas en
  * passthrough (filtros bypassed). CUT family rebasea rampStart al
@@ -45,6 +46,7 @@ import {
   PASSTHROUGH,
   type BiquadCoefficients
 } from './BiquadCoefficients';
+import { snappedRampStart } from './CrossfadeExecutor';
 import type { Timings, FilterPreset } from './crossfade-types';
 import type { CrossfadeResult } from './dj-types';
 
@@ -239,13 +241,52 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
     preRollActive && useMidScoop ? preRollStart + cascadeOffsetMidScoop : undefined;
   const highShelfRampStartOverride =
     preRollActive && useHighShelfCut ? preRollStart + cascadeOffsetHighShelf : undefined;
-  // bassKill A rampStart adelantado a preRollStart cuando preRollActive
-  // y useBassKill. Sin el override, la cosSquared 0→-16 dB arrancaría
-  // en filterStartTime y el bassKill se percibiría como "de repente"
-  // — el override hace que band 1 vaya perdiendo graves suavemente
-  // desde el inicio del pre-roll.
-  const bassKillRampStartOverride =
-    preRollActive && ctx.useBassKill ? preRollStart : undefined;
+
+  // ── Anticipation extension v15.d ──
+  // Cuando useBassKill + anticipationTime ≥ 1.5s en tipos blendy
+  // (CROSSFADE/EQ_MIX/BMB), la cosSquared 0 → -16dB arranca en
+  // anticipationStartTime en lugar de preRollStart. Cubre el gap previo
+  // al pre-roll donde A sonaba con bajo pleno hasta que arrancaba la
+  // rampa, suavizando el bassKill durante todo el lead-in.
+  const bassKillExtendToAnticipationTypeOK =
+    config.transitionType === 'EQ_MIX' ||
+    config.transitionType === 'BEAT_MATCH_BLEND' ||
+    config.transitionType === 'CROSSFADE';
+  const bassKillExtendToAnticipation =
+    ctx.useBassKill &&
+    config.anticipationTime >= 1.5 &&
+    bassKillExtendToAnticipationTypeOK;
+
+  // bassKill A rampStart adelantado:
+  //   - Si bassKillExtendToAnticipation: snap al downbeat más cercano de
+  //     `anticipationStartTime` (cap 1 bar backward).
+  //   - Else si preRollActive + useBassKill: snap al downbeat más
+  //     cercano de `preRollStart`.
+  //   - Else: undefined (sin override, rampStart = filterStartTime).
+  const bpmFromBeatIntervalA =
+    config.beatIntervalA > 0 ? 60.0 / config.beatIntervalA : 0;
+  let bassKillRampStartOverride: number | undefined;
+  if (bassKillExtendToAnticipation) {
+    bassKillRampStartOverride = snappedRampStart({
+      target: timings.anticipationStartTime,
+      downbeats: config.realDownbeatsA,
+      beats: config.downbeatTimesA,
+      bpmReported: bpmFromBeatIntervalA,
+      meter: config.meterA,
+      lowerBound: timings.startTime
+    });
+  } else if (preRollActive && ctx.useBassKill) {
+    bassKillRampStartOverride = snappedRampStart({
+      target: preRollStart,
+      downbeats: config.realDownbeatsA,
+      beats: config.downbeatTimesA,
+      bpmReported: bpmFromBeatIntervalA,
+      meter: config.meterA,
+      lowerBound: timings.startTime
+    });
+  } else {
+    bassKillRampStartOverride = undefined;
+  }
 
   // ── CUT family special handling (computed before pre-roll branch
   //    because pre-roll is gated by `!isCutFamily`) ──
@@ -260,6 +301,23 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
     if (t < cutStart) return FILTERS_NOT_SET;
     rampStart = cutStart;
   } else if (t < timings.filterStartTime) {
+    // ── Anticipation extension v15.d ──
+    // Si bassKillExtendToAnticipation + t en [anticipationStart, preRollStart],
+    // aplicar branch dedicado: band 1 cosSquared bassKill (rampStart =
+    // bassKillRampStartOverride desde anticipationStart), bands 0/2/3 en
+    // initial state. Cuando t llega a preRollStart, el pre-roll branch
+    // toma el relevo y evalúa la MISMA cosSquared con el mismo rampStart
+    // — continuidad C0 numérica garantizada.
+    if (
+      bassKillExtendToAnticipation &&
+      t >= timings.anticipationStartTime &&
+      t < preRollStart &&
+      bassKillRampStartOverride !== undefined
+    ) {
+      return applyBassKillAnticipationExtension(t, ctx, {
+        bassKillRampStart: bassKillRampStartOverride
+      });
+    }
     // Pre-roll window OR pre-pre-roll (no filters yet).
     if (preRollActive && t >= preRollStart) {
       return applyPreRollA(t, ctx, {
@@ -514,6 +572,75 @@ function applyPreRollA(
       gain = linInterp(hs.startGain, holdTarget, pp);
     }
     band3A = calcHighShelf(hs.frequency, gain, 1.0, sampleRate);
+  }
+
+  return { set: true, stages: [band0A, band1A, band2A, band3A] };
+}
+
+/**
+ * Anticipation extension branch — applies the bassKill cosSquared during
+ * `[anticipationStart, preRollStart]` so A loses bass gradually instead
+ * of suddenly when pre-roll kicks in. Mirrors iOS:2602-2638.
+ *
+ * Bands 0/2/3 stay in initial state (matches `setupInitialEQ`):
+ *   - band 0: highpass(startFreq) when !CUT && !useLowpassA, lowpass
+ *     (startFreq) when !CUT && useLowpassA, passthrough en CUT family.
+ *   - band 2: parametric(midScoop.startGain) when !CUT && useMidScoop.
+ *   - band 3: highShelf(highShelfA.startGain) when !CUT && useHighShelfCut.
+ *
+ * Band 1: cosSquared bassKill con `rampStart = bassKillRampStart` (=
+ * snapped anticipationStartTime). Cuando t llega a `preRollStart`, el
+ * branch pre-roll evaluará la MISMA cosSquared con el mismo rampStart →
+ * continuidad C0 numérica garantizada.
+ */
+function applyBassKillAnticipationExtension(
+  t: number,
+  ctx: FilterAutomationContext,
+  args: { bassKillRampStart: number }
+): FilterStages {
+  const { config, preset, sampleRate, useLowpassA, useMidScoop, useHighShelfCut, timings } = ctx;
+  const { bassKillRampStart } = args;
+  const isCutTransition =
+    config.transitionType === 'CUT' || config.transitionType === 'CUT_A_FADE_IN_B';
+  const rampEnd = timings.transitionEndTime;
+
+  // ── Band 0: highpass(startFreq) or lowpass(startFreq) in initial state.
+  let band0A: BiquadCoefficients = PASSTHROUGH;
+  if (!isCutTransition) {
+    if (useLowpassA && preset.lowpassA) {
+      band0A = calcLowpass(preset.lowpassA.startFreq, preset.lowpassA.q, sampleRate);
+    } else {
+      const hp = preset.highpassA;
+      band0A = calcHighpass(hp.startFreq, hp.q, sampleRate);
+    }
+  }
+
+  // ── Band 1: cosSquared bassKill with extended rampStart.
+  let band1A: BiquadCoefficients = PASSTHROUGH;
+  if (preset.lowshelfA) {
+    const ls = preset.lowshelfA;
+    const totalDur = rampEnd - bassKillRampStart;
+    if (totalDur > 0) {
+      const p = Math.min(1, Math.max(0, (t - bassKillRampStart) / totalDur));
+      const angle = (p * Math.PI) / 2;
+      const sinSq = Math.sin(angle) * Math.sin(angle);
+      const gain = sinSq * BASS_KILL_TARGET_DEPTH;
+      band1A = calcLowShelf(ls.frequency, gain, 1.0, sampleRate);
+    }
+  }
+
+  // ── Band 2: midScoop in initial state (startGain).
+  let band2A: BiquadCoefficients = PASSTHROUGH;
+  if (!isCutTransition && useMidScoop && preset.midScoopA) {
+    const ms = preset.midScoopA;
+    band2A = calcPeaking(ms.frequency, ms.startGain, ms.bandwidth, sampleRate);
+  }
+
+  // ── Band 3: highShelf in initial state (startGain).
+  let band3A: BiquadCoefficients = PASSTHROUGH;
+  if (!isCutTransition && useHighShelfCut && preset.highShelfA) {
+    const hs = preset.highShelfA;
+    band3A = calcHighShelf(hs.frequency, hs.startGain, 1.0, sampleRate);
   }
 
   return { set: true, stages: [band0A, band1A, band2A, band3A] };
