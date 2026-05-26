@@ -561,6 +561,18 @@ class AudioEngine {
     this.currentTime = this.chainA.audio.currentTime;
     this.endedHandled = false;
     this.isPlaying = !this.chainA.audio.paused;
+
+    // ── Reset del NUEVO chainA — restablece el "AutoMix scope" ──
+    // El nuevo chainA (= old chainB) viene del crossfade con
+    // `playbackRate = config.rateB` (time-stretch) y biquads en el
+    // estado final del fade (highpass abierto, lowshelf en endGain,
+    // notch peak, etc.). Sin reset, esos efectos seguirían aplicándose
+    // a todo el resto del track post-crossfade — el "AutoMix" se
+    // saldría del marco del crossfade. Mirror iOS resetTimeStretch +
+    // setupInitialEQ implícito al final del swap.
+    this.chainA.audio.playbackRate = 1.0;
+    this.chainA.audio.preservesPitch = true;
+    this.resetWorkletState(this.chainA);
   }
 
   /**
