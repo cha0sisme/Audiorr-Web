@@ -396,3 +396,29 @@ export type TriggerBiasResult = {
   readonly bias: number;
   readonly reason: string;
 };
+
+export type DJFilterResult = {
+  /** Cosine-bell mid-scoop active on band 2 of both A and B. Used to
+      separate overlapping vocals frequency-wise during the fade. */
+  readonly useMidScoop: boolean;
+  /** High-shelf cut at ~7kHz to tame brittle hi-hat / cymbal layering.
+      Disabled when either song's genre signature relies on the hi-hat
+      as a groove element (Hip-Hop family, Trap, Drill, Reggaeton, etc). */
+  readonly useHighShelfCut: boolean;
+  readonly reason: string;
+};
+
+export type DJEffectsResult = {
+  /** Instant low-frequency cut at bassSwapTime — removes "double-bombo"
+      when both A and B carry kicking low end at the same time. */
+  readonly useBassKill: boolean;
+  /** Bell-shaped Q sweep on A's highpass — DJ filter-rise effect. */
+  readonly useDynamicQ: boolean;
+  /** Phaser-style narrow parametric notch on B's band 2. Pairs with
+      dynamicQ for the "DJ knob ride" feel during the handoff. */
+  readonly useNotchSweep: boolean;
+  /** 1/8-note volume gate over A's last 2 beats before a CUT — DJ
+      Premier mixtape chop. Requires beat grid for runtime alignment. */
+  readonly useStutterCut: boolean;
+  readonly reason: string;
+};

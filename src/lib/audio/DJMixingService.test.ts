@@ -16,6 +16,8 @@ import {
   buildTransitionProfile,
   calculateAdaptiveFadeDuration,
   calculateTriggerBias,
+  decideDJEffects,
+  decideDJFilters,
   decideFilterUsage,
   decideTimeStretch,
   decideTransitionType,
@@ -1499,6 +1501,384 @@ describe('calculateTriggerBias', () => {
       fadeDuration: 10
     });
     expect(r.bias).toBeCloseTo(-4.0, 2);
+  });
+});
+
+// ============================================================================
+// decideDJFilters
+// ============================================================================
+
+describe('decideDJFilters', () => {
+  it('sin análisis → ambos OFF', () => {
+    const r = decideDJFilters({
+      profile: makeProfile(),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useMidScoop).toBe(false);
+    expect(r.useHighShelfCut).toBe(false);
+    expect(r.reason).toBe('Sin analisis');
+  });
+
+  it('A + B vocales en zona → midScoop ON', () => {
+    const cur = makeAnalysis({
+      hasVocalData: true,
+      hasOutroVocals: true
+    });
+    const next = makeAnalysis({
+      hasVocalData: true,
+      hasIntroVocals: true
+    });
+    const r = decideDJFilters({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile: makeProfile({ energyA: 0.1, energyB: 0.1 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useMidScoop).toBe(true);
+  });
+
+  it('B sin vocales (speechSegments fuera de zona) → midScoop OFF', () => {
+    const cur = makeAnalysis({
+      hasVocalData: true,
+      hasOutroVocals: true
+    });
+    const next = makeAnalysis({
+      hasVocalData: true,
+      hasIntroVocals: false,
+      speechSegments: [{ start: 40, end: 50 }] // fuera del fade [10, 16]
+    });
+    const r = decideDJFilters({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile: makeProfile({ energyA: 0.1, energyB: 0.1 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useMidScoop).toBe(false);
+  });
+
+  it('energyA > 0.20 + energyB > 0.15 → highShelfCut ON', () => {
+    const r = decideDJFilters({
+      currentAnalysis: makeAnalysis(),
+      nextAnalysis: makeAnalysis(),
+      profile: makeProfile({ energyA: 0.4, energyB: 0.3 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useHighShelfCut).toBe(true);
+  });
+
+  it('genre A en HIGH_SHELF_DISABLED_GENRES → highShelf OFF', () => {
+    const cur = makeAnalysis({ genres: ['Hip-Hop'] });
+    const next = makeAnalysis({ genres: ['Pop'] });
+    const r = decideDJFilters({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile: makeProfile({ energyA: 0.4, energyB: 0.3 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useHighShelfCut).toBe(false);
+    expect(r.reason).toContain('genero A');
+  });
+
+  it('genre B en HIGH_SHELF_DISABLED_GENRES → highShelf OFF', () => {
+    const cur = makeAnalysis({ genres: ['Pop'] });
+    const next = makeAnalysis({ genres: ['Reggaeton'] });
+    const r = decideDJFilters({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile: makeProfile({ energyA: 0.4, energyB: 0.3 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useHighShelfCut).toBe(false);
+    expect(r.reason).toContain('genero B');
+  });
+
+  it('ambos en el set → A+B', () => {
+    const cur = makeAnalysis({ genres: ['Trap'] });
+    const next = makeAnalysis({ genres: ['Drill'] });
+    const r = decideDJFilters({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile: makeProfile({ energyA: 0.4, energyB: 0.3 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useHighShelfCut).toBe(false);
+    expect(r.reason).toContain('genero A+B');
+  });
+
+  it('energyB ≤ 0.15 → highShelf NO se enciende', () => {
+    const r = decideDJFilters({
+      currentAnalysis: makeAnalysis(),
+      nextAnalysis: makeAnalysis(),
+      profile: makeProfile({ energyA: 0.4, energyB: 0.1 }),
+      fadeDuration: 6,
+      entryPoint: 10,
+      bufferADuration: 200
+    });
+    expect(r.useHighShelfCut).toBe(false);
+  });
+});
+
+// ============================================================================
+// decideDJEffects
+// ============================================================================
+
+describe('decideDJEffects', () => {
+  it('CUT con bpmTrusted + bpmA 100 + dance 0.6 + grid → stutterCut ON', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmA: 100,
+        avgDanceability: 0.6,
+        energyA: 0.3,
+        energyB: 0.3
+      }),
+      transitionType: 'CUT',
+      fadeDuration: 2,
+      isEnergyDown: false,
+      hasBeatGridA: true
+    });
+    expect(r.useStutterCut).toBe(true);
+    expect(r.useBassKill).toBe(false); // CUT no compatible con bassKill
+  });
+
+  it('CUT sin beatGridA → stutterCut OFF', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmA: 100,
+        avgDanceability: 0.6,
+        energyA: 0.3,
+        energyB: 0.3
+      }),
+      transitionType: 'CUT',
+      fadeDuration: 2,
+      isEnergyDown: false,
+      hasBeatGridA: false
+    });
+    expect(r.useStutterCut).toBe(false);
+  });
+
+  it('CUT con bpmA fuera de [80,180] → stutterCut OFF', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmA: 70,
+        avgDanceability: 0.6,
+        energyA: 0.3,
+        energyB: 0.3
+      }),
+      transitionType: 'CUT',
+      fadeDuration: 2,
+      isEnergyDown: false,
+      hasBeatGridA: true
+    });
+    expect(r.useStutterCut).toBe(false);
+  });
+
+  it('BMB punch + dance 0.7 + energy bueno + fade>4 → bassKill + dynQ ON', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useBassKill).toBe(true);
+    expect(r.useDynamicQ).toBe(true);
+  });
+
+  it('BMB punch fade > 5 + dance > 0.5 + dynQ ON → notchSweep ON', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useNotchSweep).toBe(true);
+  });
+
+  it('STEM_MIX nunca enciende notchSweep aunque dynQ ON', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'STEM_MIX',
+      fadeDuration: 8,
+      isEnergyDown: false
+    });
+    expect(r.useDynamicQ).toBe(true);
+    expect(r.useNotchSweep).toBe(false);
+  });
+
+  it('skipBFilters → notchSweep OFF', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false,
+      skipBFilters: true
+    });
+    expect(r.useNotchSweep).toBe(false);
+  });
+
+  it('isEnergyDown → dynQ + notchSweep OFF', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: true
+    });
+    expect(r.useDynamicQ).toBe(false);
+    expect(r.useNotchSweep).toBe(false);
+  });
+
+  it('CUT compatible NO enciende bassKill', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'CUT',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useBassKill).toBe(false);
+  });
+
+  it('smooth+dance ≥ 0.55 → bassKill eligible', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'smooth',
+        bpmTrusted: true,
+        avgDanceability: 0.6,
+        energyA: 0.3,
+        energyB: 0.3,
+        bpmRelationship: 'compatible'
+      }),
+      transitionType: 'CROSSFADE',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useBassKill).toBe(true);
+    expect(r.reason).toContain('smooth+dance');
+  });
+
+  it('minimal NO entra a bassKill eligibility', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'minimal',
+        bpmTrusted: true,
+        avgDanceability: 0.6,
+        energyA: 0.3,
+        energyB: 0.3
+      }),
+      transitionType: 'CROSSFADE',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useBassKill).toBe(false);
+  });
+
+  it('!bpmTrusted → bassKill + stutter OFF', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: false,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    expect(r.useBassKill).toBe(false);
+  });
+
+  it('energyA < 0.15 → mata dynQ + notch + stutter (pero NO bassKill)', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.10, // bassKill requiere >=0.10 → entra, pero soft override luego mata dyn/notch/stutter
+        energyB: 0.4
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false
+    });
+    // dynQ/notch dependen de dance>0.45 + character — eran ON. Soft mata.
+    expect(r.useDynamicQ).toBe(false);
+    expect(r.useNotchSweep).toBe(false);
+    // bassKill puede sobrevivir.
+    expect(r.useBassKill).toBe(true);
+  });
+
+  it('isChillContext → mata TODOS los efectos dinámicos', () => {
+    const r = decideDJEffects({
+      profile: makeProfile({
+        character: 'punch',
+        bpmTrusted: true,
+        avgDanceability: 0.7,
+        energyA: 0.4,
+        energyB: 0.4,
+        bpmA: 100
+      }),
+      transitionType: 'BEAT_MATCH_BLEND',
+      fadeDuration: 6,
+      isEnergyDown: false,
+      isChillContext: true
+    });
+    expect(r.useBassKill).toBe(false);
+    expect(r.useDynamicQ).toBe(false);
+    expect(r.useNotchSweep).toBe(false);
+    expect(r.useStutterCut).toBe(false);
+    expect(r.reason).toContain('chill');
   });
 });
 

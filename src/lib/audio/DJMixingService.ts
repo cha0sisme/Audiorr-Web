@@ -26,6 +26,8 @@
 
 import {
   type BPMRelationship,
+  type DJEffectsResult,
+  type DJFilterResult,
   type EnergyFlow,
   type FadeDurationResult,
   type FilterDecisionResult,
@@ -1029,6 +1031,313 @@ export function decideTransitionType(args: DecideTransitionTypeArgs): Transition
   return f5bRetiredFrom !== undefined
     ? { type, reason, f5bRetiredFrom, sequentialOverrideByVectorD }
     : { type, reason, sequentialOverrideByVectorD };
+}
+
+// ============================================================================
+// MARK: - DJ Filters (DJMixingService.swift:2854)
+// ============================================================================
+
+/**
+ * Genres where the high-shelf cut hurts more than it helps. Hi-hat is the
+ * groove signature in these families — cutting brilliance at 7-8kHz muddies
+ * the signature. Case-sensitive match against `SongAnalysis.genres`
+ * (Navidrome capitalization).
+ */
+const HIGH_SHELF_DISABLED_GENRES: ReadonlySet<string> = new Set([
+  'Hip-Hop', 'Alternative Hip-Hop', 'Latin Hip-Hop', 'Experimental Hip-Hop',
+  'Rap', 'UK Rap', 'Punk Rap', 'Progressive Rap', 'Emo Rap',
+  'Contemporary R&B', 'Latin R&B', 'Neo Soul', 'Urban Contemporary',
+  'Reggaeton', 'Dancehall',
+  'Trap', 'Trap Music', 'Latin Trap', 'Emo Trap',
+  'Drill', 'UK Drill', 'Plugg', 'Grime', 'Type Beat'
+]);
+
+/**
+ * Refined DJ filter decisions using actual fade zone (entry point + fade
+ * duration known). Mirrors `DJMixingService.swift:2854 decideDJFilters`.
+ *
+ * - **midScoop**: ON when A has vocals in the crossfade zone AND B has
+ *   vocals in the entry zone (precise zone detection, not just profile
+ *   flags).
+ * - **highShelfCut**: ON when energyA > 0.20 AND energyB > 0.15 (hi-hat
+ *   layering is audible). Overridden OFF when EITHER side has a genre
+ *   listed in `HIGH_SHELF_DISABLED_GENRES` — preserves the groove of both
+ *   tracks even if only one is hi-hat-driven.
+ */
+export function decideDJFilters(args: {
+  currentAnalysis?: SongAnalysis;
+  nextAnalysis?: SongAnalysis;
+  profile: TransitionProfile;
+  fadeDuration: number;
+  entryPoint: number;
+  bufferADuration: number;
+}): DJFilterResult {
+  const { currentAnalysis, nextAnalysis, profile, fadeDuration, entryPoint, bufferADuration } =
+    args;
+
+  if (!currentAnalysis && !nextAnalysis) {
+    return { useMidScoop: false, useHighShelfCut: false, reason: 'Sin analisis' };
+  }
+
+  let useMidScoop = false;
+  let useHighShelf = false;
+  const reasons: string[] = [];
+
+  const fmt2 = (n: number) => n.toFixed(2);
+
+  // ── Mid Scoop: refine vocal overlap with actual crossfade zone ──
+  if (currentAnalysis && nextAnalysis) {
+    const crossfadeStartA = bufferADuration - fadeDuration;
+    const bOverlapEnd = entryPoint + fadeDuration;
+
+    // A vocals in zone — chain: backend flag → vocalEndData → speechSegments
+    // → fallback (assume vocals when no data, safer for pop/hip-hop;
+    // outroInstrumental is a separate, more reliable signal applied later).
+    let aVocalsInZone = true;
+    if (currentAnalysis.hasVocalData && currentAnalysis.hasOutroVocals) {
+      aVocalsInZone = true;
+    } else if (
+      currentAnalysis.hasVocalEndData &&
+      currentAnalysis.lastVocalTime > crossfadeStartA
+    ) {
+      aVocalsInZone = true;
+    } else if (currentAnalysis.speechSegments.length > 0) {
+      aVocalsInZone = currentAnalysis.speechSegments.some((s) => s.end > crossfadeStartA);
+    }
+    // else: aVocalsInZone stays true (fallback).
+
+    // B vocals in entry zone — analogous chain.
+    let bVocalsInZone = true;
+    if (nextAnalysis.hasVocalData && nextAnalysis.hasIntroVocals) {
+      bVocalsInZone = true;
+    } else if (nextAnalysis.speechSegments.length > 0) {
+      bVocalsInZone = nextAnalysis.speechSegments.some(
+        (s) => s.start < bOverlapEnd && s.end > entryPoint
+      );
+    }
+    // else: bVocalsInZone stays true (fallback).
+
+    if (aVocalsInZone && bVocalsInZone) {
+      useMidScoop = true;
+      reasons.push('mid scoop: voces solapadas');
+    }
+  }
+
+  // ── High-Shelf: energy-based hi-hat detection ──
+  // Backend energy values are compressed (most music 0.05-0.42), so
+  // thresholds must be low. Hi-hat / cymbal cleanup is subtle and harmless
+  // on false positives — err on the side of activating.
+  if (profile.energyA > 0.20 && profile.energyB > 0.15) {
+    useHighShelf = true;
+    reasons.push(
+      `hi-shelf: energia A=${fmt2(profile.energyA)} B=${fmt2(profile.energyB)}`
+    );
+  }
+
+  // ── Genre override: high-shelf cut destroys hi-hat groove signature ──
+  if (useHighShelf) {
+    const aGenres = currentAnalysis?.genres ?? [];
+    const bGenres = nextAnalysis?.genres ?? [];
+    const aHit = aGenres.some((g) => HIGH_SHELF_DISABLED_GENRES.has(g));
+    const bHit = bGenres.some((g) => HIGH_SHELF_DISABLED_GENRES.has(g));
+    if (aHit || bHit) {
+      useHighShelf = false;
+      const side = aHit && bHit ? 'A+B' : aHit ? 'A' : 'B';
+      reasons.push(`hi-shelf OFF [genero ${side}: hi-hat groove]`);
+    }
+  }
+
+  const reason =
+    reasons.length === 0 ? 'DJ filters OFF' : `DJ filters ON: ${reasons.join(', ')}`;
+  return { useMidScoop, useHighShelfCut: useHighShelf, reason };
+}
+
+// ============================================================================
+// MARK: - DJ Effects (DJMixingService.swift:2979)
+// ============================================================================
+
+/**
+ * Decide which DJ effects to activate. Mirrors
+ * `DJMixingService.swift:2979 decideDJEffects`.
+ *
+ * Effects are conservative — only activate when conditions guarantee they
+ * sound good and won't interfere with transition quality.
+ *
+ *   - **bassKill**: punch / dramatic-up / smooth+dance, BPM trusted, both
+ *     energies ≥ 0.10, danceability > 0.4, fade > 4s, compatible type
+ *     (eqMix / BMB / crossfade / cutAFadeInB / fadeOutACutB).
+ *   - **dynamicQ**: NOT energy-down, fade > 4s, dance > 0.45, character
+ *     punch or dramatic-not-down.
+ *   - **notchSweep**: pairs with dynamicQ. ALSO requires NOT skipBFilters,
+ *     NOT stem mix, fade > 5s, dance > 0.5.
+ *   - **stutterCut**: only CUT family, bpmTrusted, BPM ∈ [80, 180], dance
+ *     > 0.50, fade ≥ 1.5s, hasBeatGridA.
+ *
+ * Overrides at the bottom:
+ *   - energyA < 0.15 → kill dynQ / notch / stutter (low-energy A makes
+ *     filter modulation read as "filter weirdness", not DJ technique).
+ *   - isChillContext → kill ALL moving effects (bassKill, dynQ, notch,
+ *     stutter). Static EQ presets stay alive.
+ */
+export function decideDJEffects(args: {
+  profile: TransitionProfile;
+  transitionType: TransitionType;
+  fadeDuration: number;
+  isEnergyDown: boolean;
+  needsAnticipation?: boolean;
+  skipBFilters?: boolean;
+  /** True when A has a non-empty beat grid the executor can anchor to.
+      Without this, Stutter Cut would chop blindly relative to wall-clock
+      and land off-grid. */
+  hasBeatGridA?: boolean;
+  /** Chill context detected upstream — suppress everything that *moves*
+      (sweeps, automations, rhythmic gates). Static EQ presets are not
+      affected. */
+  isChillContext?: boolean;
+}): DJEffectsResult {
+  const {
+    profile,
+    transitionType,
+    fadeDuration,
+    isEnergyDown,
+    skipBFilters = false,
+    hasBeatGridA = false,
+    isChillContext = false
+  } = args;
+
+  let useBassKill = false;
+  let useDynamicQ = false;
+  let useNotchSweep = false;
+  let useStutterCut = false;
+  const reasons: string[] = [];
+
+  const fmt1 = (n: number) => n.toFixed(1);
+  const fmt2 = (n: number) => n.toFixed(2);
+
+  // ── Bass Kill ──
+  let bassKillCompatibleType = false;
+  switch (transitionType) {
+    case 'EQ_MIX':
+    case 'BEAT_MATCH_BLEND':
+    case 'CROSSFADE':
+    case 'CUT_A_FADE_IN_B':
+    case 'FADE_OUT_A_CUT_B':
+      bassKillCompatibleType = true;
+      break;
+    case 'CUT':
+    case 'NATURAL_BLEND':
+    case 'CLEAN_HANDOFF':
+    case 'STEM_MIX':
+    case 'DROP_MIX':
+    case 'VINYL_STOP':
+    case 'SEQUENTIAL':
+      // CLEAN_HANDOFF: no overlap, no bass conflict. SEQUENTIAL: 50ms only.
+      // STEM_MIX: stem swap IS the moment, adding bass kill muddies it.
+      // DROP_MIX: already has HPF ramp on A — three effects in <4s feels busy.
+      // CUT: too short to register a kill. NATURAL_BLEND: invisible by design.
+      // VINYL_STOP: own gesture IS the effect.
+      bassKillCompatibleType = false;
+      break;
+  }
+
+  const dramaticEligible =
+    profile.character === 'dramatic' && profile.energyFlow === 'energyUp';
+  const punchEligible = profile.character === 'punch';
+  const smoothEligible = profile.character === 'smooth' && profile.avgDanceability >= 0.55;
+  const characterEligible = punchEligible || dramaticEligible || smoothEligible;
+
+  if (
+    bassKillCompatibleType &&
+    profile.bpmTrusted &&
+    profile.avgDanceability > 0.4 &&
+    fadeDuration > 4.0 &&
+    profile.energyA >= 0.10 &&
+    profile.energyB >= 0.10 &&
+    characterEligible
+  ) {
+    useBassKill = true;
+    const charLabel = punchEligible
+      ? 'punch'
+      : dramaticEligible
+        ? 'dramatic-up'
+        : 'smooth+dance';
+    reasons.push(
+      `bassKill[${charLabel}]: dance=${fmt2(profile.avgDanceability)} energyA=${fmt2(profile.energyA)} energyB=${fmt2(profile.energyB)}`
+    );
+  }
+
+  // ── Dynamic Q Resonance ──
+  if (
+    !isEnergyDown &&
+    fadeDuration > 4.0 &&
+    profile.avgDanceability > 0.45 &&
+    (profile.character === 'punch' ||
+      (profile.character === 'dramatic' && profile.energyFlow !== 'energyDown'))
+  ) {
+    useDynamicQ = true;
+    reasons.push(
+      `dynQ: dance=${fmt2(profile.avgDanceability)} fade=${fmt1(fadeDuration)}s`
+    );
+  }
+
+  // ── Phaser Notch Sweep ──
+  // Stacks musically with dynQ (different biquad bands — band 2 vs band 0/1).
+  // Excluded on STEM_MIX (stem swap is its own dramatic moment, adding a
+  // colorful notch obscures the intentional mid-only character of B's entry).
+  if (
+    useDynamicQ &&
+    !skipBFilters &&
+    transitionType !== 'STEM_MIX' &&
+    fadeDuration > 5.0 &&
+    profile.avgDanceability > 0.5
+  ) {
+    useNotchSweep = true;
+    reasons.push(`notchSweep: pair with dynQ, fade=${fmt1(fadeDuration)}s`);
+  }
+
+  // ── Stutter Cut ──
+  const stutterCompatibleType =
+    transitionType === 'CUT' || transitionType === 'CUT_A_FADE_IN_B';
+  if (
+    stutterCompatibleType &&
+    profile.bpmTrusted &&
+    profile.bpmA >= 80 &&
+    profile.bpmA <= 180 &&
+    profile.avgDanceability > 0.50 &&
+    fadeDuration >= 1.5 &&
+    hasBeatGridA
+  ) {
+    useStutterCut = true;
+    reasons.push(
+      `stutter: cut@${Math.trunc(profile.bpmA)}BPM dance=${fmt2(profile.avgDanceability)}`
+    );
+  }
+
+  // ── Energy-A floor: soft modulation effects when A is low-energy ──
+  // Backend energy is compressed (most music 0.05–0.30), so <0.15 is a
+  // low-energy passage. Filter modulation near-silence reads as "filter
+  // weirdness", not DJ technique. bassKill (instant cut) is fine — kept.
+  if (profile.energyA < 0.15 && (useDynamicQ || useNotchSweep || useStutterCut)) {
+    useDynamicQ = false;
+    useNotchSweep = false;
+    useStutterCut = false;
+    reasons.push('energyA<0.15: soft (no dynQ/notch/stutter)');
+  }
+
+  // ── Chill context override ──
+  // Kills everything that *moves*. Static EQ presets (lowshelf, fixed
+  // highpass) survive — they're upstream of this decisor.
+  if (isChillContext && (useBassKill || useDynamicQ || useNotchSweep || useStutterCut)) {
+    useBassKill = false;
+    useDynamicQ = false;
+    useNotchSweep = false;
+    useStutterCut = false;
+    reasons.push('chill: kill all dynamic FX');
+  }
+
+  const reason =
+    reasons.length === 0 ? 'DJ effects OFF' : `DJ effects ON: ${reasons.join(', ')}`;
+  return { useBassKill, useDynamicQ, useNotchSweep, useStutterCut, reason };
 }
 
 // ============================================================================
