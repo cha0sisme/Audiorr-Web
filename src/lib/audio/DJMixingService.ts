@@ -34,10 +34,12 @@ import {
   type MixMode,
   MIX_MODE_CONFIGS,
   type SongAnalysis,
+  type TimeStretchResult,
   type TransitionCharacter,
   type TransitionProfile,
   type TransitionType,
   type TransitionTypeResult,
+  type TriggerBiasResult,
   type VocalOverlapRisk
 } from './dj-types';
 import { harmonicPenaltyIsClash } from './dj-types';
@@ -1027,6 +1029,213 @@ export function decideTransitionType(args: DecideTransitionTypeArgs): Transition
   return f5bRetiredFrom !== undefined
     ? { type, reason, f5bRetiredFrom, sequentialOverrideByVectorD }
     : { type, reason, sequentialOverrideByVectorD };
+}
+
+// ============================================================================
+// MARK: - Time-Stretch Decision (DJMixingService.swift:4001)
+// ============================================================================
+
+/**
+ * Decide whether and how to time-stretch A and/or B to meet halfway.
+ * Mirrors `DJMixingService.swift:4001 decideTimeStretch`.
+ *
+ * Cuts / handoffs and VINYL_STOP never stretch. Diff < 3 BPM: no stretch
+ * needed. Diff ≤ 8: stretch B → A's BPM. Diff ≤ 15: stretch both to the
+ * midpoint. Diff > 15: too far, no stretch (a >8% rate change becomes
+ * pitch-audible).
+ */
+export function decideTimeStretch(args: {
+  profile: TransitionProfile;
+  transitionType: TransitionType;
+}): TimeStretchResult {
+  const { profile, transitionType } = args;
+
+  switch (transitionType) {
+    case 'CUT':
+    case 'CUT_A_FADE_IN_B':
+    case 'FADE_OUT_A_CUT_B':
+    case 'CLEAN_HANDOFF':
+    case 'SEQUENTIAL':
+      return {
+        useTimeStretch: false,
+        rateA: 1.0,
+        rateB: 1.0,
+        reason: 'No stretch: transicion tipo cut/handoff'
+      };
+    case 'VINYL_STOP':
+      // VINYL_STOP OWNS the rate ramp on A (1.0 → 0). No global time-stretch
+      // — the curve is driven directly by the executor.
+      return {
+        useTimeStretch: false,
+        rateA: 1.0,
+        rateB: 1.0,
+        reason: 'No stretch: rate ramp owned por VINYL_STOP'
+      };
+    default:
+      break;
+  }
+
+  if (
+    profile.bpmA <= 50 ||
+    profile.bpmA >= 250 ||
+    profile.bpmB <= 50 ||
+    profile.bpmB >= 250
+  ) {
+    return {
+      useTimeStretch: false,
+      rateA: 1.0,
+      rateB: 1.0,
+      reason: 'No stretch: BPM fuera de rango'
+    };
+  }
+
+  if (!profile.bpmTrusted) {
+    return {
+      useTimeStretch: false,
+      rateA: 1.0,
+      rateB: 1.0,
+      reason: 'No stretch: BPM no confiable (confidence < 0.5)'
+    };
+  }
+
+  const diff = profile.bpmDiff;
+  const maxRateChange = 0.08; // 8% — still inaudible with time-domain stretching
+
+  const fmt1 = (n: number) => n.toFixed(1);
+  const fmt3 = (n: number) => n.toFixed(3);
+
+  if (diff < 3) {
+    return {
+      useTimeStretch: false,
+      rateA: 1.0,
+      rateB: 1.0,
+      reason: `No stretch: BPMs casi iguales (±${fmt1(diff)})`
+    };
+  } else if (diff <= 8) {
+    const rateB = profile.bpmA / profile.bpmBNormalized;
+    if (Math.abs(rateB - 1.0) > maxRateChange) {
+      return {
+        useTimeStretch: false,
+        rateA: 1.0,
+        rateB: 1.0,
+        reason: `No stretch: rate ${fmt1(Math.abs(rateB - 1.0) * 100)}% > 8% (audible)`
+      };
+    }
+    return {
+      useTimeStretch: true,
+      rateA: 1.0,
+      rateB,
+      reason: `Stretch B→A: ${Math.trunc(profile.bpmBNormalized)}→${Math.trunc(profile.bpmA)} BPM (rate=${fmt3(rateB)})`
+    };
+  } else if (diff <= 15) {
+    const mid = (profile.bpmA + profile.bpmBNormalized) / 2.0;
+    const rateA = mid / profile.bpmA;
+    const rateB = mid / profile.bpmBNormalized;
+    if (Math.abs(rateA - 1.0) > maxRateChange || Math.abs(rateB - 1.0) > maxRateChange) {
+      return {
+        useTimeStretch: false,
+        rateA: 1.0,
+        rateB: 1.0,
+        reason: `No stretch: rate change > 8% (A:${fmt1(Math.abs(rateA - 1.0) * 100)}% B:${fmt1(Math.abs(rateB - 1.0) * 100)}%)`
+      };
+    }
+    return {
+      useTimeStretch: true,
+      rateA,
+      rateB,
+      reason: `Stretch ambos→${Math.trunc(mid)} BPM: A=${fmt3(rateA)} B=${fmt3(rateB)}`
+    };
+  } else {
+    return {
+      useTimeStretch: false,
+      rateA: 1.0,
+      rateB: 1.0,
+      reason: `No stretch: diferencia demasiado grande (±${Math.trunc(diff)} BPM)`
+    };
+  }
+}
+
+// ============================================================================
+// MARK: - Trigger Bias (DJMixingService.swift:3443)
+// ============================================================================
+
+/**
+ * How much earlier or later the crossfade should trigger on A, based on the
+ * A↔B relationship. Mirrors `DJMixingService.swift:3443 calculateTriggerBias`.
+ *
+ * Default trigger = "as late as possible so fade fits before A ends".
+ * Bias shifts it: negative = start earlier (longer overlap), positive = start
+ * later (tighter).
+ *
+ *   - minimal: trigger up to fadeDuration*0.4 earlier (cap 5s).
+ *   - smooth:  trigger up to fadeDuration*0.25 earlier (cap 3s).
+ *   - dramatic DOWN: trigger up to fadeDuration*0.3 earlier (cap 4s).
+ *   - dramatic UP:   trigger up to fadeDuration*0.15 later (cap 2s).
+ *   - punch: default (0); high styleAffinity adds +1s.
+ *   - bass conflict: −fadeDuration*0.15 (cap 2s) when bias > -3.
+ *   - vocal overlap both: −fadeDuration*0.2 (cap 2s) when bias > -2.
+ *   - high affinity + punch: +1.0s.
+ */
+export function calculateTriggerBias(args: {
+  profile: TransitionProfile;
+  fadeDuration: number;
+}): TriggerBiasResult {
+  const { profile, fadeDuration } = args;
+  const reasons: string[] = [];
+  let bias = 0;
+
+  const fmt1 = (n: number) => n.toFixed(1);
+
+  switch (profile.character) {
+    case 'minimal':
+      bias -= Math.min(5, fadeDuration * 0.4);
+      reasons.push(`minimal: trigger ${fmt1(Math.abs(bias))}s antes`);
+      break;
+    case 'smooth':
+      bias -= Math.min(3, fadeDuration * 0.25);
+      reasons.push(`smooth: trigger ${fmt1(Math.abs(bias))}s antes`);
+      break;
+    case 'dramatic':
+      if (profile.energyFlow === 'energyDown') {
+        bias -= Math.min(4, fadeDuration * 0.3);
+        reasons.push(`dramatic DOWN: trigger ${fmt1(Math.abs(bias))}s antes`);
+      } else if (profile.energyFlow === 'energyUp') {
+        bias += Math.min(2, fadeDuration * 0.15);
+        reasons.push(`dramatic UP: trigger ${fmt1(bias)}s despues`);
+      }
+      // steady + dramatic (harmonic clash): default timing, just get through it.
+      break;
+    case 'punch':
+      // Compatible BPMs — default timing. Vocal/bass adjustments below.
+      break;
+  }
+
+  // ── Bass conflict: start earlier so filters have time to separate the low end ──
+  if (profile.bassConflictRisk && bias > -3) {
+    const bassAdj = Math.min(2, fadeDuration * 0.15);
+    bias -= bassAdj;
+    reasons.push(`bass conflict: -${fmt1(bassAdj)}s`);
+  }
+
+  // ── Vocal overlap both: A and B both vocal → fade A's earlier ──
+  if (profile.vocalOverlapRisk === 'both' && bias > -2) {
+    const vocalAdj = Math.min(2, fadeDuration * 0.2);
+    bias -= vocalAdj;
+    reasons.push(`vocal overlap: -${fmt1(vocalAdj)}s`);
+  }
+
+  // ── High style affinity + punch: can afford slightly later trigger ──
+  if (profile.styleAffinity > 0.8 && profile.character === 'punch') {
+    bias += 1.0;
+    reasons.push('alta afinidad: +1s');
+  }
+
+  const reason =
+    reasons.length === 0
+      ? 'Trigger bias: 0 (default)'
+      : `Trigger bias: ${bias >= 0 ? '+' : ''}${fmt1(bias)}s (${reasons.join(', ')})`;
+
+  return { bias, reason };
 }
 
 // ============================================================================

@@ -380,3 +380,19 @@ export type FilterDecisionResult = {
   readonly bpmDiff: number;
   readonly reason: string;
 };
+
+export type TimeStretchResult = {
+  readonly useTimeStretch: boolean;
+  /** Playback rate to apply to A. 1.0 = no stretch. */
+  readonly rateA: number;
+  /** Playback rate to apply to B. 1.0 = no stretch. */
+  readonly rateB: number;
+  readonly reason: string;
+};
+
+export type TriggerBiasResult = {
+  /** Negative = earlier than default, positive = later, 0 = default
+      ("as late as possible so fade fits before A ends"). */
+  readonly bias: number;
+  readonly reason: string;
+};
