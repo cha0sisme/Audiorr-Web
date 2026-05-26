@@ -25,6 +25,7 @@
  */
 
 import {
+  type AnticipationResult,
   type BPMRelationship,
   type DJEffectsResult,
   type DJFilterResult,
@@ -179,6 +180,32 @@ export function isBDropDrivenByPercussive(
   const denom = Math.max(intro, 0.01);
   const ratio = main / denom;
   return { isDrop: ratio >= 2.0, ratio };
+}
+
+/**
+ * Drop-driven genres (trap, drill, hip-hop, industrial) — used by the A2
+ * widening anticipation gate to suppress sub-bass conflict between a
+ * high-BPM kick-driven A and a sub-808 drop-driven B. Mirrors
+ * `dropDrivenBassGenres` in iOS DJMixingService.swift:4573. Match is
+ * substring case-insensitive: "trap" ∈ "Latin Trap" → true.
+ */
+const DROP_DRIVEN_BASS_GENRES: readonly string[] = [
+  'trap', 'drill', 'hip-hop', 'hip hop', 'industrial'
+];
+
+/**
+ * True if any genre in the list contains one of the drop-driven substrings.
+ * Mirrors `DJMixingService.swift:4591 isBDropDrivenBass`.
+ */
+export function isBDropDrivenBass(genres: readonly string[]): boolean {
+  if (genres.length === 0) return false;
+  for (const g of genres) {
+    const lower = g.toLowerCase();
+    for (const pat of DROP_DRIVEN_BASS_GENRES) {
+      if (lower.includes(pat)) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -1338,6 +1365,275 @@ export function decideDJEffects(args: {
   const reason =
     reasons.length === 0 ? 'DJ effects OFF' : `DJ effects ON: ${reasons.join(', ')}`;
   return { useBassKill, useDynamicQ, useNotchSweep, useStutterCut, reason };
+}
+
+// ============================================================================
+// MARK: - Anticipation (DJMixingService.swift:3208)
+// ============================================================================
+
+export type DecideAnticipationArgs = {
+  fadeDuration: number;
+  entryPoint: number;
+  transitionType: TransitionType;
+  /** When A has no real outro (groove until the very end), anticipation
+      would cut material the listener is still expecting. */
+  noRealOutro?: boolean;
+  /** `transitionReason` string from the decisor. Used to detect Vocal
+      Trainwreck / Polirritmia overrides which should suppress tease. */
+  transitionReason?: string;
+  /** B's instrumental intro window (heuristic or backend introEnd). */
+  bIntroSpace?: number;
+  /** B's vocal onset time (0 = unknown / vocal at t=0, treated as unknown
+      until backfill is shipped). */
+  vocalStartB?: number;
+  /** BPM of A — gate for A2 widening drop-driven skip. */
+  bpmA?: number;
+  /** B genres — fed into `isBDropDrivenBass`. */
+  bGenres?: readonly string[];
+  /** A's rmsTailCurve — `deriveSlope(tailWindows=8)` detects natural decay. */
+  rmsTailCurveA?: readonly number[];
+  /** Caller's prediction of whether aggressive filters (bassKill / dynQ /
+      notchSweep / stutterCut) will activate. Adds an anticipation extra
+      so the filter onset is not abrupt. */
+  filtersAggressivePredicted?: boolean;
+};
+
+/**
+ * Decide whether to engage anticipation (pre-fade tease of B with filters
+ * armed). Mirrors `DJMixingService.swift:3208 decideAnticipation`.
+ *
+ * Paths in order:
+ *   1. noRealOutro → no tease (would cut groove the listener expects).
+ *   2. CUT forced by safety (Vocal Trainwreck / Polirritmia) → no tease.
+ *   3. DROP_MIX / CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL → no tease.
+ *   4. CUT + entryPoint ≥ 5 → tease (min 2.5s, max 4s, entry × 0.3).
+ *   5. PRE_PUNCH path: bIntroSpace ≥ 6s + entryPoint ≥ 7s + blendy type
+ *      (CROSSFADE/BMB/EQ_MIX) + vocalSafetyMargin ≥ 4s → extended tease
+ *      (4–7s, capped by bIntroSpace − 2 and vocal margin).
+ *   6. A2 widening: fade < 11s (or 8s when high-BPM A meets drop-driven
+ *      B) + entryPoint ≥ 5 → base anticipation up to 4s.
+ *   7. Extra triggers (rmsTailCurve slope < −0.003/s on tailWindows=8 OR
+ *      filtersAggressivePredicted) add up to 2s on top, capped at 4s.
+ *      If A2 didn't fire but extras do, they trigger anticipation by
+ *      themselves (≥ 1s).
+ */
+export function decideAnticipation(args: DecideAnticipationArgs): AnticipationResult {
+  const {
+    fadeDuration,
+    entryPoint,
+    transitionType,
+    noRealOutro = false,
+    transitionReason = '',
+    bIntroSpace = 0,
+    vocalStartB = 0,
+    bpmA = 0,
+    bGenres = [],
+    rmsTailCurveA,
+    filtersAggressivePredicted = false
+  } = args;
+
+  const fmt1 = (n: number) => n.toFixed(1);
+
+  // ── No real outro: pre-mute would cut groove the listener expects ──
+  if (noRealOutro) {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: A sin outro real (groove hasta el final)',
+      isPrePunch: false
+    };
+  }
+
+  // ── Safety-forced CUT (Vocal Trainwreck / Polirritmia) skips tease ──
+  // Those CUTs evade clashes, not preview B. Tease would emit filtered B
+  // at low gain before the swap — heard as unwanted fade. Genuine
+  // outro-instrumental + B-abrupta CUT keeps its tease (different reason).
+  if (
+    transitionType === 'CUT' &&
+    (transitionReason.includes('Vocal Trainwreck') ||
+      transitionReason.includes('Polirritmia'))
+  ) {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: CUT forzado por safety (no tease)',
+      isPrePunch: false
+    };
+  }
+
+  const hasEnoughIntro = entryPoint >= 5;
+
+  // ── DROP_MIX / CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL: own gestures ──
+  if (transitionType === 'DROP_MIX') {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: DROP_MIX - entrada directa',
+      isPrePunch: false
+    };
+  }
+  if (transitionType === 'CLEAN_HANDOFF') {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: CLEAN_HANDOFF - entrada secuencial',
+      isPrePunch: false
+    };
+  }
+  if (transitionType === 'VINYL_STOP') {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: VINYL_STOP - gesto de A primero',
+      isPrePunch: false
+    };
+  }
+  if (transitionType === 'SEQUENTIAL') {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: SEQUENTIAL - A termina natural',
+      isPrePunch: false
+    };
+  }
+
+  // ── CUT-specific tease: preview B filtered before the hard swap ──
+  if (transitionType === 'CUT' && hasEnoughIntro) {
+    const time = Math.min(4.0, Math.max(2.5, entryPoint * 0.3));
+    return {
+      needsAnticipation: true,
+      anticipationTime: time,
+      reason: `Anticipacion CUT: tease +${fmt1(time)}s antes del swap`,
+      isPrePunch: false
+    };
+  }
+
+  // ── PRE_PUNCH path ──
+  // B has clear instrumental intro (bIntroSpace ≥ 6) + blendy type
+  // + entry ≥ 7s + vocal safety margin ≥ 4s → extended tease where B
+  // plays clean for 4-7s before the main fade. Caller forces
+  // `skipBFilters=true` when isPrePunch=true so B is audible from the
+  // first instant of the tease.
+  //
+  // Mechanics: B plays from entryPoint. During the tease (X seconds),
+  // B sounds positions entryPoint..entryPoint+X. We require
+  // entryPoint + X ≤ vocalStartB − 2 → X ≤ vocalStartB − entryPoint − 2.
+  // If vocalSafetyMargin < 4 (min reasonable prePunchTime), don't fire.
+  const prePunchEligibleType =
+    transitionType === 'CROSSFADE' ||
+    transitionType === 'BEAT_MATCH_BLEND' ||
+    transitionType === 'EQ_MIX';
+  if (bIntroSpace >= 6 && entryPoint >= 7 && prePunchEligibleType) {
+    const vocalSafetyMargin = vocalStartB - entryPoint - 2.0;
+    if (vocalSafetyMargin >= 4.0) {
+      const prePunchTime = Math.min(
+        7.0,
+        Math.max(4.0, Math.min(bIntroSpace - 2.0, vocalSafetyMargin))
+      );
+      return {
+        needsAnticipation: true,
+        anticipationTime: prePunchTime,
+        reason: `PRE_PUNCH: B suena clean ${fmt1(prePunchTime)}s antes (intro instr ${fmt1(bIntroSpace)}s, vocal margin ${fmt1(vocalSafetyMargin)}s)`,
+        isPrePunch: true
+      };
+    }
+  }
+
+  // ── A2 widening ──
+  // Original window "fade < 8 → anticipation" is extended to "fade < 11"
+  // so intermediate fades also get a tease.
+  //
+  // Gate skip: when A is high-BPM (≥125, four-on-the-floor euro/dance-pop)
+  // AND B is drop-driven (trap/drill/hip-hop/industrial sub-808), the
+  // widening would create sub-conflict. Keep the previous behaviour (fade
+  // < 8) in that case. Default conservative: if bpmA invalid or bGenres
+  // empty → NO skip (apply widening).
+  const bpmAValid = Number.isFinite(bpmA) && bpmA > 0;
+  const shouldSkipA2Widening = bpmAValid && bpmA >= 125.0 && isBDropDrivenBass(bGenres);
+  const widenThreshold = shouldSkipA2Widening ? 8.0 : 11.0;
+  const needs = fadeDuration < widenThreshold && hasEnoughIntro;
+
+  // ── Extra triggers (additive to A2 widening, capped at total 4s) ──
+  // (a) outroSlopeSteep: A decaying naturally (slope < −0.003/s on tail
+  //     windows=8 ≈ last 40s). Give B air before the real fade because
+  //     listener already perceives A "leaving".
+  // (b) filtersAggressivePredicted: caller anticipates aggressive filter
+  //     activation (bassKill/dynQ/notchSweep/stutterCut). Filters enter
+  //     hard at filterStartTime which cascades from anticipationTime.
+  //     Advancing rampStart smooths the filter onset.
+  //
+  // Both triggers are gated by hasEnoughIntro (entryPoint ≥ 5 — no
+  // margin otherwise).
+  const tailSlope = deriveSlope(rmsTailCurveA, { tailWindows: 8 });
+  const outroSlopeSteepRaw = tailSlope !== undefined && tailSlope < -0.003;
+  const outroSlopeSteep = hasEnoughIntro && outroSlopeSteepRaw;
+  const filtersAggressiveExtra = hasEnoughIntro && filtersAggressivePredicted;
+  const extraTriggered = outroSlopeSteep || filtersAggressiveExtra;
+  const outroSlopeExtra = extraTriggered ? Math.min(2.0, fadeDuration * 0.3) : 0;
+  const extraReasonTag: string =
+    outroSlopeSteep && filtersAggressiveExtra
+      ? 'outroSlopeSteep+filtersAggressive'
+      : outroSlopeSteep
+        ? 'outroSlopeSteep'
+        : filtersAggressiveExtra
+          ? 'filtersAggressive'
+          : '';
+
+  if (needs) {
+    const maxAnticipation = Math.min(4, entryPoint * 0.3);
+    const baseTime = Math.min(maxAnticipation, Math.max(2, 10 - fadeDuration));
+    const totalTime = Math.min(4.0, baseTime + outroSlopeExtra);
+    const detail = shouldSkipA2Widening
+      ? `fade corto, A2 gate skip (bpmA=${fmt1(bpmA)} drop-driven B)`
+      : 'fade corto';
+    if (outroSlopeExtra > 0) {
+      return {
+        needsAnticipation: true,
+        anticipationTime: totalTime,
+        reason: `Anticipacion: +${fmt1(totalTime)}s (${detail} + ${extraReasonTag} +${fmt1(totalTime - baseTime)}s)`,
+        isPrePunch: false,
+        anticipationReason: extraReasonTag
+      };
+    }
+    return {
+      needsAnticipation: true,
+      anticipationTime: totalTime,
+      reason: `Anticipacion: +${fmt1(totalTime)}s (${detail})`,
+      isPrePunch: false
+    };
+  }
+
+  // A2 widening didn't fire. If extras still trigger AND there's room,
+  // fire only the extra (covers long fades that wouldn't anticipate
+  // otherwise).
+  if (extraTriggered) {
+    const maxAnticipation = Math.min(4, entryPoint * 0.3);
+    const time = Math.min(maxAnticipation, outroSlopeExtra);
+    if (time >= 1.0) {
+      return {
+        needsAnticipation: true,
+        anticipationTime: time,
+        reason: `Anticipacion: +${fmt1(time)}s (${extraReasonTag}, fade largo)`,
+        isPrePunch: false,
+        anticipationReason: extraReasonTag
+      };
+    }
+  }
+
+  if (fadeDuration >= widenThreshold) {
+    return {
+      needsAnticipation: false,
+      anticipationTime: 0,
+      reason: 'Sin anticipacion: fade largo',
+      isPrePunch: false
+    };
+  }
+  return {
+    needsAnticipation: false,
+    anticipationTime: 0,
+    reason: 'Sin anticipacion: intro insuficiente',
+    isPrePunch: false
+  };
 }
 
 // ============================================================================

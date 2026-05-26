@@ -16,6 +16,7 @@ import {
   buildTransitionProfile,
   calculateAdaptiveFadeDuration,
   calculateTriggerBias,
+  decideAnticipation,
   decideDJEffects,
   decideDJFilters,
   decideFilterUsage,
@@ -26,7 +27,8 @@ import {
   detectOutroInstrumental,
   harmonicBPM,
   harmonicPenalty,
-  isBDropDrivenByPercussive
+  isBDropDrivenByPercussive,
+  isBDropDrivenBass
 } from './DJMixingService';
 import {
   type BPMRelationship,
@@ -1879,6 +1881,236 @@ describe('decideDJEffects', () => {
     expect(r.useNotchSweep).toBe(false);
     expect(r.useStutterCut).toBe(false);
     expect(r.reason).toContain('chill');
+  });
+});
+
+// ============================================================================
+// isBDropDrivenBass
+// ============================================================================
+
+describe('isBDropDrivenBass', () => {
+  it('empty array → false', () => {
+    expect(isBDropDrivenBass([])).toBe(false);
+  });
+
+  it('Latin Trap matchea trap', () => {
+    expect(isBDropDrivenBass(['Latin Trap'])).toBe(true);
+  });
+
+  it('Hip-Hop matchea hip-hop', () => {
+    expect(isBDropDrivenBass(['Hip-Hop'])).toBe(true);
+  });
+
+  it('UK Drill matchea drill', () => {
+    expect(isBDropDrivenBass(['UK Drill'])).toBe(true);
+  });
+
+  it('Pop solo → false', () => {
+    expect(isBDropDrivenBass(['Pop'])).toBe(false);
+  });
+
+  it('un género del set en lista mixta → true', () => {
+    expect(isBDropDrivenBass(['Pop', 'Trap', 'R&B'])).toBe(true);
+  });
+});
+
+// ============================================================================
+// decideAnticipation
+// ============================================================================
+
+describe('decideAnticipation', () => {
+  it('noRealOutro → false', () => {
+    const r = decideAnticipation({
+      fadeDuration: 6,
+      entryPoint: 10,
+      transitionType: 'BEAT_MATCH_BLEND',
+      noRealOutro: true
+    });
+    expect(r.needsAnticipation).toBe(false);
+    expect(r.reason).toContain('groove hasta el final');
+  });
+
+  it('CUT con safety reason Vocal Trainwreck → false', () => {
+    const r = decideAnticipation({
+      fadeDuration: 3,
+      entryPoint: 10,
+      transitionType: 'CUT',
+      transitionReason: 'Vocal Trainwreck evitado → CUT forzado'
+    });
+    expect(r.needsAnticipation).toBe(false);
+    expect(r.reason).toContain('safety');
+  });
+
+  it('CUT con safety reason Polirritmia → false', () => {
+    const r = decideAnticipation({
+      fadeDuration: 3,
+      entryPoint: 10,
+      transitionType: 'CUT',
+      transitionReason: 'Polirritmia evitada → CUT forzado'
+    });
+    expect(r.needsAnticipation).toBe(false);
+  });
+
+  it('CUT normal con entryPoint ≥ 5 → tease 2.5-4s', () => {
+    const r = decideAnticipation({
+      fadeDuration: 3,
+      entryPoint: 10,
+      transitionType: 'CUT'
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.anticipationTime).toBeGreaterThanOrEqual(2.5);
+    expect(r.anticipationTime).toBeLessThanOrEqual(4.0);
+  });
+
+  it('CUT con entryPoint < 5 NO tease (cae al final, intro insuficiente)', () => {
+    const r = decideAnticipation({
+      fadeDuration: 3,
+      entryPoint: 3,
+      transitionType: 'CUT'
+    });
+    expect(r.needsAnticipation).toBe(false);
+  });
+
+  it('DROP_MIX → no anticipation', () => {
+    const r = decideAnticipation({
+      fadeDuration: 5,
+      entryPoint: 10,
+      transitionType: 'DROP_MIX'
+    });
+    expect(r.needsAnticipation).toBe(false);
+    expect(r.reason).toContain('DROP_MIX');
+  });
+
+  it('CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL → no anticipation', () => {
+    for (const t of ['CLEAN_HANDOFF', 'VINYL_STOP', 'SEQUENTIAL'] as const) {
+      const r = decideAnticipation({
+        fadeDuration: 5,
+        entryPoint: 10,
+        transitionType: t
+      });
+      expect(r.needsAnticipation).toBe(false);
+    }
+  });
+
+  it('PRE_PUNCH: bIntroSpace ≥ 6 + entry ≥ 7 + vocalMargin ≥ 4 + blendy → isPrePunch true', () => {
+    // bIntroSpace=10, entry=8, vocalStartB=15 → vocalSafetyMargin = 15-8-2 = 5 ≥ 4. ✓
+    const r = decideAnticipation({
+      fadeDuration: 6,
+      entryPoint: 8,
+      transitionType: 'BEAT_MATCH_BLEND',
+      bIntroSpace: 10,
+      vocalStartB: 15
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.isPrePunch).toBe(true);
+    expect(r.anticipationTime).toBeGreaterThanOrEqual(4.0);
+  });
+
+  it('PRE_PUNCH cae si vocalSafetyMargin < 4', () => {
+    // entry=8, vocalStartB=12 → margin = 12-8-2 = 2 < 4 → no PRE_PUNCH.
+    const r = decideAnticipation({
+      fadeDuration: 6,
+      entryPoint: 8,
+      transitionType: 'BEAT_MATCH_BLEND',
+      bIntroSpace: 10,
+      vocalStartB: 12
+    });
+    expect(r.isPrePunch).toBe(false);
+  });
+
+  it('PRE_PUNCH NO aplica a tipos no-blendy (DROP_MIX, CUT)', () => {
+    const r = decideAnticipation({
+      fadeDuration: 6,
+      entryPoint: 8,
+      transitionType: 'STEM_MIX', // no-blendy via match
+      bIntroSpace: 10,
+      vocalStartB: 15
+    });
+    // STEM_MIX no es prePunchEligibleType. Cae al A2 widening, no a PRE_PUNCH.
+    expect(r.isPrePunch).toBe(false);
+  });
+
+  it('A2 widening: fade<11 + entry≥5 → anticipation base', () => {
+    const r = decideAnticipation({
+      fadeDuration: 7,
+      entryPoint: 10,
+      transitionType: 'BEAT_MATCH_BLEND'
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.anticipationTime).toBeGreaterThan(0);
+    expect(r.anticipationTime).toBeLessThanOrEqual(4.0);
+    expect(r.isPrePunch).toBe(false);
+  });
+
+  it('A2 widening gate skip cuando bpmA≥125 + B drop-driven → threshold 8 en vez de 11', () => {
+    // fade=10 → con threshold 11 anticiparía. Con threshold 8 (gate skip) no.
+    const r = decideAnticipation({
+      fadeDuration: 10,
+      entryPoint: 10,
+      transitionType: 'BEAT_MATCH_BLEND',
+      bpmA: 129,
+      bGenres: ['Latin Trap']
+    });
+    expect(r.needsAnticipation).toBe(false);
+  });
+
+  it('fade ≥ 11 sin extras → no anticipation', () => {
+    const r = decideAnticipation({
+      fadeDuration: 12,
+      entryPoint: 10,
+      transitionType: 'CROSSFADE'
+    });
+    expect(r.needsAnticipation).toBe(false);
+    expect(r.reason).toContain('fade largo');
+  });
+
+  it('outroSlopeSteep dispara extra cuando fade ≥ 11 (A2 NO aplica, extras sí)', () => {
+    // rmsTailCurve con decay claro: slope < -0.003 sobre tailWindows=8.
+    // 9 muestras, los últimos 8 bajando linealmente de 0.5 a 0.1.
+    const decayingTail = [0.6, 0.5, 0.45, 0.40, 0.35, 0.30, 0.20, 0.15, 0.10];
+    const r = decideAnticipation({
+      fadeDuration: 12,
+      entryPoint: 10,
+      transitionType: 'CROSSFADE',
+      rmsTailCurveA: decayingTail
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.anticipationReason).toBe('outroSlopeSteep');
+  });
+
+  it('filtersAggressivePredicted dispara extra cuando A2 NO aplica', () => {
+    const r = decideAnticipation({
+      fadeDuration: 12,
+      entryPoint: 10,
+      transitionType: 'CROSSFADE',
+      filtersAggressivePredicted: true
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.anticipationReason).toBe('filtersAggressive');
+  });
+
+  it('outroSlope + filtersAggressive suman tag combinado', () => {
+    const decayingTail = [0.6, 0.5, 0.45, 0.40, 0.35, 0.30, 0.20, 0.15, 0.10];
+    const r = decideAnticipation({
+      fadeDuration: 7,
+      entryPoint: 10,
+      transitionType: 'BEAT_MATCH_BLEND',
+      rmsTailCurveA: decayingTail,
+      filtersAggressivePredicted: true
+    });
+    expect(r.needsAnticipation).toBe(true);
+    expect(r.anticipationReason).toBe('outroSlopeSteep+filtersAggressive');
+  });
+
+  it('cap total 4s aunque base + extra excedan', () => {
+    const decayingTail = [0.6, 0.5, 0.45, 0.40, 0.35, 0.30, 0.20, 0.15, 0.10];
+    const r = decideAnticipation({
+      fadeDuration: 4,
+      entryPoint: 20,
+      transitionType: 'BEAT_MATCH_BLEND',
+      rmsTailCurveA: decayingTail
+    });
+    expect(r.anticipationTime).toBeLessThanOrEqual(4.0);
   });
 });
 

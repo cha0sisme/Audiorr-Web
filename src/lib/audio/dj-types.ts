@@ -408,6 +408,21 @@ export type DJFilterResult = {
   readonly reason: string;
 };
 
+export type AnticipationResult = {
+  readonly needsAnticipation: boolean;
+  /** Seconds of tease/pre-fade before the main fade actually starts. */
+  readonly anticipationTime: number;
+  readonly reason: string;
+  /** PRE_PUNCH: B has a long instrumental intro (≥6s) and the type is
+      blendy. The caller forces `skipBFilters` when this is true so B
+      plays clean during the tease. */
+  readonly isPrePunch: boolean;
+  /** Internal tag of which path triggered the anticipation extra
+      ("outroSlopeSteep" / "filtersAggressive" / both / undefined). For
+      diagnostics — not user-facing. */
+  readonly anticipationReason?: string;
+};
+
 export type DJEffectsResult = {
   /** Instant low-frequency cut at bassSwapTime — removes "double-bombo"
       when both A and B carry kicking low end at the same time. */
