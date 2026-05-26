@@ -28,6 +28,7 @@ import {
   type BPMRelationship,
   type EnergyFlow,
   type FadeDurationResult,
+  type FilterDecisionResult,
   type HarmonicCompatibility,
   type HarmonicPenalty,
   type MixMode,
@@ -39,6 +40,7 @@ import {
   type TransitionTypeResult,
   type VocalOverlapRisk
 } from './dj-types';
+import { harmonicPenaltyIsClash } from './dj-types';
 
 // ============================================================================
 // MARK: - Algorithm versioning (mirrors DJMixingService.swift:128)
@@ -251,6 +253,95 @@ export function harmonicPenalty(
 }
 
 // ============================================================================
+// MARK: - Instrumental detectors (DJMixingService.swift:4268, :4317)
+// ============================================================================
+
+/**
+ * Detect if A's outro is instrumental in the actual crossfade zone.
+ * Mirrors `DJMixingService.swift:4268 detectOutroInstrumental`.
+ *
+ * Fake-outro guard: trap and conscious hip-hop frequently have a *false outro*
+ * — energy dips for 4-8 bars, then a final verse / ad-lib comes back. If we
+ * have hard evidence of vocals in the last 4s, override to not-instrumental
+ * regardless of any other signal. The 4s window is independent of fadeDuration
+ * so a long fade (15s) doesn't mask a late vocal that lands inside the
+ * perceptual "outro" of the song.
+ */
+export function detectOutroInstrumental(args: {
+  currentAnalysis?: SongAnalysis;
+  bufferADuration: number;
+  fadeDuration: number;
+}): boolean {
+  const { currentAnalysis: cur, bufferADuration, fadeDuration } = args;
+  if (!cur || cur.hasError) return false;
+
+  const crossfadeStartA = bufferADuration - fadeDuration;
+
+  // ── Fake-outro guard: vocals in the last 4s override everything ──
+  if (bufferADuration >= 4.0) {
+    const last4sStart = bufferADuration - 4.0;
+    if (cur.hasVocalEndData && cur.lastVocalTime > last4sStart) return false;
+    if (cur.speechSegments.length > 0 && cur.speechSegments.some((s) => s.end > last4sStart)) {
+      return false;
+    }
+  }
+
+  if (cur.hasVocalEndData) {
+    return cur.lastVocalTime < crossfadeStartA;
+  }
+  if (cur.hasVocalData && !cur.hasOutroVocals && cur.hasEnergyProfile) {
+    if (cur.speechSegments.length > 0) {
+      const vocalsInOutro = cur.speechSegments.some((s) => s.end > crossfadeStartA);
+      return !vocalsInOutro;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Detect if B's intro is instrumental in the actual entry/fade zone.
+ * Mirrors `DJMixingService.swift:4317 detectIntroInstrumental`.
+ *
+ * Uses the same vocal-aware reference as entry point calculation:
+ * `vocalStartTime` → `speechSegments[0]` → backend flags.
+ *
+ * NOTE on `vocalStartTime === 0` literal semantics: backend treats 0.0 as
+ * "vocal at t=0" (track opens singing), but legacy cached entries written
+ * pre-backfill use 0.0 as camouflaged null. Conservative chain: only consider
+ * vocalOnset when `> 0`, falling back to speechSegments / backend flags.
+ */
+export function detectIntroInstrumental(args: {
+  nextAnalysis?: SongAnalysis;
+  entryPoint: number;
+  fadeDuration: number;
+}): boolean {
+  const { nextAnalysis: nxt, entryPoint, fadeDuration } = args;
+  if (!nxt || nxt.hasError) return false;
+
+  const bEnd = entryPoint + fadeDuration;
+
+  // Vocal onset: prefer explicit vocalStartTime, fall back to first
+  // speechSegment.start. 0 is treated as "unknown" pending backfill.
+  let vocalOnset = 0;
+  if (nxt.vocalStartTime !== undefined && nxt.vocalStartTime > 0) {
+    vocalOnset = nxt.vocalStartTime;
+  } else if (nxt.speechSegments.length > 0 && (nxt.speechSegments[0]?.start ?? 0) > 0) {
+    vocalOnset = nxt.speechSegments[0]?.start ?? 0;
+  }
+
+  if (vocalOnset > 0) {
+    return vocalOnset > bEnd;
+  }
+
+  // No vocal timing data — fall back to backend flags.
+  if (nxt.hasVocalData && nxt.hasEnergyProfile && !nxt.hasIntroVocals) {
+    return true;
+  }
+  return false;
+}
+
+// ============================================================================
 // MARK: - Build Transition Profile (DJMixingService.swift:535)
 // ============================================================================
 
@@ -452,6 +543,78 @@ export function buildTransitionProfile(args: BuildTransitionProfileArgs): Transi
     character,
     styleAffinity: affinity,
     mode
+  };
+}
+
+// ============================================================================
+// MARK: - Filter Usage Decision (DJMixingService.swift:2786)
+// ============================================================================
+
+/**
+ * Decide whether to engage DJ-style filtering during the crossfade.
+ * Mirrors `DJMixingService.swift:2786 decideFilterUsage`.
+ *
+ * `useFilters`: ON when any of the gates fires (vocals present, energy gap
+ * > 0.20, BPM diff > 20, harmonic clash/tense, bass conflict, fade < 3s).
+ *
+ * `useAggressiveFilters`: ON only when useFilters AND (vocals + both energies
+ * > 0.20, OR harmonic clash, OR vocal overlap both, OR bass conflict, OR
+ * fade < 3s). The vocals gate is the most common firer (~80% of catalog),
+ * so it requires both A and B energy ≥ 0.20 to avoid putting a "gentle blend"
+ * pairing through the full aggressive pipeline (notch + dynamicQ + bassKill
+ * + midScoop + hp + ls).
+ */
+export function decideFilterUsage(args: {
+  profile: TransitionProfile;
+  fadeDuration: number;
+}): FilterDecisionResult {
+  const { profile, fadeDuration } = args;
+
+  const hasVocals = profile.aHasOutroVocals || profile.bHasIntroVocals;
+  const isVeryShort = fadeDuration < 3;
+  const isShort = fadeDuration < 4;
+  const isClash = harmonicPenaltyIsClash(profile.harmonic);
+
+  // Threshold v15: energyGap bajado 0.30 → 0.20 para capturar asimetrías
+  // perceptuales en catálogo Hip-Hop / R&B.
+  const useFilters =
+    hasVocals ||
+    Math.abs(profile.energyGap) > 0.20 ||
+    profile.bpmDiff > 20 ||
+    isClash ||
+    profile.bassConflictRisk ||
+    isVeryShort;
+
+  const useAggressive =
+    useFilters &&
+    ((hasVocals && profile.energyA > 0.20 && profile.energyB > 0.20) ||
+      profile.harmonic.compatibility === 'clash' ||
+      profile.vocalOverlapRisk === 'both' ||
+      profile.bassConflictRisk ||
+      isVeryShort);
+
+  const reasons: string[] = [];
+  if (hasVocals) reasons.push('voces');
+  if (Math.abs(profile.energyGap) > 0.20) {
+    reasons.push(`energia ${Math.trunc(Math.abs(profile.energyGap) * 100)}%`);
+  }
+  if (profile.bpmDiff > 20) reasons.push(`BPM ±${Math.trunc(profile.bpmDiff)}`);
+  if (profile.harmonic.compatibility === 'tense') reasons.push('tension tonal');
+  if (profile.harmonic.compatibility === 'clash') reasons.push('clash tonal');
+  if (profile.bassConflictRisk) reasons.push('bass conflict');
+  if (isVeryShort) reasons.push('fade<3s');
+  if (isShort && !isVeryShort) reasons.push('fade<4s (no aggressive)');
+
+  const reason = useFilters
+    ? `Filtros ON: ${reasons.join(', ')}`
+    : 'Filtros OFF: mezcla simple';
+
+  return {
+    useFilters,
+    useAggressiveFilters: useAggressive,
+    energyDiff: Math.abs(profile.energyGap),
+    bpmDiff: profile.bpmDiff,
+    reason
   };
 }
 

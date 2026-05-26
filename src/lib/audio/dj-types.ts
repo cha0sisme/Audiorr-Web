@@ -370,3 +370,13 @@ export type FadeDurationResult = {
   readonly duration: number;
   readonly decision: string;
 };
+
+export type FilterDecisionResult = {
+  readonly useFilters: boolean;
+  readonly useAggressiveFilters: boolean;
+  /** Absolute energyGap of the profile (snapshot, for telemetry). */
+  readonly energyDiff: number;
+  /** bpmDiff of the profile (snapshot, for telemetry). */
+  readonly bpmDiff: number;
+  readonly reason: string;
+};

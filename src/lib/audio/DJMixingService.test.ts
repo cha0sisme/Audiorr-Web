@@ -15,8 +15,11 @@ import {
   _resetCooldownForTesting,
   buildTransitionProfile,
   calculateAdaptiveFadeDuration,
+  decideFilterUsage,
   decideTransitionType,
   deriveSlope,
+  detectIntroInstrumental,
+  detectOutroInstrumental,
   harmonicBPM,
   harmonicPenalty,
   isBDropDrivenByPercussive
@@ -870,6 +873,431 @@ describe('buildTransitionProfile', () => {
     });
     // punch + beat-sync + non-abrupt + intro larga → BEAT_MATCH_BLEND
     expect(result.type).toBe('BEAT_MATCH_BLEND');
+  });
+});
+
+// ============================================================================
+// detectOutroInstrumental
+// ============================================================================
+
+describe('detectOutroInstrumental', () => {
+  it('sin analysis → false', () => {
+    expect(
+      detectOutroInstrumental({ bufferADuration: 200, fadeDuration: 6 })
+    ).toBe(false);
+  });
+
+  it('hasError → false', () => {
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({ hasError: true }),
+        bufferADuration: 200,
+        fadeDuration: 6
+      })
+    ).toBe(false);
+  });
+
+  it('fake-outro: vocal en los últimos 4s overrida hasVocalEndData', () => {
+    // bufferA=200, last4s=196. lastVocalTime=197 > 196 → false.
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({
+          hasVocalEndData: true,
+          lastVocalTime: 197
+        }),
+        bufferADuration: 200,
+        fadeDuration: 8
+      })
+    ).toBe(false);
+  });
+
+  it('vocalEnd antes del crossfadeStart → instrumental', () => {
+    // bufferA=200, fade=10 → crossfadeStartA=190. lastVocalTime=150 < 190 → true.
+    // Y last4s=196, lastVocalTime=150 < 196 → fake-outro NO dispara.
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({
+          hasVocalEndData: true,
+          lastVocalTime: 150
+        }),
+        bufferADuration: 200,
+        fadeDuration: 10
+      })
+    ).toBe(true);
+  });
+
+  it('vocalEnd dentro del crossfade pero fuera de los últimos 4s → not instrumental', () => {
+    // bufferA=200, fade=20 → crossfadeStartA=180. lastVocalTime=185 > 180 → false.
+    // last4s=196, lastVocalTime=185 < 196 → fake-outro NO aplica, cae al chain.
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({
+          hasVocalEndData: true,
+          lastVocalTime: 185
+        }),
+        bufferADuration: 200,
+        fadeDuration: 20
+      })
+    ).toBe(false);
+  });
+
+  it('hasVocalData + !hasOutroVocals + hasEnergyProfile + sin speech → instrumental', () => {
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({
+          hasVocalData: true,
+          hasOutroVocals: false,
+          hasEnergyProfile: true
+        }),
+        bufferADuration: 200,
+        fadeDuration: 6
+      })
+    ).toBe(true);
+  });
+
+  it('speechSegments contradicen el flag backend → no instrumental', () => {
+    // hasOutroVocals=false pero hay speech segment en outro.
+    expect(
+      detectOutroInstrumental({
+        currentAnalysis: makeAnalysis({
+          hasVocalData: true,
+          hasOutroVocals: false,
+          hasEnergyProfile: true,
+          speechSegments: [{ start: 0, end: 5 }, { start: 195, end: 197 }]
+        }),
+        bufferADuration: 200,
+        fadeDuration: 10
+      })
+    ).toBe(false);
+  });
+});
+
+// ============================================================================
+// detectIntroInstrumental
+// ============================================================================
+
+describe('detectIntroInstrumental', () => {
+  it('sin analysis → false', () => {
+    expect(
+      detectIntroInstrumental({ entryPoint: 5, fadeDuration: 8 })
+    ).toBe(false);
+  });
+
+  it('vocalStartTime después del fade end → instrumental', () => {
+    // entry=5, fade=8 → bEnd=13. vocalOnset=20 > 13 → true.
+    expect(
+      detectIntroInstrumental({
+        nextAnalysis: makeAnalysis({ vocalStartTime: 20 }),
+        entryPoint: 5,
+        fadeDuration: 8
+      })
+    ).toBe(true);
+  });
+
+  it('vocalStartTime dentro del fade → no instrumental', () => {
+    expect(
+      detectIntroInstrumental({
+        nextAnalysis: makeAnalysis({ vocalStartTime: 10 }),
+        entryPoint: 5,
+        fadeDuration: 8
+      })
+    ).toBe(false);
+  });
+
+  it('vocalStartTime === 0 → fallback (no claim como vocal-at-t=0 por backfill ambiguity)', () => {
+    // Sin vocalStart>0 ni speechSegments ni backend flags → false.
+    expect(
+      detectIntroInstrumental({
+        nextAnalysis: makeAnalysis({ vocalStartTime: 0 }),
+        entryPoint: 5,
+        fadeDuration: 8
+      })
+    ).toBe(false);
+  });
+
+  it('vocalStartTime undefined + speechSegments[0].start > fade end → instrumental', () => {
+    expect(
+      detectIntroInstrumental({
+        nextAnalysis: makeAnalysis({
+          speechSegments: [{ start: 25, end: 30 }]
+        }),
+        entryPoint: 5,
+        fadeDuration: 8
+      })
+    ).toBe(true);
+  });
+
+  it('sin timing data + backend hasVocalData + !hasIntroVocals → instrumental', () => {
+    expect(
+      detectIntroInstrumental({
+        nextAnalysis: makeAnalysis({
+          hasVocalData: true,
+          hasEnergyProfile: true,
+          hasIntroVocals: false
+        }),
+        entryPoint: 5,
+        fadeDuration: 8
+      })
+    ).toBe(true);
+  });
+});
+
+// ============================================================================
+// decideFilterUsage
+// ============================================================================
+
+describe('decideFilterUsage', () => {
+  it('sin gates activos → useFilters false', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        aHasOutroVocals: false,
+        bHasIntroVocals: false,
+        energyGap: 0,
+        bpmDiff: 0,
+        bassConflictRisk: false
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(false);
+    expect(result.useAggressiveFilters).toBe(false);
+  });
+
+  it('hasVocals → useFilters ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({ aHasOutroVocals: true }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.reason).toContain('voces');
+  });
+
+  it('energyGap > 0.20 → useFilters ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({ energyGap: -0.25 }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.reason).toContain('energia');
+  });
+
+  it('bpmDiff > 20 → useFilters ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({ bpmDiff: 25 }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+  });
+
+  it('clash harmonic → useFilters ON + useAggressive ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        harmonic: { distance: 6, compatibility: 'clash' }
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.useAggressiveFilters).toBe(true);
+  });
+
+  it('tense harmonic → useFilters ON pero NO aggressive', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        harmonic: { distance: 3, compatibility: 'tense' }
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.useAggressiveFilters).toBe(false);
+  });
+
+  it('fade < 3 → useFilters ON + useAggressive ON (defensivo)', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile(),
+      fadeDuration: 2.5
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.useAggressiveFilters).toBe(true);
+  });
+
+  it('hasVocals + ambos energy > 0.20 → useAggressive ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        aHasOutroVocals: true,
+        bHasIntroVocals: true,
+        energyA: 0.3,
+        energyB: 0.3
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useAggressiveFilters).toBe(true);
+  });
+
+  it('hasVocals pero B muy bajo → useFilters ON pero NO aggressive', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        aHasOutroVocals: true,
+        energyA: 0.3,
+        energyB: 0.08
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.useAggressiveFilters).toBe(false);
+  });
+
+  it('vocalOverlapRisk both → useAggressive ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        aHasOutroVocals: true,
+        bHasIntroVocals: true,
+        vocalOverlapRisk: 'both',
+        energyA: 0.1,
+        energyB: 0.1
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useAggressiveFilters).toBe(true);
+  });
+
+  it('bassConflictRisk → useFilters + useAggressive ON', () => {
+    const result = decideFilterUsage({
+      profile: makeProfile({
+        bassConflictRisk: true,
+        danceabilityA: 0.8,
+        danceabilityB: 0.8
+      }),
+      fadeDuration: 6
+    });
+    expect(result.useFilters).toBe(true);
+    expect(result.useAggressiveFilters).toBe(true);
+  });
+});
+
+// ============================================================================
+// End-to-end limpio: profile → filterUsage + detectores → decisor
+// ============================================================================
+
+describe('Fase 1 pipeline end-to-end', () => {
+  it('vocal trainwreck real: filter ON aggressive + decisor decide CUT', () => {
+    const cur = makeAnalysis({
+      bpm: 120,
+      bpmConfidence: 0.9,
+      energy: 0.5,
+      danceability: 0.7,
+      hasVocalData: true,
+      hasOutroVocals: true,
+      hasIntroData: true,
+      introEndTime: 5
+    });
+    const next = makeAnalysis({
+      bpm: 125,
+      bpmConfidence: 0.9,
+      energy: 0.5,
+      danceability: 0.7,
+      hasVocalData: true,
+      hasIntroVocals: true,
+      vocalStartTime: 0.5,
+      hasIntroData: true,
+      introEndTime: 5
+    });
+    const profile = buildTransitionProfile({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.vocalOverlapRisk).toBe('both');
+
+    const filters = decideFilterUsage({ profile, fadeDuration: 5 });
+    expect(filters.useFilters).toBe(true);
+    expect(filters.useAggressiveFilters).toBe(true);
+
+    const outroInstr = detectOutroInstrumental({
+      currentAnalysis: cur,
+      bufferADuration: 200,
+      fadeDuration: 5
+    });
+    const introInstr = detectIntroInstrumental({
+      nextAnalysis: next,
+      entryPoint: 5,
+      fadeDuration: 5
+    });
+    expect(outroInstr).toBe(false);
+    expect(introInstr).toBe(false);
+
+    const decision = decideTransitionType({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile,
+      entryPoint: 5,
+      fadeDuration: 5,
+      isBeatSynced: true,
+      useFilters: filters.useFilters,
+      bufferADuration: 200,
+      hasVocalOverlap: true,
+      outroInstrumental: outroInstr,
+      introInstrumental: introInstr
+    });
+    // vocal trainwreck override + fade < 6 → CUT forzado.
+    expect(decision.type).toBe('CUT');
+  });
+
+  it('punch beat-matched limpio: filter OFF + BEAT_MATCH_BLEND', () => {
+    // danceability=0.6 (no 0.7) para evitar bassConflictRisk (umbral 0.65),
+    // que activaría useFilters.
+    const cur = makeAnalysis({
+      bpm: 120,
+      bpmConfidence: 0.9,
+      energy: 0.5,
+      danceability: 0.6,
+      hasOutroData: true,
+      outroStartTime: 180
+    });
+    const next = makeAnalysis({
+      bpm: 121,
+      bpmConfidence: 0.9,
+      energy: 0.52,
+      danceability: 0.6,
+      hasIntroData: true,
+      introEndTime: 20,
+      vocalStartTime: 30,
+      hasVocalData: true
+    });
+    const profile = buildTransitionProfile({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.character).toBe('punch');
+
+    const filters = decideFilterUsage({ profile, fadeDuration: 7 });
+    // Sin vocales en zona, energyGap pequeño, bpmDiff bajo, no clash, no bass conflict.
+    expect(filters.useFilters).toBe(false);
+
+    const decision = decideTransitionType({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      profile,
+      entryPoint: 15,
+      fadeDuration: 7,
+      isBeatSynced: true,
+      useFilters: filters.useFilters,
+      bufferADuration: 200,
+      outroInstrumental: detectOutroInstrumental({
+        currentAnalysis: cur,
+        bufferADuration: 200,
+        fadeDuration: 7
+      }),
+      introInstrumental: detectIntroInstrumental({
+        nextAnalysis: next,
+        entryPoint: 15,
+        fadeDuration: 7
+      })
+    });
+    expect(decision.type).toBe('BEAT_MATCH_BLEND');
   });
 });
 
