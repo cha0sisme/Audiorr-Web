@@ -26,6 +26,7 @@ import {
   PASSTHROUGH,
   type BiquadCoefficients
 } from '$lib/audio/BiquadCoefficients';
+import type { CrossfadeResult } from '$lib/audio/dj-types';
 
 // Vite resuelve esta URL al asset publicado del worklet — funciona en dev y build.
 import workletUrl from '$lib/audio/worklets/biquad-processor.js?url';
@@ -420,10 +421,156 @@ class AudioEngine {
     chain.hasMedia = true;
   }
 
+  // ----------------------------------------------------------------------
+  // Runtime helpers — consumidos por CrossfadeRuntime via deps. Estos
+  // métodos exponen el AudioContext + chains sin que el runtime los
+  // conozca directamente (testeable con mocks).
+  // ----------------------------------------------------------------------
+
+  /** AudioContext.currentTime — anchor para CrossfadeRuntime ticks. */
+  getAudioContextTime(): number {
+    return this.ctx?.currentTime ?? 0;
+  }
+
+  /** AudioContext.sampleRate — para que CrossfadeRuntime compute coefs
+      contra la sample rate real (necesita ser exacto para los biquads). */
+  getSampleRate(): number {
+    return this.ctx?.sampleRate ?? 48000;
+  }
+
+  /** Setea el gain master de un chain (A o B). Multiplica internamente
+      por `replayGainLinear` del chain — el caller pasa el valor del fade
+      (0..1) y este método aplica el replay gain encima. */
+  setChainGain(label: 'A' | 'B', fadeValue: number): void {
+    const chain = label === 'A' ? this.chainA : this.chainB;
+    if (!chain) return;
+    chain.gain.gain.value = fadeValue * chain.replayGainLinear;
+  }
+
+  /** Setea `<audio>.playbackRate` con `preservesPitch=true` para
+      time-stretch. */
+  setChainPlaybackRate(label: 'A' | 'B', rate: number): void {
+    const chain = label === 'A' ? this.chainA : this.chainB;
+    if (!chain) return;
+    chain.audio.preservesPitch = true;
+    chain.audio.playbackRate = rate;
+  }
+
+  /** Programa el play de B desde `startOffset` segundos del file, lo
+      antes posible (`atTime` se ignora en web; iOS programa con
+      sample-accuracy). Llama `audio.play()` directo. */
+  schedulePlayChainB(startOffset: number, _atTime: number): void {
+    if (!this.chainB) return;
+    this.chainB.audio.currentTime = Math.max(0, startOffset);
+    void this.chainB.audio.play().catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emit({ type: 'error', message: msg, code: 'crossfade_play_failed' });
+    });
+  }
+
+  /** Pausa B + libera src. Para `CrossfadeRuntime.cancel()`. */
+  stopChainB(): void {
+    if (!this.chainB) return;
+    this.chainB.audio.pause();
+  }
+
+  /**
+   * Runs a full DJ crossfade using a `CrossfadeResult` from the
+   * `DJMixingService` algorithm. Mirrors what `crossfade(durationSec)`
+   * does at a higher level — but with EQ automation, bass swap,
+   * time-stretch ramp, and all the curves portados en Fase 2A-2E.
+   *
+   * Returns a `Promise` that resolves when the crossfade completes
+   * (natural or cancelled). The promise rejects if the audio engine
+   * isn't initialized or B has no media loaded.
+   */
+  async runCrossfadeConfig(config: CrossfadeResult): Promise<void> {
+    await this.ensureInit();
+    if (!this.ctx || !this.chainA || !this.chainB) {
+      throw new Error('AudioEngine not initialized');
+    }
+    if (!this.chainB.hasMedia) {
+      throw new Error('chain B has no media — call prepareNext() first');
+    }
+    if (this.isCrossfading) return;
+    this.isCrossfading = true;
+    this.emit({ type: 'crossfadestart' });
+
+    const { CrossfadeRuntime } = await import('./crossfade-runtime');
+
+    // Lock A on its replay gain (writes to fadeValue=1.0 will pass
+    // through the * replayGain in setChainGain).
+    const maxVolumeA = 1.0;
+    const maxVolumeB = 1.0;
+
+    return new Promise<void>((resolve) => {
+      const startFileTimeA = this.chainA!.audio.currentTime;
+      const runtime = new CrossfadeRuntime({
+        config,
+        maxVolumeA,
+        maxVolumeB,
+        startFileTimeA,
+        deps: {
+          getCurrentTime: () => this.getAudioContextTime(),
+          setGainA: (v) => this.setChainGain('A', v),
+          setGainB: (v) => this.setChainGain('B', v),
+          setBiquadCoeffsAll: (label, stages) =>
+            this.setAllBiquadCoeffs(label, stages as BiquadCoefficients[]),
+          schedulePlayB: (startOffset, atTime) => this.schedulePlayChainB(startOffset, atTime),
+          stopB: () => this.stopChainB(),
+          setPlaybackRateB: (rate) => this.setChainPlaybackRate('B', rate),
+          onComplete: () => {
+            this.swapChainsAfterCrossfade();
+            this.isCrossfading = false;
+            this.emit({ type: 'crossfadeend', startOffset: this.currentTime });
+            resolve();
+          }
+        }
+      });
+      runtime.setSampleRate(this.getSampleRate());
+      runtime.start();
+    });
+  }
+
+  /** Swap A↔B labels after a crossfade. B becomes the now-playing A;
+      A is released. Helper shared between `crossfade()` and
+      `runCrossfadeConfig()`. */
+  private swapChainsAfterCrossfade(): void {
+    if (!this.ctx || !this.chainA || !this.chainB) return;
+    const a = this.chainA;
+    const b = this.chainB;
+    const tEnd = this.ctx.currentTime;
+    a.audio.pause();
+    a.audio.removeAttribute('src');
+    a.audio.load();
+    a.hasMedia = false;
+    a.lastSrc = null;
+    a.triedRawFallback = false;
+    a.gain.gain.cancelScheduledValues(tEnd);
+    a.gain.gain.setValueAtTime(0, tEnd);
+    b.gain.gain.cancelScheduledValues(tEnd);
+    b.gain.gain.setValueAtTime(b.replayGainLinear, tEnd);
+    this.resetWorkletState(a);
+
+    this.chainA = b;
+    this.chainB = a;
+    this.chainA.label = 'A';
+    this.chainB.label = 'B';
+    this.attachAudioElementListeners(this.chainA);
+    this.duration = this.chainA.audio.duration || 0;
+    this.currentTime = this.chainA.audio.currentTime;
+    this.endedHandled = false;
+    this.isPlaying = !this.chainA.audio.paused;
+  }
+
   /**
    * Equal-power crossfade: A→B con curvas cos²/sin² aplicadas via
    * setValueCurveAtTime. Después del fade, swap labels (B pasa a ser A).
    * SIN filter automation, SIN bass swap, SIN DJ effects — Phase 2 los añade.
+   *
+   * Para usar el algoritmo DJ completo (filters, bass swap, time-stretch,
+   * etc.) consume `runCrossfadeConfig(config: CrossfadeResult)` con la
+   * salida de `calculateCrossfadeConfig` del módulo `DJMixingService`.
    */
   async crossfade(durationSec = 4): Promise<void> {
     if (!this.ctx || !this.chainA || !this.chainB) return;
