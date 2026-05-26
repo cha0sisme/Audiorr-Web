@@ -3,15 +3,16 @@
  * biquad worklet on A and B.
  *
  * Port de `applyFiltersA` / `applyFiltersB` en iOS
- * `CrossfadeExecutor.swift` v15.m:2479-3118. **Incluido tras Fase 2C-2**:
+ * `CrossfadeExecutor.swift` v15.m:2479-3118. **Incluido tras Fase 2C-3a**:
  *   - Branch principal: sweep base por banda con expInterp (freq) +
  *     linInterp (gain) + pivot al 40%.
  *   - bassKill cosSquared ramp (lowshelf A/B).
  *   - dynamicQ Gaussian bell sweep en highpass A/B.
+ *   - Phaser notch sweep en B band 2 (parametric con freq exp +
+ *     gain bell, con re-map [0.5, 1.0] en anticipation).
  *
  * **No incluido todavía** (van en iteraciones sucesivas):
  *   - Pre-roll bands 0-3 con cascade staggering 150/300 ms.
- *   - Phaser notch sweep en B band 2.
  *   - Stutter cut runtime gate.
  *   - Anticipation extension v15.d (bassKill arranca en anticipationStart).
  *
@@ -88,6 +89,11 @@ export type FilterAutomationContext = {
   /** Bell-shaped Q resonance sweep on the highpass — A bell center 0.55,
       B bell center 0.40 (B fires first → "knob handoff" perception). */
   readonly useDynamicQ: boolean;
+  /** Phaser-style narrow parametric notch on B's band 2. Center sweeps
+      `NOTCH_START_FREQ → NOTCH_END_FREQ` exponentially while depth
+      follows a bell (`tailGain → peakGain → tailGain`). Rides alongside
+      dynamicQ for the "DJ knob ride" feel. */
+  readonly useNotchSweep: boolean;
 };
 
 // ============================================================================
@@ -114,6 +120,16 @@ const DYN_Q_BELL_WIDTH_B = 0.30;
 const DYN_Q_PEAK_Q = 3.5;
 /** Hard ceiling — biquad self-oscillates above ~5.0. */
 const DYN_Q_MAX_Q = 4.0;
+
+/** Phaser notch sweep tuning (CrossfadeExecutor.swift:410-423). */
+const NOTCH_START_FREQ = 250;
+const NOTCH_END_FREQ = 6000;
+/** Bandwidth in octaves — narrower = more "phasey". */
+const NOTCH_BANDWIDTH = 0.3;
+const NOTCH_TAIL_GAIN = -6;
+const NOTCH_PEAK_GAIN = -24;
+const NOTCH_BELL_CENTER = 0.50;
+const NOTCH_BELL_WIDTH = 0.30;
 
 function gaussianBell(progress: number, center: number, width: number): number {
   const exponent = (-Math.pow((progress - center) / width, 2)) / 2.0;
@@ -449,7 +465,30 @@ export function applyFiltersB(t: number, ctx: FilterAutomationContext): FilterSt
 
   const band0B = calcHighpass(hpFreq, qBValue, sampleRate);
   const band1B = calcLowShelf(preset.lowshelfB.frequency, lsGain, 1.0, sampleRate);
-  // Bands 2 (notch sweep) and 3 stay passthrough in this iteration —
-  // notch sweep lands in Fase 2C-3.
-  return { set: true, stages: [band0B, band1B, PASSTHROUGH, PASSTHROUGH] };
+
+  // ── Band 2: Phaser notch sweep ──
+  // Narrow parametric (BW ≈ 0.3 oct) whose center frequency sweeps
+  // exponentially 250 → 6000 Hz over B's window, while depth follows a
+  // Gaussian bell (-6 → -24 → -6 dB). Sounds like a static phaser
+  // "riding through" B. With anticipation: re-map [0.5, 1.0] → [0.0, 1.0]
+  // so the active sweep waits for the second half of B's window (the
+  // first half is already busy with the multi-stage highpass curve).
+  let band2B: BiquadCoefficients = PASSTHROUGH;
+  if (ctx.useNotchSweep) {
+    const bWindowDur = timings.fadeInEndTime - timings.fadeInStartTime;
+    if (bWindowDur > 0) {
+      const notchProgress = (t - timings.fadeInStartTime) / bWindowDur;
+      const notchProgressEffective = config.needsAnticipation
+        ? Math.max(0, (notchProgress - 0.5) * 2.0)
+        : notchProgress;
+      const p = Math.min(1, Math.max(0, notchProgressEffective));
+      const notchFreq = expInterp(NOTCH_START_FREQ, NOTCH_END_FREQ, p);
+      const bellValue = gaussianBell(p, NOTCH_BELL_CENTER, NOTCH_BELL_WIDTH);
+      const notchGain = NOTCH_TAIL_GAIN + (NOTCH_PEAK_GAIN - NOTCH_TAIL_GAIN) * bellValue;
+      band2B = calcPeaking(notchFreq, notchGain, NOTCH_BANDWIDTH, sampleRate);
+    }
+  }
+
+  // Band 3 stays passthrough on B — no high-shelf cut runs on B.
+  return { set: true, stages: [band0B, band1B, band2B, PASSTHROUGH] };
 }

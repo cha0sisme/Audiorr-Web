@@ -78,6 +78,7 @@ function makeContext(
     useHighShelfCut: boolean;
     useBassKill: boolean;
     useDynamicQ: boolean;
+    useNotchSweep: boolean;
     preset: FilterAutomationContext['preset'];
   }> = {}
 ): FilterAutomationContext {
@@ -95,7 +96,8 @@ function makeContext(
     useMidScoop: ctxOverrides.useMidScoop ?? false,
     useHighShelfCut: ctxOverrides.useHighShelfCut ?? false,
     useBassKill: ctxOverrides.useBassKill ?? false,
-    useDynamicQ: ctxOverrides.useDynamicQ ?? false
+    useDynamicQ: ctxOverrides.useDynamicQ ?? false,
+    useNotchSweep: ctxOverrides.useNotchSweep ?? false
   };
 }
 
@@ -337,7 +339,7 @@ describe('applyFiltersB — invariantes', () => {
     expect(isPassthrough(r.stages[0])).toBe(false);
   });
 
-  it('MVP: bands 2 y 3 siempre passthrough', () => {
+  it('sin useNotchSweep ni useDynamicQ: band 2 passthrough, band 3 passthrough', () => {
     const ctx = makeContext({ transitionType: 'CROSSFADE' });
     const dur = ctx.timings.fadeInEndTime - ctx.timings.fadeInStartTime;
     const tMid = ctx.timings.fadeInStartTime + dur * 0.5;
@@ -345,6 +347,38 @@ describe('applyFiltersB — invariantes', () => {
     expect(r.set).toBe(true);
     expect(r.stages[2]).toBe(PASSTHROUGH);
     expect(r.stages[3]).toBe(PASSTHROUGH);
+  });
+
+  it('useNotchSweep: band 2 activo (no passthrough) en center 0.50', () => {
+    const ctx = makeContext({ transitionType: 'CROSSFADE' }, { useNotchSweep: true });
+    const dur = ctx.timings.fadeInEndTime - ctx.timings.fadeInStartTime;
+    const tCenter = ctx.timings.fadeInStartTime + dur * 0.5;
+    const r = applyFiltersB(tCenter, ctx);
+    expect(r.set).toBe(true);
+    expect(isPassthrough(r.stages[2])).toBe(false);
+  });
+
+  it('useNotchSweep + anticipation: band 2 passthrough en primera mitad, activo en segunda', () => {
+    // Anticipation re-mapea [0.5, 1.0] → [0.0, 1.0]. Antes de fadeIn+50%
+    // del window, effective progress = max(0, (p - 0.5) * 2) = 0 → bell
+    // tail gain = -6 dB (no passthrough estricto, pero gain neg que NO es 0).
+    // En p efectivo = 0.5 (= absoluto 0.75), bell peak → -24 dB.
+    const ctx = makeContext(
+      { transitionType: 'CROSSFADE', needsAnticipation: true, anticipationTime: 2.0 },
+      { useNotchSweep: true }
+    );
+    const dur = ctx.timings.fadeInEndTime - ctx.timings.fadeInStartTime;
+    // Justo después de fadeInStart → effective p = 0 → notch en tail gain -6.
+    const tEarly = ctx.timings.fadeInStartTime + dur * 0.1;
+    const rEarly = applyFiltersB(tEarly, ctx);
+    expect(rEarly.set).toBe(true);
+    // Solo activo si gain ≠ 0; -6 dB sí es perceptible → not passthrough.
+    expect(isPassthrough(rEarly.stages[2])).toBe(false);
+    // En p efectivo 0.5 (= absoluto 0.75 de B window), bell peaks → -24 dB.
+    const tPeak = ctx.timings.fadeInStartTime + dur * 0.75;
+    const rPeak = applyFiltersB(tPeak, ctx);
+    // Coefs de notch -24 dB son MÁS extremos que -6 dB → diferentes.
+    expect(rPeak.stages[2].b0).not.toBeCloseTo(rEarly.stages[2].b0, 3);
   });
 
   it('useBassKill B: hold startGain hasta bassSwapTime, cosSquared después', () => {
