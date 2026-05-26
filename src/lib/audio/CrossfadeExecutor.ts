@@ -513,3 +513,549 @@ export function computeBassSwapTime(config: CrossfadeResult, timings: Timings): 
 
   return targetTime;
 }
+
+// ============================================================================
+// MARK: - Volume curves (CrossfadeExecutor.swift:1671-2299)
+// ============================================================================
+
+/**
+ * Runtime context for the gain functions. Built once at `executor.start()`
+ * and read-only thereafter.
+ */
+export type GainContext = {
+  readonly config: CrossfadeResult;
+  readonly timings: Timings;
+  readonly maxVolumeA: number;
+  /** B's maxVolume AFTER energy compensation. Use the output of
+      `computeEnergyCompensationB`. */
+  readonly maxVolumeB: number;
+  /** Stutter gate state — `undefined` when stutter not active. */
+  readonly stutter: StutterState | undefined;
+};
+
+/**
+ * Stutter Cut runtime state. Pre-computed at executor start when the
+ * decision-layer flag `useStutterCut` AND the runtime beat-anchor check
+ * both pass. If runtime anchor check fails, `stutter` stays `undefined`
+ * (graceful degradation — the CUT still happens, just without the chop).
+ */
+export type StutterState = {
+  /** Wall-clock time when the stutter pattern STARTS (= 2 beats before
+      the anchor). */
+  readonly startWall: number;
+  /** Wall-clock time when the stutter pattern ENDS (= the anchor = A's
+      nearest real beat to the cut moment). */
+  readonly anchorWall: number;
+  /** Cell duration = beatInterval / 2 (1/8 note). */
+  readonly cellDuration: number;
+};
+
+const STUTTER_ANTI_CLICK_S = 0.003;
+
+/**
+ * Stutter gate: 1/8-note ON/OFF/ON/OFF pattern over A's last 2 beats.
+ * No-op when `stutter` is undefined or `t` is outside
+ * `[startWall, anchorWall)`. Includes a 3ms anti-click ramp at each cell
+ * boundary to suppress pops through the biquad chain. Mirrors
+ * `CrossfadeExecutor.swift:1679 applyStutterGate`.
+ */
+export function applyStutterGate(args: {
+  baseGain: number;
+  t: number;
+  stutter: StutterState | undefined;
+}): number {
+  const { baseGain, t, stutter } = args;
+  if (
+    stutter === undefined ||
+    t < stutter.startWall ||
+    t >= stutter.anchorWall ||
+    stutter.cellDuration <= 0
+  ) {
+    return baseGain;
+  }
+  const elapsed = t - stutter.startWall;
+  const cellIndex = Math.floor(elapsed / stutter.cellDuration);
+  const timeInCell = elapsed - cellIndex * stutter.cellDuration;
+  const isOnCell = cellIndex % 2 === 0;
+  const targetGate = isOnCell ? 1.0 : 0.0;
+  let gate: number;
+  if (timeInCell < STUTTER_ANTI_CLICK_S && cellIndex > 0) {
+    const prevGate = (cellIndex - 1) % 2 === 0 ? 1.0 : 0.0;
+    const p = timeInCell / STUTTER_ANTI_CLICK_S;
+    gate = prevGate + (targetGate - prevGate) * p;
+  } else {
+    gate = targetGate;
+  }
+  return baseGain * gate;
+}
+
+/**
+ * Gain on A at wall-clock time `t`. Mirrors `CrossfadeExecutor.swift:1671
+ * gainForPlayerA`. Pure: only depends on `t` + `ctx` snapshot.
+ *
+ * Phases:
+ *   - `t < volumeFadeStart` → full maxVolumeA (hold).
+ *   - `t >= transitionEnd` → 0.
+ *   - Otherwise: progress = (t − volumeFadeStart) / (transitionEnd −
+ *     volumeFadeStart), switch on transitionType for 12 distinct curves,
+ *     then apply stutter gate.
+ *
+ * Modulations (B→A communication, applies to CROSSFADE / EQ_MIX /
+ * BEAT_MATCH_BLEND):
+ *   - `bHarmonicClashLevel ≥ 0.7` → lower holdLevel by 0.15 (A retreats
+ *     earlier to shrink clash overlap).
+ *   - `bImmediateImpact` → compress holdEnd/dropEnd (A cedes antes del
+ *     punch de B).
+ *   - `bIntroBars ≥ 4 && !needsAnticipation` → extend holdEnd + dropEnd
+ *     (A breathes longer while B's instrumental intro plays).
+ *   - `tier4Active` → earlyBlend curve (A holds 100% for first ~50%,
+ *     drops cos² to 0.30 by ~75%, exponential tail).
+ */
+export function gainForPlayerA(t: number, ctx: GainContext): number {
+  const baseGain = unstutteredGainForPlayerA(t, ctx);
+  return applyStutterGate({ baseGain, t, stutter: ctx.stutter });
+}
+
+function unstutteredGainForPlayerA(t: number, ctx: GainContext): number {
+  const { config, timings, maxVolumeA } = ctx;
+  if (t < timings.volumeFadeStartTime) return maxVolumeA;
+  if (t >= timings.transitionEndTime) return 0;
+
+  const duration = timings.transitionEndTime - timings.volumeFadeStartTime;
+  const progress = (t - timings.volumeFadeStartTime) / duration;
+
+  switch (config.transitionType) {
+    case 'CUT':
+    case 'CUT_A_FADE_IN_B': {
+      // Hard cut: A holds, then exponential drop over 3s (4s for slow
+      // BPM tracks where the filter sweep needs more room).
+      const cutCap = config.danceability < 0.5 ? 4.0 : 3.0;
+      const cutDuration = Math.min(cutCap, duration);
+      const cutStart = Math.max(0, 1.0 - cutDuration / duration);
+      if (progress < cutStart) return maxVolumeA;
+      const cutP = (progress - cutStart) / (1.0 - cutStart);
+      return maxVolumeA * Math.pow(0.0001 / maxVolumeA, cutP);
+    }
+
+    case 'EQ_MIX':
+    case 'BEAT_MATCH_BLEND':
+      return blendCurveA(progress, ctx, { holdLevel: 0.65, holdEnd: 0.50, dropEnd: 0.85 });
+
+    case 'NATURAL_BLEND': {
+      // Equal-power cos² with a 0.15 floor + exponential tail.
+      const dropEnd = 0.85;
+      const floor = 0.15;
+      if (progress < dropEnd) {
+        const p = progress / dropEnd;
+        const angle = (p * Math.PI) / 2.0;
+        const cosSq = Math.cos(angle) * Math.cos(angle);
+        return maxVolumeA * (floor + (1.0 - floor) * cosSq);
+      }
+      const tailP = (progress - dropEnd) / (1.0 - dropEnd);
+      return maxVolumeA * floor * Math.pow(0.0001 / floor, tailP);
+    }
+
+    case 'CLEAN_HANDOFF': {
+      // Cos descent over the first 70% (or 85% when A is quiet) so the
+      // tail has body during the 25% overlap zone with B's sin ramp.
+      const aFadeEnd = config.energyA < 0.20 ? 0.85 : 0.70;
+      if (progress < aFadeEnd) {
+        const p = progress / aFadeEnd;
+        const angle = (p * Math.PI) / 2.0;
+        return maxVolumeA * Math.cos(angle);
+      }
+      return 0;
+    }
+
+    case 'FADE_OUT_A_CUT_B': {
+      // A fades out ahead of B's firm entry at ~55%.
+      const holdLevel = 0.85;
+      const holdEnd = 0.45;
+      if (progress < holdEnd) {
+        const p = progress / holdEnd;
+        const eased = p * p;
+        return maxVolumeA * (1.0 - (1.0 - holdLevel) * eased);
+      }
+      const dropP = (progress - holdEnd) / (1.0 - holdEnd);
+      return maxVolumeA * holdLevel * Math.pow(0.0001 / holdLevel, dropP);
+    }
+
+    case 'STEM_MIX': {
+      // Holds at 95% until 75%, then fast exponential.
+      const holdLevel = 0.95;
+      const holdEnd = 0.75;
+      if (progress < holdEnd) {
+        const p = progress / holdEnd;
+        const eased = p * p;
+        return maxVolumeA * (1.0 - (1.0 - holdLevel) * eased);
+      }
+      const dropP = (progress - holdEnd) / (1.0 - holdEnd);
+      return maxVolumeA * holdLevel * Math.pow(0.0001 / holdLevel, dropP);
+    }
+
+    case 'DROP_MIX': {
+      // Short hold, aggressive exit.
+      const holdLevel = 0.80;
+      const holdEnd = 0.30;
+      if (progress < holdEnd) {
+        const p = progress / holdEnd;
+        const eased = p * p;
+        return maxVolumeA * (1.0 - (1.0 - holdLevel) * eased);
+      }
+      const dropP = (progress - holdEnd) / (1.0 - holdEnd);
+      return maxVolumeA * holdLevel * Math.pow(0.0001 / holdLevel, dropP);
+    }
+
+    case 'CROSSFADE':
+      return blendCurveA(progress, ctx, { holdLevel: 0.70, holdEnd: 0.45, dropEnd: 0.85 });
+
+    case 'VINYL_STOP': {
+      // Cos² mirrors the rate ramp (which is driven elsewhere).
+      const aFadeEnd = 0.225;
+      if (progress < aFadeEnd) {
+        const p = progress / aFadeEnd;
+        const angle = (p * Math.PI) / 2.0;
+        return maxVolumeA * Math.cos(angle) * Math.cos(angle);
+      }
+      return 0;
+    }
+
+    case 'SEQUENTIAL': {
+      // A holds full, descends cos² in the last 50ms to complement B's
+      // sin² entry (sin² + cos² = 1, constant power).
+      const solapeWindow = 0.050;
+      const solapeStart = Math.max(0, 1.0 - solapeWindow / duration);
+      if (progress < solapeStart) return maxVolumeA;
+      const p = (progress - solapeStart) / (1.0 - solapeStart);
+      const angle = (p * Math.PI) / 2.0;
+      return maxVolumeA * Math.cos(angle) * Math.cos(angle);
+    }
+  }
+}
+
+/**
+ * Shared blend curve for CROSSFADE / EQ_MIX / BEAT_MATCH_BLEND. The
+ * holdLevel/holdEnd/dropEnd parameters distinguish the three types
+ * (crossfade holds higher and shorter than eqMix/BMB). Modulated by
+ * B→A communication flags + tier4 earlyBlend curve.
+ */
+function blendCurveA(
+  progress: number,
+  ctx: GainContext,
+  params: { holdLevel: number; holdEnd: number; dropEnd: number }
+): number {
+  const { config, maxVolumeA } = ctx;
+  const floor = 0.15;
+
+  // tier4Active overrides the regular curve with earlyBlend: full hold
+  // for the first ~50%, cos² drop to 0.30 by ~75%, exponential tail.
+  // holdEndT4 compresses with clash; dropMidT4 compresses with impact.
+  if (config.tier4Active) {
+    let holdEndT4: number;
+    if (config.bHarmonicClashLevel >= 0.7) holdEndT4 = 0.35;
+    else if (config.bHarmonicClashLevel >= 0.5) holdEndT4 = 0.40;
+    else holdEndT4 = 0.50;
+    const dropMidT4 = config.bImmediateImpact ? 0.65 : 0.75;
+    if (progress < holdEndT4) return maxVolumeA;
+    if (progress < dropMidT4) {
+      const dropP = (progress - holdEndT4) / (dropMidT4 - holdEndT4);
+      const angle = (dropP * Math.PI) / 2.0;
+      const cosSq = Math.cos(angle) * Math.cos(angle);
+      return maxVolumeA * (0.30 + 0.70 * cosSq);
+    }
+    const tailP = (progress - dropMidT4) / (1.0 - dropMidT4);
+    const tailFloor = 0.30;
+    return maxVolumeA * tailFloor * Math.pow(0.0001 / tailFloor, tailP);
+  }
+
+  let holdLevel = params.holdLevel;
+  let holdEnd = params.holdEnd;
+  let dropEnd = params.dropEnd;
+
+  // B→A communication modulations. Acotado por if/else-if para que
+  // intro-aware e impact-aware no colisionen.
+  if (config.bHarmonicClashLevel >= 0.7) {
+    holdLevel = Math.max(0.40, holdLevel - 0.15);
+  }
+  if (config.bImmediateImpact) {
+    // CROSSFADE caps at 0.40, EQ/BMB caps at 0.45 — preservar shape iOS.
+    const impactCap = params.holdEnd >= 0.50 ? 0.45 : 0.40;
+    holdEnd = Math.min(holdEnd, impactCap);
+    dropEnd = Math.max(holdEnd + 0.20, dropEnd - 0.10);
+  } else if (config.bIntroBars >= 4 && !config.needsAnticipation) {
+    // CROSSFADE caps holdEnd at 0.55, EQ/BMB at 0.60 — preservar shape iOS.
+    const introCap = params.holdEnd >= 0.50 ? 0.60 : 0.55;
+    holdEnd = Math.min(introCap, dropEnd - 0.20);
+    dropEnd = Math.min(0.90, dropEnd + 0.05);
+  }
+
+  if (progress < holdEnd) {
+    const p = progress / holdEnd;
+    const eased = p * p * (3.0 - 2.0 * p);
+    return maxVolumeA * (1.0 - (1.0 - holdLevel) * eased);
+  }
+  if (progress < dropEnd) {
+    const dropP = (progress - holdEnd) / (dropEnd - holdEnd);
+    const angle = (dropP * Math.PI) / 2.0;
+    const cosSq = Math.cos(angle) * Math.cos(angle);
+    return maxVolumeA * holdLevel * (floor + (1.0 - floor) * cosSq);
+  }
+  const tailP = (progress - dropEnd) / (1.0 - dropEnd);
+  const tailFloor = holdLevel * floor;
+  return maxVolumeA * tailFloor * Math.pow(0.0001 / tailFloor, tailP);
+}
+
+/**
+ * Gain on B at wall-clock time `t`. Mirrors `CrossfadeExecutor.swift:1995
+ * gainForPlayerB`. Pure: only depends on `t` + `ctx` snapshot.
+ *
+ * Phases:
+ *   - Anticipation pre-fade (when `config.needsAnticipation`):
+ *     * t < anticipationStart → 0.
+ *     * anticipationStart ≤ t < filterStart → tease 0 → 25% maxVolumeB.
+ *     * filterStart ≤ t < fadeInStart → creep 25% → 35% maxVolumeB.
+ *     * t ≥ fadeInStart → falls through to main curve below with
+ *       baseLevel = 0.35.
+ *   - Main curve (anticipation false OR fallthrough):
+ *     * t < fadeInStart → 0.
+ *     * progress = (t − fadeInStart) / (fadeInEnd − fadeInStart).
+ *     * Switch on transitionType for 12 distinct curves.
+ *
+ * Modulations:
+ *   - `aNaturalDecay = isOutroInstrumental && !tier4Active &&
+ *     !needsAnticipation` → 10% easing lift to `target` then hold
+ *     (avoids thump at t=0 from baseLevel→target step).
+ *   - `tier4Active` → earlyBlend curve (B enters at 75% from t=0,
+ *     small climb to 0.85 by 75%, eased final to 1.0).
+ */
+export function gainForPlayerB(t: number, ctx: GainContext): number {
+  const { config, timings, maxVolumeB } = ctx;
+
+  if (config.needsAnticipation) {
+    if (t < timings.anticipationStartTime) return 0;
+    if (t < timings.filterStartTime) {
+      const dur = timings.filterStartTime - timings.anticipationStartTime;
+      if (dur <= 0) return 0;
+      const p = (t - timings.anticipationStartTime) / dur;
+      return maxVolumeB * 0.25 * Math.max(0, p);
+    }
+    if (t < timings.fadeInStartTime) {
+      const dur = timings.fadeInStartTime - timings.filterStartTime;
+      if (dur <= 0) return maxVolumeB * 0.25;
+      const p = (t - timings.filterStartTime) / dur;
+      return maxVolumeB * (0.25 + 0.10 * p);
+    }
+    // Falls through to main curve.
+  }
+
+  if (t < timings.fadeInStartTime) return 0;
+  const fadeInDuration = timings.fadeInEndTime - timings.fadeInStartTime;
+  if (fadeInDuration <= 0) return maxVolumeB;
+  const progress = Math.min(1.0, (t - timings.fadeInStartTime) / fadeInDuration);
+
+  const baseLevel = config.needsAnticipation ? 0.35 : 0.0;
+  const aNaturalDecay =
+    config.isOutroInstrumental && !config.tier4Active && !config.needsAnticipation;
+
+  switch (config.transitionType) {
+    case 'CUT': {
+      // B enters during the last 3s (4s for slow BPM) — matches A's drop
+      // zone. 1.5s ramp avoids the "BAM" effect.
+      const cutCap = config.danceability < 0.5 ? 4.0 : 3.0;
+      const cutZone = Math.min(cutCap, fadeInDuration);
+      const bRampStart = timings.fadeInEndTime - cutZone;
+      if (t < bRampStart) {
+        if (config.needsAnticipation) {
+          // Don't freeze B at a flat level for long fades — creep 0.35 →
+          // 0.45 over max 4s then hold.
+          const holdStart = timings.fadeInStartTime;
+          const holdDur = bRampStart - holdStart;
+          if (holdDur > 0) {
+            const elapsed = t - holdStart;
+            const creepDur = Math.min(4.0, holdDur);
+            const creepP = Math.min(1.0, elapsed / creepDur);
+            return maxVolumeB * (0.35 + 0.10 * creepP);
+          }
+          return maxVolumeB * 0.35;
+        }
+        return 0;
+      }
+      const startLevel = config.needsAnticipation ? 0.45 : 0.0;
+      const rampP = Math.min(1.0, (t - bRampStart) / 1.5);
+      return maxVolumeB * (startLevel + (1.0 - startLevel) * rampP);
+    }
+
+    case 'FADE_OUT_A_CUT_B': {
+      // B waits until A drops (~55% of fade), then quick smoothstep ramp.
+      const waitUntil = 0.55;
+      if (progress < waitUntil) {
+        const p = progress / waitUntil;
+        return maxVolumeB * 0.15 * p;
+      }
+      const rampP = (progress - waitUntil) / (1.0 - waitUntil);
+      const eased = rampP * rampP * (3.0 - 2.0 * rampP);
+      return maxVolumeB * (0.15 + 0.85 * eased);
+    }
+
+    case 'EQ_MIX':
+    case 'BEAT_MATCH_BLEND':
+      return blendCurveB(progress, ctx, {
+        rampStart: 0.35,
+        baseLevel,
+        aNaturalDecay,
+        midTarget: 0.50
+      });
+
+    case 'NATURAL_BLEND': {
+      // Pure sin² ramp. cos² (A) + sin² (B) = 1 → constant power.
+      const angle = (progress * Math.PI) / 2.0;
+      const sinSq = Math.sin(angle) * Math.sin(angle);
+      return maxVolumeB * (baseLevel + (1.0 - baseLevel) * sinSq);
+    }
+
+    case 'CLEAN_HANDOFF': {
+      // sin (not sin²) over the last 55%. anticipation forced off
+      // upstream → baseLevel always 0 here.
+      const bRampStart = 0.45;
+      if (progress < bRampStart) return 0;
+      const rampP = (progress - bRampStart) / (1.0 - bRampStart);
+      const angle = (rampP * Math.PI) / 2.0;
+      return maxVolumeB * Math.sin(angle);
+    }
+
+    case 'CUT_A_FADE_IN_B': {
+      // B reaches ~100% BEFORE A's hard cut at ~98%.
+      const rampEnd = 0.80;
+      if (progress < rampEnd) {
+        const p = progress / rampEnd;
+        const eased = p * p * (3.0 - 2.0 * p);
+        return maxVolumeB * (baseLevel + (1.0 - baseLevel) * eased);
+      }
+      return maxVolumeB;
+    }
+
+    case 'STEM_MIX':
+      return blendCurveB(progress, ctx, {
+        rampStart: 0.50,
+        baseLevel,
+        aNaturalDecay,
+        midTarget: 0.40,
+        useSmoothstepRamp: true
+      });
+
+    case 'DROP_MIX': {
+      // B enters fast → 100% by 60%.
+      const rampEnd = 0.60;
+      if (progress < rampEnd) {
+        if (aNaturalDecay) {
+          const liftEnd = 0.10;
+          const target = 0.60;
+          if (progress < liftEnd) {
+            const p = progress / liftEnd;
+            const eased = p * p * (3.0 - 2.0 * p);
+            return maxVolumeB * (baseLevel + (target - baseLevel) * eased);
+          }
+          const tailP = (progress - liftEnd) / (rampEnd - liftEnd);
+          const easedTail = tailP * tailP * (3.0 - 2.0 * tailP);
+          return maxVolumeB * (target + (1.0 - target) * easedTail);
+        }
+        const p = progress / rampEnd;
+        const eased = p * p * (3.0 - 2.0 * p);
+        return maxVolumeB * (baseLevel + (1.0 - baseLevel) * eased);
+      }
+      return maxVolumeB;
+    }
+
+    case 'CROSSFADE':
+      return blendCurveB(progress, ctx, {
+        rampStart: 0.30,
+        baseLevel,
+        aNaturalDecay,
+        midTarget: 0.50
+      });
+
+    case 'VINYL_STOP': {
+      // B silent until A's rate winds down + ~200ms aire buffer.
+      const bRampStart = 0.325;
+      if (progress < bRampStart) return 0;
+      const rampP = (progress - bRampStart) / (1.0 - bRampStart);
+      const angle = (rampP * Math.PI) / 2.0;
+      const sinSq = Math.sin(angle) * Math.sin(angle);
+      return maxVolumeB * sinSq;
+    }
+
+    case 'SEQUENTIAL': {
+      // B silent until the last 50ms, then sin² enters complementing A's
+      // cos² descent.
+      const solapeWindow = 0.050;
+      const solapeStart = Math.max(0, 1.0 - solapeWindow / fadeInDuration);
+      if (progress < solapeStart) return 0;
+      const p = (progress - solapeStart) / (1.0 - solapeStart);
+      const angle = (p * Math.PI) / 2.0;
+      return maxVolumeB * Math.sin(angle) * Math.sin(angle);
+    }
+  }
+}
+
+/**
+ * Shared blend ramp for B in CROSSFADE / EQ_MIX / BEAT_MATCH_BLEND /
+ * STEM_MIX. Splits into:
+ *   - progress < rampStart: lift baseLevel → midTarget (smoothstep or
+ *     aNaturalDecay 10% lift then hold).
+ *   - progress ≥ rampStart: rise to 1.0 (sin² for blendy types,
+ *     smoothstep for stemMix via `useSmoothstepRamp`).
+ *
+ * `tier4Active` overrides with earlyBlend (B enters at 75% from t=0).
+ */
+function blendCurveB(
+  progress: number,
+  ctx: GainContext,
+  params: {
+    rampStart: number;
+    baseLevel: number;
+    aNaturalDecay: boolean;
+    midTarget: number;
+    useSmoothstepRamp?: boolean;
+  }
+): number {
+  const { config, maxVolumeB } = ctx;
+  const { rampStart, baseLevel, aNaturalDecay, midTarget } = params;
+  const useSmoothstepRamp = params.useSmoothstepRamp ?? false;
+
+  if (config.tier4Active) {
+    // earlyBlend: B enters at 75% from t=0, climbs to 0.85 by 75%, eased
+    // ramp to 1.0 by end.
+    if (progress < 0.50) return maxVolumeB * 0.75;
+    if (progress < 0.75) {
+      const p = (progress - 0.50) / 0.25;
+      return maxVolumeB * (0.75 + 0.10 * p);
+    }
+    const p = (progress - 0.75) / 0.25;
+    const eased = p * p * (3.0 - 2.0 * p);
+    return maxVolumeB * (0.85 + 0.15 * eased);
+  }
+
+  if (progress < rampStart) {
+    if (aNaturalDecay) {
+      const liftEnd = 0.10;
+      if (progress < liftEnd) {
+        const p = progress / liftEnd;
+        const eased = p * p * (3.0 - 2.0 * p);
+        return maxVolumeB * (baseLevel + (midTarget - baseLevel) * eased);
+      }
+      return maxVolumeB * midTarget;
+    }
+    const p = progress / rampStart;
+    const eased = p * p * (3.0 - 2.0 * p);
+    return maxVolumeB * (baseLevel + (midTarget - baseLevel) * eased);
+  }
+
+  const rampP = (progress - rampStart) / (1.0 - rampStart);
+  if (useSmoothstepRamp) {
+    const eased = rampP * rampP * (3.0 - 2.0 * rampP);
+    return maxVolumeB * (midTarget + (1.0 - midTarget) * eased);
+  }
+  const angle = (rampP * Math.PI) / 2.0;
+  const sinSq = Math.sin(angle) * Math.sin(angle);
+  return maxVolumeB * (midTarget + (1.0 - midTarget) * sinSq);
+}
