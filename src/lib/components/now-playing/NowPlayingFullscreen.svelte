@@ -779,8 +779,8 @@
       </div>
       <div
         class="np-automix-hint"
-        class:visible={player.playbackMode === 'dj'}
-        aria-hidden={player.playbackMode !== 'dj'}
+        class:visible={queueManager.djCrossfadeFiring}
+        aria-hidden={!queueManager.djCrossfadeFiring}
       >
         <WaveText text="AutoMix" />
       </div>

@@ -427,7 +427,7 @@
             progress={player.progress}
             isPlaying={player.isPlaying}
             volume={player.volume}
-            autoMixActive={player.playbackMode === 'dj'}
+            autoMixActive={queueManager.djCrossfadeFiring}
             queueOpen={queueUI.isOpen}
             canvasOpen={canvasShown}
             canvasAvailable={canvas.videoUrl !== null || canvas.demoMode}

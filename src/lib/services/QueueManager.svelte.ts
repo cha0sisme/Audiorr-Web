@@ -224,9 +224,13 @@ class QueueManager {
   private preparedCrossfade:
     | { config: import('$lib/audio/dj-types').CrossfadeResult; nextSongId: string }
     | undefined = undefined;
-  /** True mientras el crossfade DJ está ejecutándose. Evita doble-disparo
-      desde `onPlaybackProgress` ticks consecutivos. */
-  private djCrossfadeFiring = false;
+  /** True mientras el crossfade DJ está ejecutándose -- desde el trigger
+      (t >= duration - totalTime) hasta `onCrossfadeCompleted`. Doble función:
+      evita doble-disparo desde `onPlaybackProgress` ticks consecutivos, y
+      es la fuente de verdad para que el MiniPlayer muestre "AutoMix" SOLO
+      dentro del marco del crossfade (no durante toda la sesión SmartMix).
+      Reactivo via `$state` para que el layout reaccione al cambio. */
+  djCrossfadeFiring = $state(false);
   /** True cuando la fetch de análisis para el siguiente trío está en
       flight. Evita reentry en `prepareCrossfadeIfDJ()`. */
   private djPreparing = false;
@@ -678,6 +682,11 @@ class QueueManager {
     this.originalQueue = [];
     this.currentIndex = -1;
     this.pendingResumePosition = 0;
+    // Si se hace clear() mid-crossfade DJ, el flag de "fade en curso" quedaría
+    // colgado hasta el proximo onCrossfadeCompleted -- que ya no llegara porque
+    // borramos la queue. Sin esto, el indicador "AutoMix" del MiniPlayer
+    // seguiria visible tras un wipe durante el fade.
+    this.resetDjCrossfadePrep();
     void clearSnapshot();
   }
 
