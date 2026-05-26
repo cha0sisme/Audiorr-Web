@@ -553,6 +553,80 @@ export type StutterState = {
 const STUTTER_ANTI_CLICK_S = 0.003;
 
 /**
+ * Stutter cut runtime gate: final check before arming the chop.
+ * Mirrors `CrossfadeExecutor.swift:670-725` anchor pre-computation.
+ *
+ * The decision layer (`decideDJEffects`) already gated on `bpmTrusted`,
+ * BPM range, `danceability`, `useStutterCut`, etc. This function does
+ * the FINAL runtime check: is the cut moment actually close enough to a
+ * real beat in A's grid? If not, return `undefined` — graceful
+ * degradation (CUT still happens, just no chop).
+ *
+ * Algorithm:
+ *   1. `cutFileTimeA = startFileTimeA + timings.totalTime`. Since
+ *      time-stretch is forced off for CUT, A advances 1:1 from
+ *      startTime onward.
+ *   2. `nearestBeat = closest(config.downbeatTimesA, cutFileTimeA)`.
+ *   3. If `|nearestBeat - cutFileTimeA| > beatInterval / 3` → off-grid
+ *      → undefined.
+ *   4. Else: anchor wall-clock = `timings.startTime + (nearestBeat -
+ *      startFileTimeA)`. Stutter zone = 2 beats ending at anchor.
+ *      Cell duration = beatInterval / 2 (1/8 note).
+ *
+ * Gates (any fail → undefined):
+ *   - `config.useStutterCut === true`.
+ *   - `config.beatIntervalA > 0`.
+ *   - `config.downbeatTimesA` non-empty.
+ *   - `config.transitionType` is CUT or CUT_A_FADE_IN_B.
+ *
+ * Tolerance `beatInterval / 3` ≈ ±167 ms at 120 BPM — within the human
+ * "groove pocket" (1/12 note). Tighter (/4 = ±125 ms) is too strict;
+ * looser (/2) effectively removes the gate.
+ */
+export function computeStutterState(args: {
+  config: CrossfadeResult;
+  timings: Timings;
+  /** A's file-time at the moment the executor started. Captured upstream
+      from the audio engine's playhead — only meaningful when A plays at
+      rate 1.0 (always true for CUT). */
+  startFileTimeA: number;
+}): StutterState | undefined {
+  const { config, timings, startFileTimeA } = args;
+  if (!config.useStutterCut) return undefined;
+  if (config.beatIntervalA <= 0) return undefined;
+  if (config.downbeatTimesA.length === 0) return undefined;
+  if (config.transitionType !== 'CUT' && config.transitionType !== 'CUT_A_FADE_IN_B') {
+    return undefined;
+  }
+
+  const beatInterval = config.beatIntervalA;
+  const cutFileTimeA = startFileTimeA + timings.totalTime;
+
+  // Nearest beat in A's downbeat grid.
+  let nearestBeat = config.downbeatTimesA[0] ?? 0;
+  let bestDist = Math.abs(nearestBeat - cutFileTimeA);
+  for (const beat of config.downbeatTimesA) {
+    const d = Math.abs(beat - cutFileTimeA);
+    if (d < bestDist) {
+      bestDist = d;
+      nearestBeat = beat;
+    }
+  }
+
+  // Off-grid tolerance.
+  const snapTolerance = beatInterval / 3.0;
+  if (bestDist > snapTolerance) return undefined;
+
+  // Convert anchor file-time back to wall-clock.
+  const anchorWall = timings.startTime + (nearestBeat - startFileTimeA);
+  return {
+    startWall: anchorWall - 2.0 * beatInterval,
+    anchorWall,
+    cellDuration: beatInterval / 2.0
+  };
+}
+
+/**
  * Stutter gate: 1/8-note ON/OFF/ON/OFF pattern over A's last 2 beats.
  * No-op when `stutter` is undefined or `t` is outside
  * `[startWall, anchorWall)`. Includes a 3ms anti-click ramp at each cell

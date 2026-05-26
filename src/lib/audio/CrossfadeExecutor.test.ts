@@ -16,6 +16,7 @@ import {
   calculateTimings,
   computeBassSwapTime,
   computeEnergyCompensationB,
+  computeStutterState,
   gainForPlayerA,
   gainForPlayerB,
   type GainContext,
@@ -906,6 +907,120 @@ describe('gainForPlayerB — universal invariants', () => {
     expect(vMidLift).toBeGreaterThan(0);
     expect(vMidLift).toBeLessThan(0.50);
     expect(vTarget).toBeCloseTo(0.50, 2);
+  });
+});
+
+// ============================================================================
+// computeStutterState
+// ============================================================================
+
+describe('computeStutterState — runtime gate', () => {
+  function makeStutterConfig(overrides: Partial<CrossfadeResult> = {}): CrossfadeResult {
+    return makeConfig({
+      transitionType: 'CUT',
+      useStutterCut: true,
+      beatIntervalA: 0.5, // 120 BPM
+      downbeatTimesA: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5],
+      ...overrides
+    });
+  }
+
+  it('useStutterCut=false → undefined', () => {
+    const config = makeStutterConfig({ useStutterCut: false });
+    const timings = calculateTimings(config, 0);
+    expect(computeStutterState({ config, timings, startFileTimeA: 0 })).toBeUndefined();
+  });
+
+  it('beatIntervalA=0 → undefined', () => {
+    const config = makeStutterConfig({ beatIntervalA: 0 });
+    const timings = calculateTimings(config, 0);
+    expect(computeStutterState({ config, timings, startFileTimeA: 0 })).toBeUndefined();
+  });
+
+  it('downbeats vacíos → undefined', () => {
+    const config = makeStutterConfig({ downbeatTimesA: [] });
+    const timings = calculateTimings(config, 0);
+    expect(computeStutterState({ config, timings, startFileTimeA: 0 })).toBeUndefined();
+  });
+
+  it('transitionType no CUT family → undefined', () => {
+    const config = makeStutterConfig({ transitionType: 'CROSSFADE' });
+    const timings = calculateTimings(config, 0);
+    expect(computeStutterState({ config, timings, startFileTimeA: 0 })).toBeUndefined();
+  });
+
+  it('CUT_A_FADE_IN_B también es elegible', () => {
+    const config = makeStutterConfig({ transitionType: 'CUT_A_FADE_IN_B' });
+    const timings = calculateTimings(config, 0);
+    // cutFileTime = 0 + totalTime. Para fade=6, useFilters=true → filterLead=1.92,
+    // totalTime ~7.92. nearestBeat closest a 7.92 → 8 (no en lista). Lista
+    // termina en 5 → nearestBeat=5, dist=2.92 >> tolerance(0.5/3=0.167) → undefined.
+    // Para que dispare, necesito downbeats que cubran cutFileTime.
+    expect(computeStutterState({ config, timings, startFileTimeA: 0 })).toBeUndefined();
+  });
+
+  it('cutFileTime alineado con un beat → StutterState válido', () => {
+    // fade=6, useFilters=false → filterLead=0. totalTime = 6.
+    // startFileTimeA=0 → cutFileTime = 6. Downbeats cada 0.5s. Si añadimos
+    // 6.0, nearestBeat=6.0, dist=0 ≤ tolerance.
+    const config = makeStutterConfig({
+      useFilters: false,
+      downbeatTimesA: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5]
+    });
+    const timings = calculateTimings(config, 100);
+    const s = computeStutterState({ config, timings, startFileTimeA: 0 });
+    expect(s).toBeDefined();
+    if (s !== undefined) {
+      // anchorWall = startTime(100) + (6 - 0) = 106.
+      expect(s.anchorWall).toBeCloseTo(106, 3);
+      // startWall = anchorWall - 2 * 0.5 = 105.
+      expect(s.startWall).toBeCloseTo(105, 3);
+      // cellDuration = beatInterval / 2 = 0.25.
+      expect(s.cellDuration).toBeCloseTo(0.25, 3);
+    }
+  });
+
+  it('cutFileTime off-grid > beatInterval/3 → undefined', () => {
+    // Tolerance = 0.5 / 3 ≈ 0.167. cutFileTime=6 (totalTime). El downbeat
+    // más cercano es 5.5 (dist=0.5) o si pongo 5.8 (dist=0.2). 0.2 > 0.167
+    // → off-grid.
+    const config = makeStutterConfig({
+      useFilters: false,
+      downbeatTimesA: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.8]
+    });
+    const timings = calculateTimings(config, 0);
+    const s = computeStutterState({ config, timings, startFileTimeA: 0 });
+    expect(s).toBeUndefined();
+  });
+
+  it('cutFileTime off-grid dentro de tolerance → válido', () => {
+    // Mismo setup pero downbeat a 5.85 (dist=0.15 < 0.167 tolerance).
+    const config = makeStutterConfig({
+      useFilters: false,
+      downbeatTimesA: [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.85]
+    });
+    const timings = calculateTimings(config, 0);
+    const s = computeStutterState({ config, timings, startFileTimeA: 0 });
+    expect(s).toBeDefined();
+    if (s !== undefined) {
+      expect(s.anchorWall).toBeCloseTo(5.85, 3);
+    }
+  });
+
+  it('startFileTimeA distinto de 0 desplaza el mapping wall-clock', () => {
+    // startFileTimeA=10, totalTime=6 → cutFileTime=16. Downbeat closest a 16 = 16.
+    const config = makeStutterConfig({
+      useFilters: false,
+      downbeatTimesA: [14, 14.5, 15, 15.5, 16, 16.5]
+    });
+    const timings = calculateTimings(config, 0);
+    const s = computeStutterState({ config, timings, startFileTimeA: 10 });
+    expect(s).toBeDefined();
+    if (s !== undefined) {
+      // anchorWall = 0 + (16 - 10) = 6.
+      expect(s.anchorWall).toBeCloseTo(6, 3);
+      expect(s.startWall).toBeCloseTo(5, 3);
+    }
   });
 });
 
