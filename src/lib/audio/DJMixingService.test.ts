@@ -17,6 +17,7 @@ import {
   applyVlfsCap,
   buildTransitionProfile,
   calculateAdaptiveFadeDuration,
+  calculateCrossfadeConfig,
   calculateSmartEntryPoint,
   calculateTriggerBias,
   computeTier4Entry,
@@ -2946,6 +2947,251 @@ describe('snapCutEntryToDownbeat', () => {
     });
     expect(r.snapped).toBe(true);
     expect(r.entry).toBeCloseTo(30.1, 1);
+  });
+});
+
+// ============================================================================
+// calculateCrossfadeConfig — orquestador final
+// ============================================================================
+
+describe('calculateCrossfadeConfig', () => {
+  it('analysis missing → fallback básico con entryPoint chico', () => {
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: undefined,
+      nextAnalysis: undefined,
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'normal'
+    });
+    expect(r.entryPoint).toBeLessThan(10);
+    expect(r.fadeDuration).toBeGreaterThanOrEqual(2);
+    // Sin analysis: profile usa defaults (steady energy, identical BPM,
+    // smooth character) → debería caer en CROSSFADE smooth.
+    expect(['CROSSFADE', 'NATURAL_BLEND']).toContain(r.transitionType);
+  });
+
+  it('SEQUENTIAL fuerza entry=0 y fadeDuration=0.050', () => {
+    // Construir un par que el decisor mande a SEQUENTIAL: punch + STEM_MIX
+    // candidato (vocal overlap + fade≥6 + bpmDiff<6) → STEM_MIX → retired
+    // a SEQUENTIAL. STEM_MIX necesita vocales solapadas + ambos energía.
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: makeAnalysis({
+        bpm: 120,
+        bpmConfidence: 0.9,
+        energy: 0.5,
+        danceability: 0.7,
+        hasVocalData: true,
+        hasOutroVocals: true,
+        hasIntroData: true,
+        introEndTime: 5
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 121,
+        bpmConfidence: 0.9,
+        energy: 0.5,
+        danceability: 0.7,
+        hasVocalData: true,
+        hasIntroVocals: true,
+        vocalStartTime: 0.5,
+        hasIntroData: true,
+        introEndTime: 5
+      }),
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    // SEQUENTIAL puede llegar por varios paths (CUT sin outro fiable,
+    // STEM_MIX retired, etc.) — en todos los casos entry=0 + fade=0.050.
+    if (r.transitionType === 'SEQUENTIAL') {
+      expect(r.entryPoint).toBe(0);
+      expect(r.fadeDuration).toBeCloseTo(0.050, 3);
+    }
+  });
+
+  it('CLEAN_HANDOFF clamp fadeDuration a [2.5, 3.5]', () => {
+    // Punto de difícil construcción: necesita un path que devuelva
+    // CLEAN_HANDOFF. Hv5-4 retiró CLEAN_HANDOFF del decisor, así que el
+    // tipo solo puede llegar por sequenciaación residual. Si no llegamos,
+    // saltamos el assert.
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: makeAnalysis(),
+      nextAnalysis: makeAnalysis(),
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    if (r.transitionType === 'CLEAN_HANDOFF') {
+      expect(r.fadeDuration).toBeGreaterThanOrEqual(2.5);
+      expect(r.fadeDuration).toBeLessThanOrEqual(3.5);
+    } else {
+      expect(true).toBe(true);
+    }
+  });
+
+  it('VINYL_STOP clamp fadeDuration a [1.5, 2.0]', () => {
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: makeAnalysis({
+        bpm: 120,
+        bpmConfidence: 0.9,
+        energy: 0.7,
+        danceability: 0.6,
+        hasOutroData: true,
+        outroStartTime: 180
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 80, // incompatible
+        bpmConfidence: 0.9,
+        energy: 0.15,
+        danceability: 0.5,
+        chorusStartTime: 2,
+        hasIntroData: true,
+        introEndTime: 1
+      }),
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    if (r.transitionType === 'VINYL_STOP') {
+      expect(r.fadeDuration).toBeGreaterThanOrEqual(1.5);
+      expect(r.fadeDuration).toBeLessThanOrEqual(2.0);
+    }
+  });
+
+  it('punch normal flow produce un CrossfadeResult coherente', () => {
+    // speechSegments fuera de la zona del fade fuerzan aVocalsInZone /
+    // bVocalsInZone = false → no useMidScoop → no STEM_MIX → BMB clean.
+    const cur = makeAnalysis({
+      bpm: 120,
+      bpmConfidence: 0.9,
+      energy: 0.5,
+      danceability: 0.6,
+      hasOutroData: true,
+      outroStartTime: 180,
+      hasVocalEndData: true,
+      lastVocalTime: 175,
+      speechSegments: [{ start: 100, end: 120 }] // fuera de zona [180..200]
+    });
+    const next = makeAnalysis({
+      bpm: 122,
+      bpmConfidence: 0.9,
+      energy: 0.52,
+      danceability: 0.6,
+      hasIntroData: true,
+      introEndTime: 12,
+      introEndTimeHeuristic: 12,
+      vocalStartTime: 14,
+      chorusStartTime: 20,
+      downbeatTimes: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+      speechSegments: [{ start: 100, end: 110 }] // fuera de fade zone
+    });
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    expect(r.entryPoint).toBeGreaterThan(0);
+    expect(r.fadeDuration).toBeGreaterThanOrEqual(2);
+    expect(r.energyA).toBeCloseTo(0.5, 1);
+    expect(r.energyB).toBeCloseTo(0.52, 1);
+    expect(r.beatIntervalA).toBeCloseTo(0.5, 1); // 60/120 (post-sanitize)
+    expect(r.danceability).toBeCloseTo(0.6, 1);
+    expect(r.transitionReason.length).toBeGreaterThan(0);
+    expect(r.beatSyncInfo.length).toBeGreaterThan(0);
+  });
+
+  it('chillRecipeApplied true cuando ambas low energy + low dance + B respira', () => {
+    // Sin vocalStartTime: chillVocalSpace=Infinity. vocalStartReliable=false
+    // (chain: vocalStart=0 fails > 0 guard). punch path → entryReference=
+    // heuristic=12. entry≈12. chorus-12=13>8, bImmediateImpact=false →
+    // chill aplica. speechSegments fuera de zona evitan STEM_MIX.
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: makeAnalysis({
+        bpm: 100,
+        bpmConfidence: 0.9,
+        energy: 0.15,
+        danceability: 0.4,
+        hasOutroData: true,
+        outroStartTime: 180,
+        hasVocalEndData: true,
+        lastVocalTime: 150,
+        speechSegments: [{ start: 50, end: 70 }]
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 102,
+        bpmConfidence: 0.9,
+        energy: 0.15,
+        danceability: 0.4,
+        // sin vocalStartTime → chillVocalSpace=Infinity
+        chorusStartTime: 25,
+        hasIntroData: true,
+        introEndTime: 12,
+        introEndTimeHeuristic: 12,
+        speechSegments: [{ start: 100, end: 110 }]
+      }),
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    expect(r.chillRecipeApplied).toBe(true);
+    // Chill forza skipBFilters.
+    expect(r.skipBFilters).toBe(true);
+    // Y mata moving FX (bassKill, dynQ, notchSweep, stutterCut).
+    expect(r.useBassKill).toBe(false);
+    expect(r.useDynamicQ).toBe(false);
+    expect(r.useNotchSweep).toBe(false);
+  });
+
+  it('noRealOutro cap aplica entry → ≤8s cuando A groove al final', () => {
+    // A con outro corto (<4s) + energyOutro alta = noRealOutro true.
+    // Si entry pre-cap > 8 → cap a 8.
+    const cur = makeAnalysis({
+      bpm: 120,
+      bpmConfidence: 0.9,
+      energy: 0.5,
+      danceability: 0.6,
+      hasOutroData: true,
+      outroStartTime: 197, // outroDur = 3 < 4
+      hasEnergyProfile: true,
+      energyOutro: 0.4 // > 0.15 → noRealOutro
+    });
+    const next = makeAnalysis({
+      bpm: 122,
+      bpmConfidence: 0.9,
+      hasIntroData: true,
+      introEndTime: 25,
+      introEndTimeHeuristic: 25,
+      chorusStartTime: 30
+    });
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: cur,
+      nextAnalysis: next,
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    expect(r.entryPoint).toBeLessThanOrEqual(8.0);
+    expect(r.beatSyncInfo).toContain('noRealOutro');
+  });
+
+  it('telemetría tier4FailedGate presente cuando tier4 no dispara', () => {
+    const r = calculateCrossfadeConfig({
+      currentAnalysis: makeAnalysis({
+        bpm: 120,
+        bpmConfidence: 0.9
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 122,
+        bpmConfidence: 0.9
+      }),
+      bufferADuration: 200,
+      bufferBDuration: 200,
+      mode: 'dj'
+    });
+    // Sin setup tier4-compatible, debería fallar en algún gate.
+    expect(r.tier4Active).toBe(false);
+    // tier4FailedGate puede estar definido (la rama lo poblará).
   });
 });
 

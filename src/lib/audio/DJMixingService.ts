@@ -27,6 +27,7 @@
 import {
   type AnticipationResult,
   type BPMRelationship,
+  type CrossfadeResult,
   type DJEffectsResult,
   type DJFilterResult,
   type EnergyFlow,
@@ -3337,6 +3338,724 @@ export function calculateSmartEntryPoint(args: {
     ...result,
     ...(genreCapApplied !== undefined ? { genreCapApplied } : {}),
     ...(entryFinalCapApplied !== undefined ? { entryFinalCapApplied } : {})
+  };
+}
+
+// ============================================================================
+// MARK: - calculateCrossfadeConfig (DJMixingService.swift:724)
+// ============================================================================
+//
+// THE orchestrator. Combines every pure-logic decisor portado en este file
+// into a single CrossfadeResult that CrossfadeExecutor (Fase 2) consumes.
+//
+// Pipeline (numbered to match iOS comments):
+//   1. Sanitize current + next analysis.
+//   2. Build transition profile.
+//   2b. noRealOutro guard (cap entry to 8s when A still grooves to end).
+//   3. Adaptive fade duration.
+//   4. Filter usage (useFilters / useAggressive).
+//   5. DJ filters (midScoop / highShelfCut).
+//   5b. Pre-decision instrumental detection (used by decisor).
+//   6. Decide transition type.
+//   6b. DROP_MIX → BMB redirect for mid-entry cluster.
+//   6b-ter. Late entry vs vocalStartB → SEQUENTIAL.
+//   6b-quater. CUT sin outro instrumental fiable → SEQUENTIAL.
+//   6b-bis. SEQUENTIAL force entry=0.
+//   6c. Snap CUT entry to downbeat.
+//   6.5. Tier 4 advance entry to first kick.
+//   6a. Late entry post-Tier4 vs vocalStartB → SEQUENTIAL.
+//   6b. effectiveFadeDuration overrides per type.
+//   7. Anticipation (with filtersAggressivePredicted).
+//   8. Time-stretch.
+//   8b. Aggressive preset → force skipBFilters.
+//   8c. Quiet-B gate → skipBFilters.
+//   8d. B→A communication flags computation.
+//   8e. Chill recipe → skipBFilters + suppress moving FX.
+//   8f. Bass-of-B-high gate → skipBFilters.
+//   8g. CUT + clash → kill midScoop.
+//   9. Trigger bias.
+//   10. DJ effects.
+//   11. Build final CrossfadeResult with telemetry.
+
+export function calculateCrossfadeConfig(args: {
+  currentAnalysis: SongAnalysis | undefined;
+  nextAnalysis: SongAnalysis | undefined;
+  bufferADuration: number;
+  bufferBDuration: number;
+  mode: MixMode;
+  currentPlaybackTimeA?: number;
+  userFadeDuration?: number;
+}): CrossfadeResult {
+  const {
+    currentAnalysis,
+    nextAnalysis,
+    bufferADuration,
+    bufferBDuration,
+    mode,
+    currentPlaybackTimeA,
+    userFadeDuration
+  } = args;
+
+  const safeCurrent =
+    currentAnalysis !== undefined ? sanitizeAnalysis(currentAnalysis, bufferADuration) : undefined;
+  const safeNext =
+    nextAnalysis !== undefined ? sanitizeAnalysis(nextAnalysis, bufferBDuration) : undefined;
+
+  // ── 1. Profile ──
+  const profile = buildTransitionProfile({
+    mode,
+    bufferADuration,
+    bufferBDuration,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {}),
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {})
+  });
+
+  // ── 2. Entry point ──
+  let entry = calculateSmartEntryPoint({
+    bufferDuration: bufferBDuration,
+    profile,
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {}),
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {}),
+    ...(currentPlaybackTimeA !== undefined ? { currentPlaybackTimeA } : {})
+  });
+
+  // ── 2b. noRealOutro guard ──
+  // Tracks with outroStartTime within ~3s of file end + still energetic
+  // → A is in full groove; the high outro-aware entry would trigger A's
+  // fade-out way too early. Cap entry to 8s when this fires.
+  const noRealOutroEval = ((): { flag: boolean; outroEnergy: number | undefined } => {
+    if (!safeCurrent || safeCurrent.hasError) return { flag: false, outroEnergy: undefined };
+    if (!safeCurrent.hasOutroData || bufferADuration <= 30) {
+      return { flag: false, outroEnergy: undefined };
+    }
+    const outroDur = bufferADuration - safeCurrent.outroStartTime;
+    if (outroDur >= 4) return { flag: false, outroEnergy: undefined };
+
+    // Confirm with energy: prefer energyOutro, fall back to energy global.
+    // Backend RMS-zero bug guard: when energyOutro≤0.02, use cur.energy as
+    // second opinion before assuming bug. Activate only when BOTH look low.
+    const primary = safeCurrent.hasEnergyProfile ? safeCurrent.energyOutro : safeCurrent.energy;
+    let outroEnergy: number;
+    if (primary > 0.02) outroEnergy = primary;
+    else if (safeCurrent.hasEnergyProfile && safeCurrent.energy > 0.02) {
+      outroEnergy = safeCurrent.energy;
+    } else outroEnergy = primary;
+    return { flag: outroEnergy > 0.15, outroEnergy };
+  })();
+  const noRealOutro = noRealOutroEval.flag;
+  const outroEnergyAForTelemetry = noRealOutroEval.outroEnergy;
+
+  if (noRealOutro && entry.entryPoint > 8.0) {
+    const capped = 8.0;
+    // Preserve original entrySource + chorus-cap flags; only modify entry +
+    // beatSyncInfo + drop the beat-sync claim (sync was tied to pre-cap
+    // downbeat).
+    entry = {
+      entryPoint: capped,
+      beatSyncInfo: `${entry.beatSyncInfo} [noRealOutro cap]`,
+      usedFallback: entry.usedFallback,
+      isBeatSynced: false,
+      entrySource: entry.entrySource,
+      ...(entry.genreCapApplied !== undefined ? { genreCapApplied: entry.genreCapApplied } : {}),
+      ...(entry.entryFinalCapApplied !== undefined
+        ? { entryFinalCapApplied: entry.entryFinalCapApplied }
+        : {})
+    };
+  }
+
+  // ── 3. Fade duration ──
+  const fade = calculateAdaptiveFadeDuration({
+    entryPoint: entry.entryPoint,
+    bufferADuration,
+    bufferBDuration,
+    profile,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {}),
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {}),
+    ...(userFadeDuration !== undefined ? { userFadeDuration } : {})
+  });
+
+  // ── 4. Filter usage ──
+  const filter = decideFilterUsage({ profile, fadeDuration: fade.duration });
+
+  // ── 5. DJ filters (refined with actual fade zone) ──
+  const djFilters = decideDJFilters({
+    profile,
+    fadeDuration: fade.duration,
+    entryPoint: entry.entryPoint,
+    bufferADuration,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {}),
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {})
+  });
+
+  // ── 5b. Pre-decision instrumental detection ──
+  // Computed BEFORE decideTransitionType so the selector can route
+  // incompatible-BPM pairs that share instrumental outro/intro to gentle
+  // blend instead of CLEAN_HANDOFF. Re-detected later with
+  // effectiveFadeDuration for the runtime config.
+  const preOutroInstrumental = detectOutroInstrumental({
+    bufferADuration,
+    fadeDuration: fade.duration,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {})
+  });
+  const preIntroInstrumental = detectIntroInstrumental({
+    entryPoint: entry.entryPoint,
+    fadeDuration: fade.duration,
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {})
+  });
+
+  // ── 6. Transition type ──
+  let transition = decideTransitionType({
+    profile,
+    entryPoint: entry.entryPoint,
+    fadeDuration: fade.duration,
+    isBeatSynced: entry.isBeatSynced,
+    useFilters: filter.useFilters,
+    bufferADuration,
+    hasVocalOverlap: djFilters.useMidScoop,
+    outroInstrumental: preOutroInstrumental,
+    introInstrumental: preIntroInstrumental,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {}),
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {})
+  });
+
+  // ── 6b. DROP_MIX → BMB redirect for mid-entry cluster ──
+  // entry ∈ [5, 15) + bpmDiff ≥ 5 + isBeatSynced + entrySource ≠ vocal
+  // avoidance → BMB. Below 5 is legitimate kick-roll; ≥15 is a different
+  // problem; vocal avoidance source is a protective signal we respect.
+  if (
+    transition.type === 'DROP_MIX' &&
+    entry.entryPoint >= 5.0 &&
+    entry.entryPoint < 15.0 &&
+    profile.bpmDiff >= 5.0 &&
+    entry.entrySource !== 'punchVocalAvoidance' &&
+    entry.isBeatSynced
+  ) {
+    const oldReason = transition.reason;
+    transition = {
+      type: 'BEAT_MATCH_BLEND',
+      reason: `Redirect: DROP_MIX→BMB (entry=${entry.entryPoint.toFixed(1)}s, bpmDiff=${profile.bpmDiff.toFixed(1)}, src=${entry.entrySource}) [old: ${oldReason}]`,
+      sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
+      ...(transition.f5bRetiredFrom !== undefined
+        ? { f5bRetiredFrom: transition.f5bRetiredFrom }
+        : {})
+    };
+  }
+
+  // ── 6b-ter. Late entry vs vocalStartB → SEQUENTIAL ──
+  // When the chosen entry skips B's intro by > 5s (or 20s when B's intro
+  // is very quiet instrumental), A delivers its outro while B already
+  // passed its intro material. Drop-driven percussive exempt (the kick
+  // justifies a mid-song entry).
+  if (
+    safeNext &&
+    !safeNext.hasError &&
+    transition.type !== 'SEQUENTIAL' &&
+    transition.type !== 'VINYL_STOP' &&
+    transition.type !== 'CUT' &&
+    transition.type !== 'CUT_A_FADE_IN_B'
+  ) {
+    const vocalStartB =
+      safeNext.vocalStartTime !== undefined && safeNext.vocalStartTime > 0
+        ? safeNext.vocalStartTime
+        : (safeNext.speechSegments[0]?.start ?? 0) > 0
+          ? (safeNext.speechSegments[0]?.start ?? 0)
+          : 0;
+    if (vocalStartB > 0) {
+      const { isDrop } = isBDropDrivenByPercussive(safeNext.percussiveCurve);
+      const isQuietInstrumentalIntro = profile.energyB < 0.12 && preIntroInstrumental;
+      const h2Threshold = isQuietInstrumentalIntro ? 20.0 : 5.0;
+      const entryExcess = entry.entryPoint - vocalStartB;
+      if (entryExcess > h2Threshold && !isDrop) {
+        const oldReason = transition.reason;
+        transition = {
+          type: 'SEQUENTIAL',
+          reason: `Entry tardío vs vocalStartB (entry=${entry.entryPoint.toFixed(1)}s, vocalStartB=${vocalStartB.toFixed(1)}s, excess=${entryExcess.toFixed(1)}s, threshold=${h2Threshold.toFixed(0)}s) → SEQUENTIAL [old: ${oldReason}]`,
+          sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
+          ...(transition.f5bRetiredFrom !== undefined
+            ? { f5bRetiredFrom: transition.f5bRetiredFrom }
+            : {})
+        };
+      }
+    }
+  }
+
+  // ── 6b-quater. CUT sin outro instrumental fiable → SEQUENTIAL ──
+  // preOutroInstrumental can false-positive on outros that "have no vocal"
+  // simply because they have no sound (fade-out to silence). Require also
+  // outroEnergyA > 0.10 to consider the outro defendible for CUT.
+  if (transition.type === 'CUT') {
+    const h3OutroDefendsCut = (() => {
+      if (!preOutroInstrumental) return false;
+      if (outroEnergyAForTelemetry !== undefined && outroEnergyAForTelemetry < 0.10) return false;
+      return true;
+    })();
+    if (!h3OutroDefendsCut) {
+      const oldReason = transition.reason;
+      const oeStr =
+        outroEnergyAForTelemetry !== undefined ? outroEnergyAForTelemetry.toFixed(2) : 'nil';
+      transition = {
+        type: 'SEQUENTIAL',
+        reason: `CUT sin outro instrumental fiable (preOutroInstrumental=${preOutroInstrumental}, outroEnergyA=${oeStr}) → SEQUENTIAL [old: ${oldReason}]`,
+        sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
+        ...(transition.f5bRetiredFrom !== undefined
+          ? { f5bRetiredFrom: transition.f5bRetiredFrom }
+          : {})
+      };
+    }
+  }
+
+  // ── 6b-bis. SEQUENTIAL force entry=0 ──
+  // decideTransitionType can redirect DROP_MIX/STEM_MIX → SEQUENTIAL via
+  // the retirement guard. The entry was computed before that redirect,
+  // typically pointing at chorus/drop ~30-60s in. SEQUENTIAL promises
+  // "A finishes natural, B starts from the beginning" — force entry=0.
+  if (transition.type === 'SEQUENTIAL' && entry.entryPoint > 0) {
+    entry = {
+      entryPoint: 0,
+      beatSyncInfo: `${entry.beatSyncInfo} [SEQUENTIAL reset]`,
+      usedFallback: entry.usedFallback,
+      isBeatSynced: false,
+      entrySource: entry.entrySource,
+      ...(entry.genreCapApplied !== undefined ? { genreCapApplied: entry.genreCapApplied } : {}),
+      ...(entry.entryFinalCapApplied !== undefined
+        ? { entryFinalCapApplied: entry.entryFinalCapApplied }
+        : {})
+    };
+  }
+
+  // ── 6c. CUT entry snap to downbeat ──
+  const harmonicClashLevel = (() => {
+    switch (profile.harmonic.compatibility) {
+      case 'compatible':
+        return 0.0;
+      case 'acceptable':
+        return 0.3;
+      case 'tense':
+        return 0.6;
+      case 'clash':
+        return 1.0;
+    }
+  })();
+  const snapResult = snapCutEntryToDownbeat({
+    entry: entry.entryPoint,
+    transitionType: transition.type,
+    next: safeNext,
+    bufferBDuration,
+    fadeDuration: fade.duration,
+    harmonicClashLevel
+  });
+  const snapEntry = snapResult.entry;
+
+  // ── 6.5. Tier 4: advance entry to first kick of B's intro ──
+  const tier4Result = computeTier4Entry({
+    safeCurrent,
+    safeNext,
+    profile,
+    bufferADuration,
+    fadeDuration: fade.duration,
+    originalEntry: snapEntry,
+    transitionType: transition.type
+  });
+  let finalEntry: number;
+  let tier4Active: boolean;
+  let tier4Telemetry: Tier4Telemetry;
+  if (tier4Result.entry !== undefined) {
+    finalEntry = tier4Result.entry;
+    tier4Active = true;
+    tier4Telemetry = tier4Result.telemetry;
+  } else {
+    finalEntry = snapEntry;
+    tier4Active = false;
+    tier4Telemetry = tier4Result.telemetry;
+  }
+
+  // ── 6a. Late entry post-Tier4 vs vocalStartB → SEQUENTIAL ──
+  // Defensive: blendy types (BMB / EQ_MIX) with finalEntry > vocalStartB+3
+  // step on a vocal already singing ≥3s — reassign to SEQUENTIAL.
+  const vocalStartBForLateEntryGate =
+    safeNext && !safeNext.hasError ? (safeNext.vocalStartTime ?? 0) : 0;
+  const isBlendyForLateEntryGate =
+    transition.type === 'BEAT_MATCH_BLEND' || transition.type === 'EQ_MIX';
+  if (
+    isBlendyForLateEntryGate &&
+    vocalStartBForLateEntryGate > 0 &&
+    finalEntry > vocalStartBForLateEntryGate + 3.0
+  ) {
+    const oldType = transition.type;
+    const oldEntry = finalEntry;
+    transition = {
+      type: 'SEQUENTIAL',
+      reason: `[Late entry vs vocalStartB (finalEntry=${oldEntry.toFixed(1)}s > vocalStartB+3s=${(vocalStartBForLateEntryGate + 3.0).toFixed(1)}s, era ${oldType}) → SEQUENTIAL, entry=0] ${transition.reason}`,
+      sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
+      ...(transition.f5bRetiredFrom !== undefined
+        ? { f5bRetiredFrom: transition.f5bRetiredFrom }
+        : {})
+    };
+    finalEntry = 0;
+  }
+
+  // ── 6b. effectiveFadeDuration overrides per transition type ──
+  let effectiveFadeDuration: number;
+  switch (transition.type) {
+    case 'CLEAN_HANDOFF':
+      effectiveFadeDuration = Math.max(2.5, Math.min(3.5, fade.duration));
+      break;
+    case 'VINYL_STOP':
+      effectiveFadeDuration = Math.max(1.5, Math.min(2.0, fade.duration));
+      break;
+    case 'CUT':
+      effectiveFadeDuration = Math.max(3.0, Math.min(7.0, fade.duration));
+      break;
+    case 'SEQUENTIAL':
+      // 50ms total overlap — A ends natural, B starts from t=0 with an
+      // inaudible cos²/sin² seam.
+      effectiveFadeDuration = 0.050;
+      break;
+    case 'FADE_OUT_A_CUT_B': {
+      if (profile.energyA > 0.40 && profile.energyB < 0.25) {
+        const aOutroLimit =
+          safeCurrent && !safeCurrent.hasError && safeCurrent.hasOutroData &&
+          bufferADuration > safeCurrent.outroStartTime
+            ? bufferADuration - safeCurrent.outroStartTime + 2.0
+            : 8.0;
+        const cap = Math.min(8.0, aOutroLimit);
+        const target = Math.max(Math.min(5.0, cap), fade.duration);
+        effectiveFadeDuration = Math.min(cap, target);
+      } else {
+        effectiveFadeDuration = fade.duration;
+      }
+      break;
+    }
+    default:
+      effectiveFadeDuration = fade.duration;
+  }
+
+  // ── 7. Anticipation ──
+  const bIntroSpaceForAnticipation =
+    safeNext && !safeNext.hasError
+      ? (safeNext.introEndTimeHeuristic ??
+        (safeNext.hasIntroData ? safeNext.introEndTime : 0))
+      : 0;
+  const vocalStartBForAnticipation =
+    safeNext && !safeNext.hasError ? (safeNext.vocalStartTime ?? 0) : 0;
+  const bpmAForAnticipation =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.bpm : 0;
+  const bGenresForAnticipation =
+    safeNext && !safeNext.hasError ? safeNext.genres : [];
+  const rmsTailCurveAForAnticipation =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.rmsTailCurve : undefined;
+
+  // Conservative prediction of whether decideDJEffects will activate any
+  // moving FX. False positives (predict aggressive but later turned off)
+  // are harmless — only an extra anticipation slot. False negatives are
+  // not OK — they're the "filters land abruptly" complaint.
+  const filtersAggressivePredicted = (() => {
+    // Killers: chill / low-energy-A → all 4 flags off.
+    if (profile.energyA < 0.30) return false;
+    if (profile.energyA < 0.15) return false;
+
+    // bassKill primary gate
+    const bassKillCompatibleType = (() => {
+      switch (transition.type) {
+        case 'EQ_MIX':
+        case 'BEAT_MATCH_BLEND':
+        case 'CROSSFADE':
+        case 'CUT_A_FADE_IN_B':
+        case 'FADE_OUT_A_CUT_B':
+          return true;
+        default:
+          return false;
+      }
+    })();
+    const dramaticEligible =
+      profile.character === 'dramatic' && profile.energyFlow === 'energyUp';
+    const punchEligible = profile.character === 'punch';
+    const smoothEligible =
+      profile.character === 'smooth' && profile.avgDanceability >= 0.55;
+    const bassKillEligible =
+      bassKillCompatibleType &&
+      profile.bpmTrusted &&
+      profile.avgDanceability > 0.4 &&
+      effectiveFadeDuration > 4.0 &&
+      profile.energyA >= 0.10 &&
+      profile.energyB >= 0.10 &&
+      (punchEligible || dramaticEligible || smoothEligible);
+    if (bassKillEligible) return true;
+
+    // dynamicQ primary gate
+    const isEnergyDownPredicted = profile.energyB < profile.energyA - 0.2;
+    const dynQEligible =
+      !isEnergyDownPredicted &&
+      effectiveFadeDuration > 4.0 &&
+      profile.avgDanceability > 0.45 &&
+      (profile.character === 'punch' ||
+        (profile.character === 'dramatic' && profile.energyFlow !== 'energyDown'));
+    if (dynQEligible) return true;
+
+    // stutterCut primary gate
+    const stutterCompatibleType =
+      transition.type === 'CUT' || transition.type === 'CUT_A_FADE_IN_B';
+    const stutterEligible =
+      stutterCompatibleType &&
+      profile.bpmTrusted &&
+      profile.bpmA >= 80 &&
+      profile.bpmA <= 180 &&
+      profile.avgDanceability > 0.50 &&
+      effectiveFadeDuration >= 1.5;
+    if (stutterEligible) return true;
+
+    return false;
+  })();
+
+  const anticipation = decideAnticipation({
+    fadeDuration: effectiveFadeDuration,
+    entryPoint: finalEntry,
+    transitionType: transition.type,
+    noRealOutro,
+    transitionReason: transition.reason,
+    bIntroSpace: bIntroSpaceForAnticipation,
+    vocalStartB: vocalStartBForAnticipation,
+    bpmA: bpmAForAnticipation,
+    bGenres: bGenresForAnticipation,
+    ...(rmsTailCurveAForAnticipation !== undefined
+      ? { rmsTailCurveA: rmsTailCurveAForAnticipation }
+      : {}),
+    filtersAggressivePredicted
+  });
+
+  // ── 8. Time-stretch ──
+  const timeStretch = decideTimeStretch({ profile, transitionType: transition.type });
+
+  // ── Beat grid (adjusted for time-stretch) ──
+  const biA =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.beatInterval : 0;
+  const rawBiB =
+    safeNext && !safeNext.hasError ? safeNext.beatInterval : 0;
+  const biB =
+    timeStretch.useTimeStretch && timeStretch.rateB > 0 ? rawBiB / timeStretch.rateB : rawBiB;
+  const dbA =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.downbeatTimes : [];
+  const rawDbB =
+    safeNext && !safeNext.hasError ? safeNext.downbeatTimes : [];
+  const dbB: readonly number[] =
+    timeStretch.useTimeStretch && timeStretch.rateB > 0
+      ? rawDbB.map((t) => t / timeStretch.rateB)
+      : rawDbB;
+  const realDbA =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.realDownbeats : [];
+  const meterA =
+    safeCurrent && !safeCurrent.hasError ? safeCurrent.meter : 4;
+
+  // ── Instrumental detection (refined with effectiveFadeDuration) ──
+  const outroInstrumental = detectOutroInstrumental({
+    bufferADuration,
+    fadeDuration: effectiveFadeDuration,
+    ...(safeCurrent !== undefined ? { currentAnalysis: safeCurrent } : {})
+  });
+  const introInstrumental = detectIntroInstrumental({
+    entryPoint: finalEntry,
+    fadeDuration: effectiveFadeDuration,
+    ...(safeNext !== undefined ? { nextAnalysis: safeNext } : {})
+  });
+
+  // ── skipBFilters composition chain ──
+  // Default: short fades + types where B enters clean.
+  const isShortCut =
+    (transition.type === 'CUT' || transition.type === 'CUT_A_FADE_IN_B') &&
+    effectiveFadeDuration < 5.0;
+  let skipBFilters =
+    effectiveFadeDuration <= 3.0 ||
+    transition.type === 'DROP_MIX' ||
+    transition.type === 'CLEAN_HANDOFF' ||
+    transition.type === 'VINYL_STOP' ||
+    transition.type === 'SEQUENTIAL' ||
+    anticipation.isPrePunch ||
+    isShortCut;
+
+  // 8b. Aggressive preset gating — when A and B both energetic OR A-only
+  // energetic, the aggressive stack on B sounds "synthetic, filtered" —
+  // skip B filters.
+  const bothEnergetic = profile.energyA > 0.20 && profile.energyB > 0.20;
+  const aOnlyEnergetic = profile.energyA > 0.25 && profile.energyB < 0.15;
+  if (
+    filter.useAggressiveFilters &&
+    profile.avgDanceability > 0.55 &&
+    (bothEnergetic || aOnlyEnergetic) &&
+    !skipBFilters
+  ) {
+    skipBFilters = true;
+  }
+
+  // 8c. Quiet-B gate when B is being filtered hard — applies both when
+  // anticipation needs filters AND when the aggressive preset would fire.
+  const bQuietNotDanceable = profile.energyB < 0.22 && profile.avgDanceability < 0.85;
+  const bMidQuietLowDance = profile.energyB <= 0.25 && profile.avgDanceability < 0.65;
+  const bIsBeingFiltered = anticipation.needsAnticipation || filter.useAggressiveFilters;
+  if (bIsBeingFiltered && (bQuietNotDanceable || bMidQuietLowDance) && !skipBFilters) {
+    skipBFilters = true;
+  }
+
+  // ── 8d. B→A communication flags ──
+  // All measured relative to finalEntry (the listener only "sees" B from
+  // finalEntry onward).
+  const entrySafe = Math.max(0, finalEntry);
+  const bIntroBarsForA = (() => {
+    if (!safeNext || safeNext.hasError) return 0;
+    const intro =
+      safeNext.introEndTimeHeuristic ??
+      (safeNext.hasIntroData ? safeNext.introEndTime : 0);
+    const bi = safeNext.beatInterval;
+    if (intro <= entrySafe || bi < 0.25 || bi > 1.2) return 0;
+    return Math.round((intro - entrySafe) / (bi * 4.0));
+  })();
+  const bImmediateImpactForA = (() => {
+    if (!safeNext || safeNext.hasError) return false;
+    const intro =
+      safeNext.introEndTimeHeuristic ??
+      (safeNext.hasIntroData ? safeNext.introEndTime : 0);
+    const chorus = safeNext.chorusStartTime;
+    const validChorusInRange = chorus > 0 && chorus >= Math.max(0, intro - 1.0);
+    const chorusFromEntry = validChorusInRange ? chorus - entrySafe : Infinity;
+    const vocalFromEntry =
+      safeNext.vocalStartTime !== undefined ? safeNext.vocalStartTime - entrySafe : Infinity;
+    const chorusEarly = chorusFromEntry >= 0 && chorusFromEntry < 6.0;
+    const vocalEarly = vocalFromEntry >= 0 && vocalFromEntry < 4.0;
+    return chorusEarly || vocalEarly;
+  })();
+  const bHarmonicClashLevelForA = harmonicClashLevel;
+
+  // ── 8e. Chill recipe ──
+  // Both quiet + low dance + B respira (>6s vocal, >8s chorus from entry)
+  // + no immediate impact → force skipBFilters and suppress moving FX
+  // downstream. Static EQ presets still apply.
+  const chillVocalSpace =
+    safeNext && !safeNext.hasError && safeNext.vocalStartTime !== undefined
+      ? safeNext.vocalStartTime - entrySafe
+      : Infinity;
+  const chillChorusSpace =
+    safeNext && !safeNext.hasError && safeNext.chorusStartTime > 0
+      ? safeNext.chorusStartTime - entrySafe
+      : Infinity;
+  const isChillContext =
+    profile.energyA < 0.30 &&
+    profile.energyB < 0.30 &&
+    profile.avgDanceability < 0.55 &&
+    !bImmediateImpactForA &&
+    chillVocalSpace > 6.0 &&
+    chillChorusSpace > 8.0;
+  if (isChillContext && !skipBFilters) {
+    skipBFilters = true;
+  }
+
+  // 8f. Bass-of-B high — proxy via energyB > 0.40. DJ rule: never touch
+  // B's bass in the first 8 bars when B has a prominent low end.
+  if (profile.energyB > 0.40 && !skipBFilters) {
+    skipBFilters = true;
+  }
+
+  // ── 8g. CUT + clash → kill midScoop on A ──
+  // DJ rule: a hard cut with clashing keys + midScoop on A compounds the
+  // dissonance. Other paths (clash-retreat on blendy types via flag #4)
+  // already handle non-CUT cases.
+  const effectiveMidScoop = (() => {
+    const isCut = transition.type === 'CUT' || transition.type === 'CUT_A_FADE_IN_B';
+    if (isCut && harmonicClashLevel >= 0.6) return false;
+    return djFilters.useMidScoop;
+  })();
+
+  // ── 9. Trigger bias ──
+  const trigger = calculateTriggerBias({ profile, fadeDuration: effectiveFadeDuration });
+
+  // ── 10. DJ effects ──
+  const isEnergyDown = profile.energyB < profile.energyA - 0.2;
+  const djEffects = decideDJEffects({
+    profile,
+    transitionType: transition.type,
+    fadeDuration: effectiveFadeDuration,
+    isEnergyDown,
+    needsAnticipation: anticipation.needsAnticipation,
+    skipBFilters,
+    hasBeatGridA: dbA.length > 0,
+    isChillContext
+  });
+
+  // ── 11. bRapidFadeIn — stubbed false (legacy field) ──
+  const bRapidFadeIn = false;
+
+  // ── Build result with optional fields conditionally attached
+  //    (exactOptionalPropertyTypes) ──
+  const rmsTailLast =
+    rmsTailCurveAForAnticipation !== undefined && rmsTailCurveAForAnticipation.length > 0
+      ? rmsTailCurveAForAnticipation[rmsTailCurveAForAnticipation.length - 1]
+      : undefined;
+  const rmsTailSlope = deriveSlope(rmsTailCurveAForAnticipation, { tailWindows: 4 });
+
+  const base: CrossfadeResult = {
+    entryPoint: finalEntry,
+    fadeDuration: effectiveFadeDuration,
+    transitionType: transition.type,
+    useFilters: filter.useFilters,
+    useAggressiveFilters: filter.useAggressiveFilters,
+    needsAnticipation: anticipation.needsAnticipation,
+    anticipationTime: anticipation.anticipationTime,
+    beatSyncInfo: entry.beatSyncInfo,
+    isBeatSynced: entry.isBeatSynced,
+    useTimeStretch: timeStretch.useTimeStretch,
+    rateA: timeStretch.rateA,
+    rateB: timeStretch.rateB,
+    energyA: profile.energyA,
+    energyB: profile.energyB,
+    beatIntervalA: biA,
+    beatIntervalB: biB,
+    downbeatTimesA: dbA,
+    downbeatTimesB: dbB,
+    realDownbeatsA: realDbA,
+    meterA,
+    useMidScoop: effectiveMidScoop,
+    useHighShelfCut: djFilters.useHighShelfCut,
+    isOutroInstrumental: outroInstrumental,
+    isIntroInstrumental: introInstrumental,
+    danceability: profile.avgDanceability,
+    skipBFilters,
+    useBassKill: djEffects.useBassKill,
+    useDynamicQ: djEffects.useDynamicQ,
+    useNotchSweep: djEffects.useNotchSweep,
+    useStutterCut: djEffects.useStutterCut,
+    transitionReason: transition.reason,
+    triggerBias: trigger.bias,
+    triggerBiasReason: trigger.reason,
+    bIntroBars: bIntroBarsForA,
+    bImmediateImpact: bImmediateImpactForA,
+    bHarmonicClashLevel: bHarmonicClashLevelForA,
+    bRapidFadeIn,
+    tier4Active,
+    entryPointSource: entry.entrySource,
+    chillRecipeApplied: isChillContext
+  };
+
+  return {
+    ...base,
+    ...(anticipation.anticipationReason !== undefined
+      ? { anticipationReason: anticipation.anticipationReason }
+      : {}),
+    ...(tier4Telemetry.failedGate !== undefined
+      ? { tier4FailedGate: tier4Telemetry.failedGate }
+      : {}),
+    ...(tier4Telemetry.introSlopeB !== undefined
+      ? { introSlopeB: tier4Telemetry.introSlopeB }
+      : {}),
+    ...(tier4Telemetry.downbeatDensityB20s !== undefined
+      ? { downbeatDensityB20s: tier4Telemetry.downbeatDensityB20s }
+      : {}),
+    ...(entry.genreCapApplied !== undefined ? { genreCapApplied: entry.genreCapApplied } : {}),
+    ...(entry.entryFinalCapApplied !== undefined
+      ? { entryFinalCapApplied: entry.entryFinalCapApplied }
+      : {}),
+    ...(rmsTailLast !== undefined ? { rmsTailCurveA_last: rmsTailLast } : {}),
+    ...(rmsTailSlope !== undefined ? { rmsTailSlopeA: rmsTailSlope } : {}),
+    ...(outroEnergyAForTelemetry !== undefined
+      ? { outroEnergyA: outroEnergyAForTelemetry }
+      : {})
   };
 }
 

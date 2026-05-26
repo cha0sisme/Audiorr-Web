@@ -371,6 +371,89 @@ export type FadeDurationResult = {
   readonly decision: string;
 };
 
+/**
+ * Full crossfade configuration — the output of `calculateCrossfadeConfig`.
+ * Mirrors `CrossfadeResult` in iOS DJMixingService.swift:421.
+ *
+ * Consumed by CrossfadeExecutor (Fase 2 — pending) to drive the actual
+ * audio engine. Every field is read-only at this layer.
+ */
+export type CrossfadeResult = {
+  readonly entryPoint: number;
+  readonly fadeDuration: number;
+  readonly transitionType: TransitionType;
+  readonly useFilters: boolean;
+  readonly useAggressiveFilters: boolean;
+  readonly needsAnticipation: boolean;
+  readonly anticipationTime: number;
+  /** "outroSlopeSteep" / "filtersAggressive" / both / undefined. */
+  readonly anticipationReason?: string;
+  readonly beatSyncInfo: string;
+  readonly isBeatSynced: boolean;
+  readonly useTimeStretch: boolean;
+  readonly rateA: number;
+  readonly rateB: number;
+  readonly energyA: number;
+  readonly energyB: number;
+  readonly beatIntervalA: number;
+  /** B's beatInterval AFTER time-stretch adjustment (raw bi / rateB). */
+  readonly beatIntervalB: number;
+  readonly downbeatTimesA: readonly number[];
+  /** B's downbeats AFTER time-stretch adjustment (each / rateB). */
+  readonly downbeatTimesB: readonly number[];
+  /** Backend "musical downbeats" (1st beat of each bar) — parallel to
+      downbeatTimesA which carries beats[]. Used by the executor's rampStart
+      snap on bass kill. */
+  readonly realDownbeatsA: readonly number[];
+  /** Meter of A (4 = 4/4 default). */
+  readonly meterA: number;
+  readonly useMidScoop: boolean;
+  readonly useHighShelfCut: boolean;
+  readonly isOutroInstrumental: boolean;
+  readonly isIntroInstrumental: boolean;
+  readonly danceability: number;
+  readonly skipBFilters: boolean;
+  readonly useBassKill: boolean;
+  readonly useDynamicQ: boolean;
+  readonly useNotchSweep: boolean;
+  readonly useStutterCut: boolean;
+  readonly transitionReason: string;
+  readonly triggerBias: number;
+  readonly triggerBiasReason: string;
+  /** B→A communication flag: instrumental bars left from entry to B's
+      first impact. ≥4 + blendy type → "intro-hold" branch of A's curve. */
+  readonly bIntroBars: number;
+  /** B→A communication flag: vocal/chorus arrives within first 4-6s after
+      entry. Blendy type → "impact-tail" branch of A's curve. */
+  readonly bImmediateImpact: boolean;
+  /** B→A communication flag: 0-1 from harmonic.compatibility. ≥0.7 +
+      blendy type → "clash-retreat" branch of A's curve. */
+  readonly bHarmonicClashLevel: number;
+  /** Stubbed `false` — kept for API compat with iOS. The "B skip ramp"
+      experiment was retired; CrossfadeExecutor doesn't read this. */
+  readonly bRapidFadeIn: boolean;
+  /** True when Tier 4 fired (advanced entry to first kick of B intro).
+      Executor activates the `earlyBlend` curve. */
+  readonly tier4Active: boolean;
+  readonly entryPointSource: EntryPointSource;
+  /** Tier 4 telemetry — which gate cut the chain (undefined when fired). */
+  readonly tier4FailedGate?: Tier4FailedGate;
+  readonly introSlopeB?: number;
+  readonly downbeatDensityB20s?: number;
+  /** True when the chill recipe override applied (all moving FX killed). */
+  readonly chillRecipeApplied: boolean;
+  /** Three-state from `EntryPointResult` (chorus cap diagnostic). */
+  readonly genreCapApplied?: boolean;
+  readonly entryFinalCapApplied?: boolean;
+  /** rmsTailCurveA last sample — diagnostic. */
+  readonly rmsTailCurveA_last?: number;
+  /** Slope of A's rmsTailCurve on tailWindows=4 — diagnostic. */
+  readonly rmsTailSlopeA?: number;
+  /** Outro energy of A computed during the noRealOutro evaluation —
+      diagnostic. */
+  readonly outroEnergyA?: number;
+};
+
 export type FilterDecisionResult = {
   readonly useFilters: boolean;
   readonly useAggressiveFilters: boolean;
