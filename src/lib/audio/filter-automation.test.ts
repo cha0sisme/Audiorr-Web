@@ -223,17 +223,15 @@ describe('applyFiltersA — band sweep', () => {
   });
 
   it('useBassKill A: cosSquared 0 → −16dB sobre toda la rampa', () => {
-    // En t=rampStart → gain=0 (passthrough lowshelf). En t=rampEnd → -16dB.
-    // Verificamos que band 1 cambia monotónicamente.
+    // Con pre-roll activo, bassKill rampStart = preRollStart (no
+    // filterStartTime). En filterStartTime, gain ya tiene un avance
+    // pequeño (~-0.4 dB, NO passthrough). El invariant clave: gain
+    // crece monotónicamente y cerca de rampEnd alcanza valores notables.
     const ctx = makeContext(
       { transitionType: 'CROSSFADE' },
       { useBassKill: true }
     );
     const totalDur = ctx.timings.transitionEndTime - ctx.timings.filterStartTime;
-    // En t=rampStart, gain=0 → passthrough.
-    const rStart = applyFiltersA(ctx.timings.filterStartTime, ctx);
-    expect(rStart.set).toBe(true);
-    expect(isPassthrough(rStart.stages[1])).toBe(true);
     // En t cerca del final, gain ≈ -16 → no passthrough.
     const rNearEnd = applyFiltersA(
       ctx.timings.filterStartTime + totalDur * 0.9,
@@ -241,6 +239,12 @@ describe('applyFiltersA — band sweep', () => {
     );
     expect(rNearEnd.set).toBe(true);
     expect(isPassthrough(rNearEnd.stages[1])).toBe(false);
+    // Monotonía: el coeficiente b0 del lowshelf cambia conforme avanza el
+    // tiempo (verificación indirecta del bassKill curve sin necesitar
+    // extraer el gain del biquad).
+    const rEarly = applyFiltersA(ctx.timings.filterStartTime + totalDur * 0.1, ctx);
+    expect(rEarly.set && rNearEnd.set).toBe(true);
+    expect(rEarly.stages[1].b0).not.toBeCloseTo(rNearEnd.stages[1].b0, 3);
   });
 
   it('useDynamicQ A: Q peaks alrededor del center 0.55', () => {
@@ -356,6 +360,37 @@ describe('applyFiltersB — invariantes', () => {
     const r = applyFiltersB(tCenter, ctx);
     expect(r.set).toBe(true);
     expect(isPassthrough(r.stages[2])).toBe(false);
+  });
+
+  it('pre-roll: t en [preRollStart, filterStart] → set=true (filtros ya curvando)', () => {
+    // fadeDuration=10 con useFilters=true → filterLead = min(3.5, 10*0.32) = 3.2.
+    // preRollDur = min(0.9, 3.2*0.35) = 0.9. filterLead >= 0.6 → preRollActive.
+    // preRollStart = filterStartTime - 0.9.
+    const ctx = makeContext({ transitionType: 'CROSSFADE', fadeDuration: 10 });
+    const preRollStart = ctx.timings.filterStartTime - 0.9;
+    // En t=preRollStart + 0.5 → dentro del pre-roll window.
+    const tInPreRoll = preRollStart + 0.5;
+    const r = applyFiltersB(tInPreRoll, ctx); // B no tiene pre-roll, sí A.
+    // Verifico A.
+    const rA = applyFiltersA(tInPreRoll, ctx);
+    expect(rA.set).toBe(true);
+    // Antes de preRollStart → set=false.
+    expect(applyFiltersA(preRollStart - 0.1, ctx).set).toBe(false);
+    void r; // sanity reference
+  });
+
+  it('pre-roll NO activo cuando filterLead < 0.6', () => {
+    // useFilters=true + fadeDuration=1.5 → filterLead = min(3.5, 1.5*0.32) = 0.48 < 0.6.
+    const ctx = makeContext({ transitionType: 'CROSSFADE', fadeDuration: 1.5 });
+    expect(ctx.timings.filterLead).toBeLessThan(0.6);
+    const tBefore = ctx.timings.filterStartTime - 0.1;
+    expect(applyFiltersA(tBefore, ctx).set).toBe(false);
+  });
+
+  it('pre-roll NO activo para CUT family', () => {
+    const ctx = makeContext({ transitionType: 'CUT', fadeDuration: 10 });
+    const tBefore = ctx.timings.filterStartTime - 0.5;
+    expect(applyFiltersA(tBefore, ctx).set).toBe(false);
   });
 
   it('useNotchSweep + anticipation: band 2 passthrough en primera mitad, activo en segunda', () => {
