@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   _resetCooldownForTesting,
+  buildTransitionProfile,
   calculateAdaptiveFadeDuration,
   decideTransitionType,
   deriveSlope,
@@ -653,9 +654,228 @@ describe('harmonicPenalty', () => {
 });
 
 // ============================================================================
-// Suppress unused-import warning (vitest may not register the type imports)
+// buildTransitionProfile — builds the A↔B profile consumed by everyone else
 // ============================================================================
 
-// Sanity assertion to keep TS happy about the union types being reachable.
+describe('buildTransitionProfile', () => {
+  it('mode "normal" siempre devuelve character "smooth"', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 120, energy: 0.5, danceability: 0.7 }),
+      nextAnalysis: makeAnalysis({ bpm: 122, energy: 0.5, danceability: 0.7 }),
+      mode: 'normal',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.character).toBe('smooth');
+  });
+
+  it('DJ mode + ambos bajos + low dance → minimal', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ energy: 0.10, danceability: 0.3 }),
+      nextAnalysis: makeAnalysis({ energy: 0.10, danceability: 0.3 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.character).toBe('minimal');
+  });
+
+  it('DJ mode + gap energético >0.35 → dramatic', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ energy: 0.2, danceability: 0.6 }),
+      nextAnalysis: makeAnalysis({ energy: 0.7, danceability: 0.7 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.character).toBe('dramatic');
+  });
+
+  it('DJ mode + BPM compatible + alta afinidad → punch', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({
+        bpm: 120,
+        energy: 0.5,
+        danceability: 0.7,
+        bpmConfidence: 0.9
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 122,
+        energy: 0.55,
+        danceability: 0.7,
+        bpmConfidence: 0.9
+      }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.character).toBe('punch');
+    expect(profile.bpmTrusted).toBe(true);
+  });
+
+  it('floor de energy 0.10 cuando raw≈0 y track >30s', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({
+        energy: 0,
+        hasEnergyProfile: true,
+        energyOutro: 0
+      }),
+      nextAnalysis: makeAnalysis({ energy: 0.5 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.energyA).toBe(0.10);
+  });
+
+  it('NO aplica floor cuando track <30s (puede ser jingle/SFX)', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({
+        energy: 0,
+        hasEnergyProfile: true,
+        energyOutro: 0
+      }),
+      nextAnalysis: makeAnalysis({ energy: 0.5 }),
+      mode: 'dj',
+      bufferADuration: 15,
+      bufferBDuration: 200
+    });
+    expect(profile.energyA).toBe(0);
+  });
+
+  it('half-time fold: bpmA=120, bpmB=60 → normalized 120, identical', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 120, bpmConfidence: 0.9 }),
+      nextAnalysis: makeAnalysis({ bpm: 60, bpmConfidence: 0.9 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.bpmBNormalized).toBe(120);
+    expect(profile.bpmDiff).toBe(0);
+    expect(profile.bpmRelationship).toBe('identical');
+  });
+
+  it('incompatible cuando bpmDiff > 18 (sin fold half/double)', () => {
+    // 120 vs 150: harmonicBPM evalúa 150*0.5=75 (err 45), 150*1.0=150 (err 30),
+    // 150*2.0=300 (err 180). Best ratio = 1.0 → no fold. bpmDiff = 30 → incompatible.
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 120, bpmConfidence: 0.9 }),
+      nextAnalysis: makeAnalysis({ bpm: 150, bpmConfidence: 0.9 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.bpmBNormalized).toBe(150);
+    expect(profile.bpmDiff).toBe(30);
+    expect(profile.bpmRelationship).toBe('incompatible');
+  });
+
+  it('bpmTrusted=false cuando confianza A < 0.5', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 120, bpmConfidence: 0.3 }),
+      nextAnalysis: makeAnalysis({ bpm: 122, bpmConfidence: 0.9 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.bpmTrusted).toBe(false);
+  });
+
+  it('vocalOverlapRisk both cuando A outroVocals + B introVocals', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({
+        hasVocalData: true,
+        hasOutroVocals: true
+      }),
+      nextAnalysis: makeAnalysis({
+        hasVocalData: true,
+        hasIntroVocals: true
+      }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.vocalOverlapRisk).toBe('both');
+  });
+
+  it('vocalOverlapRisk none por defecto (sin señales vocales)', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis(),
+      nextAnalysis: makeAnalysis(),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.vocalOverlapRisk).toBe('none');
+  });
+
+  it('bassConflictRisk true cuando ambos danceability > 0.65', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ danceability: 0.75 }),
+      nextAnalysis: makeAnalysis({ danceability: 0.80 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(profile.bassConflictRisk).toBe(true);
+  });
+
+  it('styleAffinity baja cuando BPMs lejanos + energy lejanos', () => {
+    const close = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 120, energy: 0.5, danceability: 0.5 }),
+      nextAnalysis: makeAnalysis({ bpm: 122, energy: 0.55, danceability: 0.5 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    const far = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({ bpm: 80, energy: 0.2, danceability: 0.3 }),
+      nextAnalysis: makeAnalysis({ bpm: 140, energy: 0.8, danceability: 0.8 }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    expect(far.styleAffinity).toBeLessThan(close.styleAffinity);
+  });
+
+  it('end-to-end: profile + decisor produce un TransitionType válido', () => {
+    const profile = buildTransitionProfile({
+      currentAnalysis: makeAnalysis({
+        bpm: 120,
+        energy: 0.5,
+        danceability: 0.7,
+        bpmConfidence: 0.9
+      }),
+      nextAnalysis: makeAnalysis({
+        bpm: 122,
+        energy: 0.55,
+        danceability: 0.7,
+        bpmConfidence: 0.9,
+        hasIntroData: true,
+        introEndTime: 18
+      }),
+      mode: 'dj',
+      bufferADuration: 200,
+      bufferBDuration: 200
+    });
+    const result = decideTransitionType({
+      profile,
+      entryPoint: 12,
+      fadeDuration: 7,
+      isBeatSynced: true,
+      useFilters: true,
+      bufferADuration: 200,
+      nextAnalysis: makeAnalysis({ hasIntroData: true, introEndTime: 18 })
+    });
+    // punch + beat-sync + non-abrupt + intro larga → BEAT_MATCH_BLEND
+    expect(result.type).toBe('BEAT_MATCH_BLEND');
+  });
+});
+
+// ============================================================================
+// Type union sanity (TS unused-import check)
+// ============================================================================
+
 const _checkUnions: [EnergyFlow, VocalOverlapRisk] = ['energyUp', 'none'];
 void _checkUnions;

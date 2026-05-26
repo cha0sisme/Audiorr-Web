@@ -26,15 +26,18 @@
 
 import {
   type BPMRelationship,
+  type EnergyFlow,
   type FadeDurationResult,
   type HarmonicCompatibility,
   type HarmonicPenalty,
   type MixMode,
   MIX_MODE_CONFIGS,
   type SongAnalysis,
+  type TransitionCharacter,
   type TransitionProfile,
   type TransitionType,
-  type TransitionTypeResult
+  type TransitionTypeResult,
+  type VocalOverlapRisk
 } from './dj-types';
 
 // ============================================================================
@@ -245,6 +248,211 @@ export function harmonicPenalty(
   else compatibility = 'clash';
 
   return { distance: totalDistance, compatibility };
+}
+
+// ============================================================================
+// MARK: - Build Transition Profile (DJMixingService.swift:535)
+// ============================================================================
+
+export type BuildTransitionProfileArgs = {
+  currentAnalysis?: SongAnalysis;
+  nextAnalysis?: SongAnalysis;
+  mode: MixMode;
+  bufferADuration: number;
+  bufferBDuration: number;
+};
+
+/**
+ * Builds the A↔B `TransitionProfile`. Mirrors
+ * `DJMixingService.swift:535 buildTransitionProfile`.
+ *
+ * Called ONCE upstream by `calculateCrossfadeConfig` (Fase 1 pending) and
+ * drives every downstream decision (`decideTransitionType`,
+ * `calculateAdaptiveFadeDuration`, filter usage, anticipation, entry point).
+ *
+ * Sections in order:
+ *   1. Energy (per-section preferred — uses `energyOutro` / `energyIntro`
+ *      when `hasEnergyProfile`, else `energy`). Floor 0.10 when raw ≤0.02
+ *      AND track > 30s (defends against backend RMS-zeroing bug; safe
+ *      because 0.10 is below any audible track's real energy).
+ *   2. BPM with harmonic fold (half/double-time) + confidence trust gate
+ *      (both ≥0.5 + BPM in [20, 300]).
+ *   3. Harmonic penalty (Camelot wheel distance).
+ *   4. Vocal overlap — conservative estimate (A's last 15s vs B's first 20s).
+ *   5. Danceability + bass conflict (both >0.65 → bass overlap risk).
+ *   6. Style affinity 0-1: weighted ave of BPM/energy/harmonic/danceability
+ *      affinities (35/25/25/15 weights).
+ *   7. Character (punch/smooth/dramatic/minimal): rules in order.
+ */
+export function buildTransitionProfile(args: BuildTransitionProfileArgs): TransitionProfile {
+  const { currentAnalysis, nextAnalysis, mode, bufferADuration, bufferBDuration } = args;
+
+  const hasCurrent = currentAnalysis !== undefined && !currentAnalysis.hasError;
+  const hasNext = nextAnalysis !== undefined && !nextAnalysis.hasError;
+
+  // ── Energy (per-section preferred) ──
+  // Backend RMS-zeroing bug: pistas audibles devuelven energy/energyOutro≈0.
+  // Floor a 0.10 cuando raw ≤0.02 Y duración > 30s (pistas <30s pueden ser
+  // jingles/SFX donde 0 es legítimo). 0.10 está por debajo de cualquier
+  // pista audible real → no afecta tracks legítimamente bajos.
+  const computeEnergy = (
+    analysis: SongAnalysis | undefined,
+    has: boolean,
+    perSection: (a: SongAnalysis) => number,
+    bufferDur: number
+  ): number => {
+    let raw: number;
+    if (analysis && has && analysis.hasEnergyProfile) raw = perSection(analysis);
+    else raw = has ? (analysis?.energy ?? 0.5) : 0.5;
+    return raw <= 0.02 && bufferDur > 30 ? 0.10 : raw;
+  };
+  const eA = computeEnergy(currentAnalysis, hasCurrent, (a) => a.energyOutro, bufferADuration);
+  const eB = computeEnergy(nextAnalysis, hasNext, (a) => a.energyIntro, bufferBDuration);
+
+  const gap = eB - eA;
+  let flow: EnergyFlow;
+  if (gap > 0.15) flow = 'energyUp';
+  else if (gap < -0.15) flow = 'energyDown';
+  else flow = 'steady';
+
+  // ── BPM (with confidence system) ──
+  const bA = hasCurrent ? (currentAnalysis?.bpm ?? 120) : 120;
+  const bB = hasNext ? (nextAnalysis?.bpm ?? 120) : 120;
+  const bBNorm = harmonicBPM(bA, bB);
+  const diff = Math.abs(bA - bBNorm);
+  let bpmRel: BPMRelationship;
+  if (diff < 3) bpmRel = 'identical';
+  else if (diff <= 12) bpmRel = 'compatible';
+  else if (diff <= 18) bpmRel = 'borderline';
+  else bpmRel = 'incompatible';
+
+  // BPM confidence: both must have confidence ≥ 0.5 AND BPM ∈ [20, 300] for
+  // beat-sync / time-stretch / bassKill to be musically justified. Fallback
+  // 0.5 (no 1.0): si el backend no devolvió confidence, asumimos el límite
+  // mínimo confiable en lugar de confianza máxima injustificada.
+  const confA = currentAnalysis?.bpmConfidence ?? 0.5;
+  const confB = nextAnalysis?.bpmConfidence ?? 0.5;
+  const hasBeatDataA = bA > 20 && bA < 300;
+  const hasBeatDataB = bB > 20 && bB < 300;
+  const trusted = confA >= 0.5 && confB >= 0.5 && hasBeatDataA && hasBeatDataB;
+
+  // ── Harmonic ──
+  const harm = harmonicPenalty(currentAnalysis?.key, nextAnalysis?.key);
+
+  // ── Vocal overlap (conservative: A's last ~15s, B's first ~20s) ──
+  const conservativeCrossfadeZoneA = Math.max(0, bufferADuration - 15);
+  const conservativeBEnd = 20;
+
+  let aVocals = false;
+  if (currentAnalysis && hasCurrent) {
+    const cur = currentAnalysis;
+    if (cur.hasVocalData && cur.hasOutroVocals) {
+      aVocals = true;
+    } else if (cur.hasVocalEndData) {
+      aVocals = cur.lastVocalTime > conservativeCrossfadeZoneA;
+    } else if (cur.speechSegments.length > 0) {
+      aVocals = cur.speechSegments.some((s) => s.end > conservativeCrossfadeZoneA);
+    } else if (cur.vocalStartTime !== undefined && cur.vocalStartTime > 0) {
+      aVocals = cur.outroStartTime <= 0 || cur.outroStartTime > conservativeCrossfadeZoneA;
+    }
+    // else: vocalStart nil/0 → sin señal → no claim.
+  }
+
+  let bVocals = false;
+  if (nextAnalysis && hasNext) {
+    const nxt = nextAnalysis;
+    if (nxt.hasVocalData && nxt.hasIntroVocals) {
+      bVocals = true;
+    } else if (nxt.speechSegments.length > 0) {
+      bVocals = nxt.speechSegments.some((s) => s.start < conservativeBEnd);
+    } else if (nxt.vocalStartTime !== undefined && nxt.vocalStartTime > 0) {
+      bVocals = nxt.vocalStartTime < conservativeBEnd;
+    }
+    // else: vs nil (unknown) o 0 (literal vocal-at-t=0) — sin claim.
+  }
+
+  let vocalRisk: VocalOverlapRisk;
+  if (aVocals && bVocals) vocalRisk = 'both';
+  else if (aVocals && !bVocals) vocalRisk = 'aOnly';
+  else if (!aVocals && bVocals) vocalRisk = 'bOnly';
+  else vocalRisk = 'none';
+
+  // ── Danceability / bass conflict ──
+  const dA = hasCurrent ? (currentAnalysis?.danceability ?? 0.5) : 0.5;
+  const dB = hasNext ? (nextAnalysis?.danceability ?? 0.5) : 0.5;
+  const avgDance = (dA + dB) / 2.0;
+  const bassConflict = dA > 0.65 && dB > 0.65;
+
+  // ── Style affinity (0-1) ──
+  // Songs in the same BPM bracket, similar energy, similar danceability =
+  // same "world". Pondered: BPM matters most (genre identifier), then energy,
+  // then harmony, then danceability.
+  const bpmAffinity = Math.max(0, 1.0 - diff / 30.0);
+  const energyAffinity = Math.max(0, 1.0 - Math.abs(gap) / 0.6);
+  const danceAffinity = Math.max(0, 1.0 - Math.abs(dA - dB) / 0.5);
+  let harmonicAffinity: number;
+  switch (harm.compatibility) {
+    case 'compatible':
+      harmonicAffinity = 1.0;
+      break;
+    case 'acceptable':
+      harmonicAffinity = 0.7;
+      break;
+    case 'tense':
+      harmonicAffinity = 0.4;
+      break;
+    case 'clash':
+      harmonicAffinity = 0.1;
+      break;
+  }
+  const affinity = Math.min(
+    1.0,
+    Math.max(
+      0,
+      bpmAffinity * 0.35 + energyAffinity * 0.25 + harmonicAffinity * 0.25 + danceAffinity * 0.15
+    )
+  );
+
+  // ── Character ──
+  // Backend energy values are compressed (most music falls 0.05-0.30).
+  // "Minimal" should only apply to truly ambient/quiet tracks — high
+  // danceability = NOT minimal even at low RMS energy.
+  let character: TransitionCharacter;
+  if (mode !== 'dj') {
+    character = 'smooth';
+  } else if (eA < 0.15 && eB < 0.15 && avgDance < 0.5) {
+    character = 'minimal';
+  } else if (Math.abs(gap) > 0.35 || harm.compatibility === 'clash') {
+    character = 'dramatic';
+  } else if (bpmRel !== 'incompatible' && affinity > 0.4) {
+    character = 'punch';
+  } else {
+    character = 'smooth';
+  }
+
+  return {
+    energyA: eA,
+    energyB: eB,
+    energyGap: gap,
+    energyFlow: flow,
+    bpmA: bA,
+    bpmB: bB,
+    bpmBNormalized: bBNorm,
+    bpmDiff: diff,
+    bpmRelationship: bpmRel,
+    bpmTrusted: trusted,
+    harmonic: harm,
+    vocalOverlapRisk: vocalRisk,
+    aHasOutroVocals: aVocals,
+    bHasIntroVocals: bVocals,
+    danceabilityA: dA,
+    danceabilityB: dB,
+    avgDanceability: avgDance,
+    bassConflictRisk: bassConflict,
+    character,
+    styleAffinity: affinity,
+    mode
+  };
 }
 
 // ============================================================================
