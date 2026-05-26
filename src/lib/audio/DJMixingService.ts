@@ -3990,9 +3990,26 @@ export function calculateCrossfadeConfig(args: {
       : undefined;
   const rmsTailSlope = deriveSlope(rmsTailCurveAForAnticipation, { tailWindows: 4 });
 
+  // Compute effective totalTime against the EFFECTIVE fade duration
+  // (post-overrides per type — CLEAN_HANDOFF clamps to [2.5, 3.5],
+  // SEQUENTIAL to 0.050, etc). `timings.totalTime` was computed against
+  // `fade.duration` pre-override. Mismo cálculo que `calculateTimings`
+  // pero inline para evitar un objeto intermedio.
+  const effectiveFilterLead =
+    transition.type === 'CLEAN_HANDOFF' ||
+    transition.type === 'VINYL_STOP' ||
+    transition.type === 'SEQUENTIAL'
+      ? 0
+      : filter.useFilters
+        ? Math.min(3.5, effectiveFadeDuration * 0.32)
+        : 0;
+  const effectiveTotalTime =
+    anticipation.anticipationTime + effectiveFilterLead + effectiveFadeDuration;
+
   const base: CrossfadeResult = {
     entryPoint: finalEntry,
     fadeDuration: effectiveFadeDuration,
+    totalTime: effectiveTotalTime,
     transitionType: transition.type,
     useFilters: filter.useFilters,
     useAggressiveFilters: filter.useAggressiveFilters,

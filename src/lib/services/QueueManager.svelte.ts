@@ -216,6 +216,20 @@ class QueueManager {
   /** Timer del save backend (debounce 2s). Cancelable cuando llega un cambio
       antes de que dispare. Mirror del iOS `saveToBackendWork`. */
   private backendSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Crossfade DJ preparado: análisis A+B fetched, CrossfadeResult listo
+      para disparar al alcanzar el trigger time. Sólo se popula cuando
+      `playbackMode === 'dj'` (mirror iOS: el algoritmo DJ solo se
+      invoca via SmartMix). `nextSongId` se compara contra el index
+      actual al disparar — si el queue cambió, se descarta. */
+  private preparedCrossfade:
+    | { config: import('$lib/audio/dj-types').CrossfadeResult; nextSongId: string }
+    | undefined = undefined;
+  /** True mientras el crossfade DJ está ejecutándose. Evita doble-disparo
+      desde `onPlaybackProgress` ticks consecutivos. */
+  private djCrossfadeFiring = false;
+  /** True cuando la fetch de análisis para el siguiente trío está en
+      flight. Evita reentry en `prepareCrossfadeIfDJ()`. */
+  private djPreparing = false;
   /** Si true, los próximos save al backend se suprimen — usado durante el
       restore para evitar el loop "lo que acabamos de leer del backend lo
       volvemos a escribir". El flag se limpia tras el primer save real
@@ -360,6 +374,16 @@ class QueueManager {
     this.suppressLoadOnce = false;
     this.suppressBackendSaveOnce = false;
     this.pendingResumePosition = 0;
+    this.resetDjCrossfadePrep();
+  }
+
+  /** Cancela el crossfade DJ preparado / en curso. Llamar en skips
+      manuales para evitar disparar un fade contra un track que ya
+      cambió. NO cancela el `<audio>` element B en flight — el siguiente
+      `player.load()` lo pisa. */
+  private resetDjCrossfadePrep(): void {
+    this.preparedCrossfade = undefined;
+    this.djCrossfadeFiring = false;
   }
 
   /**
@@ -843,7 +867,130 @@ class QueueManager {
         }
       );
     }
-    // TODO Phase 2: prepareNextForCrossfade (DJMixingService)
+    // ── DJ mode crossfade preparation + trigger ──
+    // Mirror iOS: el algoritmo DJ solo se invoca cuando playbackMode==='dj'
+    // (activado via SmartMix button). En modo normal, el engine deja que
+    // la pista termine y `onSongFinished` → `next()` hace el avance simple.
+    if (this.playbackMode === 'dj' && _duration > 0) {
+      // Prepara con generoso lead (35 s antes del final) para que la
+      // fetch de análisis backend de A y B termine antes del trigger.
+      const PREPARE_LEAD = 35;
+      const remaining = _duration - _currentTime;
+      if (
+        !this.djPreparing &&
+        this.preparedCrossfade === undefined &&
+        remaining > 0 &&
+        remaining <= PREPARE_LEAD
+      ) {
+        void this.prepareCrossfadeIfDJ(_duration);
+      }
+      // Trigger cuando estamos dentro de `totalTime` del final. Doble
+      // guard contra disparos repetidos.
+      if (
+        !this.djCrossfadeFiring &&
+        this.preparedCrossfade !== undefined &&
+        remaining > 0 &&
+        remaining <= this.preparedCrossfade.config.totalTime
+      ) {
+        void this.triggerDjCrossfade();
+      }
+    }
+  }
+
+  /**
+   * Pre-fetch análisis A + B del backend, mapea a `SongAnalysis`,
+   * llama `calculateCrossfadeConfig` con `mode: 'dj'` y deja todo listo
+   * para el trigger en `onPlaybackProgress`. Idempotente vía
+   * `djPreparing` lock.
+   *
+   * No-op si:
+   *   - No hay próxima canción en la queue (último track).
+   *   - No hay credenciales (no podemos stream-fetch).
+   *   - La fetch de análisis falla — caemos al avance natural.
+   */
+  private async prepareCrossfadeIfDJ(durationA: number): Promise<void> {
+    if (this.djPreparing) return;
+    const current = this.currentSong;
+    const nextIdx = this.peekNextIndex();
+    if (current === null || nextIdx === null) return;
+    const next = this.queue[nextIdx];
+    if (next === undefined) return;
+    this.djPreparing = true;
+    try {
+      const [{ analyzeSong }, { getStreamUrl }, { analysisResultToSongAnalysis }, { calculateCrossfadeConfig }] =
+        await Promise.all([
+          import('$services/AnalysisService'),
+          import('$services/NavidromeService'),
+          import('$lib/audio/analysis-mapper'),
+          import('$lib/audio/DJMixingService')
+        ]);
+      const streamA = getStreamUrl(current.id);
+      const streamB = getStreamUrl(next.id);
+      if (!streamA || !streamB) return;
+      const [analysisA, analysisB] = await Promise.all([
+        analyzeSong({ songId: current.id, streamUrl: streamA, duration: durationA }),
+        analyzeSong({ songId: next.id, streamUrl: streamB, duration: next.duration })
+      ]);
+      const songA = analysisResultToSongAnalysis(analysisA, durationA);
+      const songB = analysisResultToSongAnalysis(analysisB, next.duration);
+      const config = calculateCrossfadeConfig({
+        currentAnalysis: songA,
+        nextAnalysis: songB,
+        bufferADuration: durationA,
+        bufferBDuration: next.duration,
+        mode: 'dj'
+      });
+      // Pre-cargar B en el AudioEngine (cuando el trigger dispare,
+      // `runCrossfadeConfig` programa B con `currentTime=startOffset`).
+      const { audioEngine } = await import('$lib/audio/AudioEngine.svelte');
+      audioEngine.prepareNext(streamB, {
+        ...(next.replayGainMultiplier !== undefined && {
+          replayGainLinear: next.replayGainMultiplier
+        })
+      });
+      this.preparedCrossfade = { config, nextSongId: next.id };
+    } catch (err) {
+      console.warn('[QueueManager] DJ crossfade prep failed — fallback al avance natural', err);
+    } finally {
+      this.djPreparing = false;
+    }
+  }
+
+  /** Lanza `runCrossfadeConfig` con la config preparada. Marca
+      `djCrossfadeFiring` para que `onCrossfadeCompleted` reaccione. */
+  private async triggerDjCrossfade(): Promise<void> {
+    if (this.djCrossfadeFiring) return;
+    const prepared = this.preparedCrossfade;
+    if (prepared === undefined) return;
+    // Si la cola cambió entre prepare y trigger (skip manual del user),
+    // el `nextSongId` ya no es válido — descartamos.
+    const nextIdx = this.peekNextIndex();
+    if (nextIdx === null || this.queue[nextIdx]?.id !== prepared.nextSongId) {
+      this.preparedCrossfade = undefined;
+      return;
+    }
+    this.djCrossfadeFiring = true;
+    try {
+      const { audioEngine } = await import('$lib/audio/AudioEngine.svelte');
+      await audioEngine.runCrossfadeConfig(prepared.config);
+      // `onCrossfadeCompleted` ya hizo el avance de index — el engine
+      // dispara via el evento 'crossfadeend' que el player propaga.
+    } catch (err) {
+      console.error('[QueueManager] runCrossfadeConfig failed', err);
+      this.djCrossfadeFiring = false;
+      this.preparedCrossfade = undefined;
+    }
+  }
+
+  /** Devuelve el index del siguiente track tras `currentIndex` respetando
+      shuffle + repeat. `null` cuando no hay siguiente (último track sin
+      repeat). Helper para `prepareCrossfadeIfDJ` que necesita conocer
+      la siguiente sin avanzar el index. */
+  private peekNextIndex(): number | null {
+    if (this.queue.length === 0) return null;
+    if (this.currentIndex + 1 < this.queue.length) return this.currentIndex + 1;
+    if (this.repeatMode === 'all') return 0;
+    return null;
   }
 
   onPlaybackStateChanged(_isPlaying: boolean, _currentTime: number): void {
@@ -885,13 +1032,36 @@ class QueueManager {
   }
 
   onCrossfadeStarted(): void {
-    // TODO Phase 2: bump generation, marcar isCrossfading interno.
+    // Nothing to bump on web — el AudioEngine ya marca isCrossfading.
   }
 
+  /**
+   * El AudioEngine completó el crossfade DJ — el chain B es ahora el A
+   * activo. Tenemos que avanzar el index del queue manager para que
+   * coincida con lo que el listener ya está oyendo.
+   *
+   * `_startOffset` es la `currentTime` del nuevo A justo después del
+   * swap (= entryPoint del CrossfadeResult original). El player store
+   * ya lo refleja vía el evento del AudioEngine.
+   */
   onCrossfadeCompleted(_startOffset: number): void {
-    // TODO Phase 2: bump generation, advance index, push to history,
-    // ScrobbleService.songDidStart, OfflineStorageManager.markPlayed,
-    // prepareNextForCrossfade.
+    if (!this.djCrossfadeFiring) {
+      // Crossfade no-DJ (equal-power simple) — no avance automático.
+      return;
+    }
+    const nextIdx = this.peekNextIndex();
+    if (nextIdx !== null) {
+      this.currentIndex = nextIdx;
+      this.persistState();
+      // Sincroniza el player store con la canción nueva (= chain A
+      // post-swap). Optimismo UI: el MiniPlayer cambia al instante.
+      const newSong = this.queue[nextIdx];
+      if (newSong !== undefined) {
+        player.currentSong = persistableToPlayerSong(newSong);
+      }
+    }
+    this.djCrossfadeFiring = false;
+    this.preparedCrossfade = undefined;
   }
 
   // ==========================================================================

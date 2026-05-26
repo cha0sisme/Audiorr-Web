@@ -42,6 +42,7 @@ function makeConfig(overrides: Partial<CrossfadeResult> = {}): CrossfadeResult {
   return {
     entryPoint: 10,
     fadeDuration: 6,
+    totalTime: 6,
     transitionType: 'CROSSFADE',
     useFilters: true,
     useAggressiveFilters: false,

@@ -381,6 +381,13 @@ export type FadeDurationResult = {
 export type CrossfadeResult = {
   readonly entryPoint: number;
   readonly fadeDuration: number;
+  /**
+   * Total time the crossfade occupies on A's timeline: `anticipationTime +
+   * filterLead + fadeDuration`. The caller uses this to trigger
+   * `runCrossfadeConfig` — when A's playback time reaches `durationA -
+   * totalTime`, the runtime takes over. Mirrors `Timings.totalTime`.
+   */
+  readonly totalTime: number;
   readonly transitionType: TransitionType;
   readonly useFilters: boolean;
   readonly useAggressiveFilters: boolean;
