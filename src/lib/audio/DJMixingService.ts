@@ -39,6 +39,8 @@ import {
   type MixMode,
   MIX_MODE_CONFIGS,
   type SongAnalysis,
+  type Tier4FailedGate,
+  type Tier4Telemetry,
   type TimeStretchResult,
   type TransitionCharacter,
   type TransitionProfile,
@@ -183,6 +185,13 @@ export function isBDropDrivenByPercussive(
   const ratio = main / denom;
   return { isDrop: ratio >= 2.0, ratio };
 }
+
+// Tier 4-lite perceptual gate thresholds. From musical analysis:
+//   +0.015/seg ≈ +0.30 over 20s of intro (perceptible build, not exaggerated).
+//   0.45 downbeats/bar ≈ 1.8 downbeats per 4/4 measure (percussion marking
+//   consistently — a stable loop, not silence or sparse hits).
+const kIntroSlopeMinPerSecond = 0.015;
+const kDownbeatDensityMinPerBar = 0.45;
 
 /**
  * Drop-driven genres (trap, drill, hip-hop, industrial) — used by the A2
@@ -2088,6 +2097,342 @@ export function calculateAdaptiveFadeDuration(
   }
 
   return { duration: Math.max(2, fadeDuration), decision };
+}
+
+// ============================================================================
+// MARK: - downbeatDensity (DJMixingService.swift:4105)
+// ============================================================================
+
+/**
+ * Downbeats per bar in the window [0, until). Returns `undefined` when
+ * `barDur` is invalid or `until` is non-positive. Mirrors
+ * `DJMixingService.swift:4105 downbeatDensity`.
+ */
+export function downbeatDensity(args: {
+  downbeats: readonly number[];
+  barDur: number;
+  until: number;
+}): number | undefined {
+  const { downbeats, barDur, until } = args;
+  if (barDur <= 0 || until <= 0) return undefined;
+  const inWindow = downbeats.filter((t) => t >= 0 && t < until).length;
+  const bars = until / barDur;
+  if (bars <= 0) return undefined;
+  return inWindow / bars;
+}
+
+// ============================================================================
+// MARK: - Tier 4: advance entry to first kick of B (DJMixingService.swift:4124)
+// ============================================================================
+
+export type Tier4Result =
+  | { entry: number; reason: string; telemetry: Tier4Telemetry }
+  | { entry: undefined; telemetry: Tier4Telemetry };
+
+/**
+ * Compute an advanced entry point for B when the setup is clear: A in a
+ * reliable instrumental outro + B opening with a real instrumental intro
+ * (kick + percussion + measurable build). 13 sequential gates — first
+ * failure stops the chain and returns `entry: undefined` with the failed
+ * gate tagged in `telemetry`.
+ *
+ * Mirrors `DJMixingService.swift:4124 computeTier4Entry`.
+ *
+ * Why 13 gates? Each defends against a specific failure mode:
+ *   1. Transition type must be blendy (crossfade / eqMix / BMB).
+ *   2. fade ≥ 4s (room for B to walk in alongside A).
+ *   3. A reliable + vocal-end data available.
+ *   4. A's outro instrumental (vocals end ≥ 2s before crossfade start).
+ *   5. B reliable + BPM trusted + both BPMs outside toxic 140-180 band
+ *      (backend half-time bug zone).
+ *   6. B has ≥ 2 downbeats + median bar duration ∈ [1, 4]s (sane meter).
+ *   7. Perceptual gate (Tier 4-lite, OR of 3 paths):
+ *      A. introSlope ≥ +0.015/s (clear perceptual build).
+ *      B. introSlope ≥ 0 + downbeatDensity ≥ 0.45/bar (stable loop).
+ *      C. legacy energyB ≥ 0.30 (fallback for tracks without curves).
+ *   8. structure intact — chorusStart > 5 (defense against literal 0.1s).
+ *   9. vocalStart > 0 (rules out nil / literal t=0).
+ *   10. intro real ≥ 4 bars (vocalStart > introEnd + 4*barDur).
+ *   11. structure not broken — introEnd + 12*barDur < firstEvent.
+ *   12. no hard harmonic clash (compatibility ≠ 'clash').
+ *   13. valid range [lower, upper] + at least one candidate downbeat
+ *       with even parity around the musical event + bestCandidate
+ *       strictly < originalEntry − 1 (improvement floor).
+ *
+ * Caller activates the `earlyBlend` executor curve when Tier 4 fires.
+ */
+export function computeTier4Entry(args: {
+  safeCurrent: SongAnalysis | undefined;
+  safeNext: SongAnalysis | undefined;
+  profile: TransitionProfile;
+  bufferADuration: number;
+  fadeDuration: number;
+  originalEntry: number;
+  transitionType: TransitionType;
+}): Tier4Result {
+  const {
+    safeCurrent,
+    safeNext,
+    profile,
+    bufferADuration,
+    fadeDuration,
+    originalEntry,
+    transitionType
+  } = args;
+
+  const telemetry: Tier4Telemetry = {};
+
+  const fail = (gate: Tier4FailedGate): Tier4Result => {
+    telemetry.failedGate = gate;
+    return { entry: undefined, telemetry };
+  };
+
+  if (!kEnableTier4) return fail('disabled');
+
+  // ── Gate 1: blendy type ──
+  if (
+    transitionType !== 'CROSSFADE' &&
+    transitionType !== 'EQ_MIX' &&
+    transitionType !== 'BEAT_MATCH_BLEND'
+  ) {
+    return fail('typeIncompat');
+  }
+
+  // ── Gate 2: fade ≥ 4s ──
+  if (fadeDuration < 4.0) return fail('fadeShort');
+
+  // ── Gate 3: A reliable + vocal-end data ──
+  if (!safeCurrent || safeCurrent.hasError) return fail('aMissing');
+  if (!safeCurrent.hasVocalEndData) return fail('noVocalEndData');
+  const crossfadeStartA = bufferADuration - fadeDuration;
+  if (crossfadeStartA - safeCurrent.lastVocalTime < 2.0) return fail('outroVocal');
+
+  // ── Gate 4: B reliable ──
+  if (!safeNext || safeNext.hasError) return fail('bMissing');
+
+  // ── Gate 5: BPM trust + not in toxic band 140-180 ──
+  if (!profile.bpmTrusted) return fail('bpmUntrusted');
+  const bpmAToxic = profile.bpmA >= 140 && profile.bpmA <= 180;
+  const bpmBToxic = profile.bpmB >= 140 && profile.bpmB <= 180;
+  if (bpmAToxic || bpmBToxic) return fail('bpmToxic');
+
+  // ── Gate 6: ≥ 2 downbeats + median bar duration ∈ [1, 4] ──
+  const downbeats = safeNext.downbeatTimes;
+  if (downbeats.length < 2) return fail('noDownbeats');
+  const deltas: number[] = [];
+  for (let i = 1; i < Math.min(downbeats.length, 8); i++) {
+    const a = downbeats[i] ?? 0;
+    const b = downbeats[i - 1] ?? 0;
+    deltas.push(a - b);
+  }
+  const sortedDeltas = [...deltas].sort((a, b) => a - b);
+  const medianDelta = sortedDeltas[Math.floor(sortedDeltas.length / 2)] ?? 0;
+  if (medianDelta < 1.0 || medianDelta > 4.0) return fail('invalidBarDur');
+  const barDur = medianDelta;
+
+  // Persist perceptual telemetry even if later gates fail — lets us see the
+  // real distribution of introSlope and downbeatDensity in the catalog.
+  if (safeNext.introSlope !== undefined) {
+    telemetry.introSlopeB = safeNext.introSlope;
+  }
+  const dens20 = downbeatDensity({ downbeats, barDur, until: 20.0 });
+  if (dens20 !== undefined) {
+    telemetry.downbeatDensityB20s = dens20;
+  }
+
+  // ── Gate 7: perceptual gate (OR of 3 paths) ──
+  // Path A: clear perceptual build (introSlope ≥ kIntroSlopeMinPerSecond).
+  // Path B: stable loop (slope ≥ 0 + density ≥ kDownbeatDensityMinPerBar).
+  // Path C: legacy energyB ≥ 0.30 fallback for tracks lacking curves.
+  const slopeB = safeNext.introSlope ?? -Infinity;
+  const pathA = slopeB >= kIntroSlopeMinPerSecond;
+  const pathB = slopeB >= 0 && dens20 !== undefined && dens20 >= kDownbeatDensityMinPerBar;
+  const pathC = profile.energyB >= 0.30;
+  if (!pathA && !pathB && !pathC) return fail('perceptual');
+
+  // ── Gate 8: structure intact — chorusStart > 5 ──
+  const chorusStart = safeNext.chorusStartTime;
+  const chorusValid = chorusStart > 5.0;
+
+  // ── Gate 9: vocalStart > 0 (rules out nil / literal t=0) ──
+  if (safeNext.vocalStartTime === undefined || safeNext.vocalStartTime <= 0) {
+    return fail('vocalStart');
+  }
+  const vocalStart = safeNext.vocalStartTime;
+
+  // ── Gate 10: intro real ≥ 4 bars ──
+  const introEnd =
+    safeNext.introEndTimeHeuristic ?? (safeNext.hasIntroData ? safeNext.introEndTime : 0);
+  if (introEnd <= 0) return fail('noIntroEnd');
+  if (vocalStart <= introEnd + 4 * barDur) return fail('introBarsShort');
+
+  const firstEventB = chorusValid ? Math.min(vocalStart, chorusStart) : vocalStart;
+  if (!Number.isFinite(firstEventB)) return fail('noFirstEvent');
+
+  // ── Gate 11: structure not broken — introEnd + 12*barDur < firstEvent ──
+  if (introEnd + 12 * barDur >= firstEventB) return fail('structureCollision');
+
+  // ── Gate 12: no hard harmonic clash ──
+  if (profile.harmonic.compatibility === 'clash') return fail('clash');
+
+  // ── Gate 13: compute target with BPM-scaled barsAhead ──
+  // When fade > 8s, audible window of B before the punch grows past 12s.
+  // barsAhead=6 fixed would leave B ringing in "pre-bar(-6)" territory.
+  // Scale to 8 so the target lands closer to the first kick.
+  const barsAhead = fadeDuration > 8.0 ? 8 : 6;
+  const lowerBound = Math.max(introEnd + 4 * barDur, firstEventB - 12 * barDur);
+  const upperBound = firstEventB - 4 * barDur;
+  if (lowerBound >= upperBound) return fail('rangeInvalid');
+
+  const targetIdeal = firstEventB - barsAhead * barDur;
+  const target = Math.min(Math.max(targetIdeal, lowerBound), upperBound);
+
+  // Snap to nearest downbeat with even-bars parity anchored to firstEvent.
+  const candidates = downbeats.filter((db) => {
+    if (db < lowerBound || db > upperBound) return false;
+    const barsFromFirstEvent = (firstEventB - db) / barDur;
+    const nearestBars = Math.round(barsFromFirstEvent);
+    if (nearestBars % 2 !== 0) return false;
+    return Math.abs(barsFromFirstEvent - nearestBars) < 0.25;
+  });
+  if (candidates.length === 0) return fail('noCandidates');
+
+  const bestCandidate = candidates.reduce((acc, db) =>
+    Math.abs(db - target) < Math.abs(acc - target) ? db : acc
+  );
+
+  // Improvement floor: new entry must be strictly < originalEntry − 1s.
+  if (bestCandidate >= originalEntry - 1.0) return fail('notImproving');
+
+  const reason = `Tier4: BPM=${Math.trunc(profile.bpmB)} bars=${barsAhead} entry: ${originalEntry.toFixed(1)}→${bestCandidate.toFixed(1)}s`;
+  return { entry: bestCandidate, reason, telemetry };
+}
+
+// ============================================================================
+// MARK: - snapCutEntryToDownbeat (DJMixingService.swift:4389)
+// ============================================================================
+
+export type SnapCutResult = {
+  readonly entry: number;
+  readonly snapped: boolean;
+  readonly info: string;
+};
+
+/**
+ * Snap a CUT-family entry to a clean musical landmark when B's chorus is
+ * reachable. Mirrors `DJMixingService.swift:4389 snapCutEntryToDownbeat`.
+ *
+ * Without this, CUT can land in a "dead zone" — typically 0.05-2.5s before
+ * the chorus drop — which reads as if the cut fired half a beat early.
+ *
+ * Strategy:
+ *   - **Inside dead zone** (entry ∈ (chorusStart − 2.5, chorusStart − 0.05)):
+ *     default backward (−1 bar). Land AT chorus only when keys are
+ *     compatible (`harmonicClashLevel < 0.3`) AND backward shift is
+ *     physically unavailable (negative).
+ *   - **Outside dead zone** (entry ≤ chorusStart − 2.5): minimum-shift
+ *     forward, picking among (chorus, −1 bar, −2 bars) the one closest to
+ *     entry that's at least entry + 0.5s away. AT chorus excluded if keys
+ *     clash.
+ *
+ * Snaps to actual downbeat if `downbeatTimes` has one within 0.3s of the
+ * chosen candidate (real grid > theoretical bar).
+ *
+ * No-op for non-cut transitions, missing analysis, original entry already
+ * at/past chorus, or entry more than 2 bars before chorus (respect
+ * deliberate "early CUT" intent).
+ */
+export function snapCutEntryToDownbeat(args: {
+  entry: number;
+  transitionType: TransitionType;
+  next: SongAnalysis | undefined;
+  bufferBDuration: number;
+  fadeDuration: number;
+  /** `[0, 1]` from `harmonicPenalty.compatibility`
+      (compatible=0, acceptable=0.3, tense=0.6, clash=1.0). */
+  harmonicClashLevel?: number;
+}): SnapCutResult {
+  const {
+    entry,
+    transitionType,
+    next,
+    bufferBDuration,
+    fadeDuration,
+    harmonicClashLevel = 0.0
+  } = args;
+
+  if (transitionType !== 'CUT' && transitionType !== 'CUT_A_FADE_IN_B') {
+    return { entry, snapped: false, info: '' };
+  }
+  if (!next || next.hasError) return { entry, snapped: false, info: '' };
+  if (next.chorusStartTime <= 0.5) return { entry, snapped: false, info: '' };
+
+  const chorusStart = next.chorusStartTime;
+  // Already AT/past chorus: don't move.
+  if (entry >= chorusStart - 0.05) return { entry, snapped: false, info: '' };
+
+  const beatInterval = next.beatInterval > 0 ? next.beatInterval : 0.5;
+  const bar = beatInterval * 4;
+
+  // Reachability guard: snap only when entry is WITHIN 2 bars of chorus.
+  // Beyond that, the entry was a deliberate "early CUT" — respect it.
+  if (entry < chorusStart - 2 * bar) return { entry, snapped: false, info: '' };
+
+  const maxEntry = Math.max(0, bufferBDuration - fadeDuration - 0.5);
+
+  // Dead zone: entries within ~2.5s of chorus are problematic — A dies as
+  // chorus of B starts with no breathing room.
+  const inDeadZone = entry > chorusStart - 2.5;
+
+  // AT-chorus permitted only with compatible keys.
+  const allowAtChorus = harmonicClashLevel < 0.3;
+
+  type Candidate = { value: number; label: string };
+  const rawCandidates: Candidate[] = [
+    { value: chorusStart - bar, label: '-1 bar' },
+    { value: chorusStart - 2 * bar, label: '-2 bars' },
+    { value: chorusStart, label: 'AT chorus' }
+  ];
+  const candidates = rawCandidates.filter((c) => c.value >= 0 && c.value <= maxEntry);
+
+  let target: Candidate | undefined;
+  if (inDeadZone) {
+    // Default backward (−1 bar). −2 bars fallback if −1 out of range.
+    // AT chorus only when both backward candidates are negative AND keys
+    // compatible.
+    const back1 = candidates.find((c) => c.label === '-1 bar');
+    const back2 = candidates.find((c) => c.label === '-2 bars');
+    const atCh = candidates.find((c) => c.label === 'AT chorus');
+    if (back1 !== undefined) target = back1;
+    else if (back2 !== undefined) target = back2;
+    else if (atCh !== undefined && allowAtChorus) target = atCh;
+    else return { entry, snapped: false, info: '' };
+  } else {
+    // Minimum-shift forward, ≥ entry + 0.5 to avoid trivial snaps.
+    const viable = candidates
+      .filter((c) => c.value >= entry + 0.5)
+      .filter((c) => allowAtChorus || c.label !== 'AT chorus');
+    if (viable.length === 0) return { entry, snapped: false, info: '' };
+    target = viable.reduce((acc, c) =>
+      Math.abs(c.value - entry) < Math.abs(acc.value - entry) ? c : acc
+    );
+  }
+
+  // Snap to actual downbeat if one is within 0.3s of the chosen candidate.
+  let snappedTime: number = target.value;
+  if (next.downbeatTimes.length > 0) {
+    const nearest = next.downbeatTimes.reduce((acc, db) =>
+      Math.abs(db - target!.value) < Math.abs(acc - target!.value) ? db : acc
+    );
+    if (Math.abs(nearest - target.value) < 0.3) {
+      snappedTime = nearest;
+    }
+  }
+
+  const zoneTag = inDeadZone ? ' [dead-zone]' : '';
+  const clashTag = !allowAtChorus && target.label !== 'AT chorus' ? ' [clash:no-AT]' : '';
+  const info = `CUT snap ${entry.toFixed(1)}s → ${snappedTime.toFixed(1)}s (${target.label} of chorus@${chorusStart.toFixed(1)}s)${zoneTag}${clashTag}`;
+  return { entry: snappedTime, snapped: true, info };
 }
 
 // ============================================================================

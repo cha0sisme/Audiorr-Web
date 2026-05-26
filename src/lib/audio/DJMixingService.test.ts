@@ -19,6 +19,7 @@ import {
   calculateAdaptiveFadeDuration,
   calculateSmartEntryPoint,
   calculateTriggerBias,
+  computeTier4Entry,
   decideAnticipation,
   decideDJEffects,
   decideDJFilters,
@@ -28,11 +29,13 @@ import {
   deriveSlope,
   detectIntroInstrumental,
   detectOutroInstrumental,
+  downbeatDensity,
   harmonicBPM,
   harmonicPenalty,
   isBDropDrivenByPercussive,
   isBDropDrivenBass,
   sanitizeAnalysis,
+  snapCutEntryToDownbeat,
   snapToMeasureGrid
 } from './DJMixingService';
 import {
@@ -42,6 +45,7 @@ import {
   SONG_ANALYSIS_DEFAULT,
   type TransitionCharacter,
   type TransitionProfile,
+  type TransitionType,
   type VocalOverlapRisk
 } from './dj-types';
 
@@ -2566,6 +2570,382 @@ describe('calculateSmartEntryPoint', () => {
     });
     expect(r.entryPoint).toBeGreaterThanOrEqual(0);
     expect(r.entryPoint).toBeLessThanOrEqual(9);
+  });
+});
+
+// ============================================================================
+// downbeatDensity
+// ============================================================================
+
+describe('downbeatDensity', () => {
+  it('barDur 0 → undefined', () => {
+    expect(downbeatDensity({ downbeats: [0, 2, 4], barDur: 0, until: 10 })).toBeUndefined();
+  });
+
+  it('until 0 → undefined', () => {
+    expect(downbeatDensity({ downbeats: [0, 2, 4], barDur: 2, until: 0 })).toBeUndefined();
+  });
+
+  it('cuenta downbeats en [0, until)', () => {
+    // 4 downbeats en [0, 20), barDur=4 → bars=5, density=4/5=0.8.
+    const d = downbeatDensity({
+      downbeats: [0, 4, 8, 12, 25, 30],
+      barDur: 4,
+      until: 20
+    });
+    expect(d).toBeCloseTo(0.8, 2);
+  });
+
+  it('excluye downbeats negativos', () => {
+    const d = downbeatDensity({
+      downbeats: [-2, 0, 4, 8],
+      barDur: 4,
+      until: 10
+    });
+    // dentro [0, 10): 0, 4, 8 → 3. bars=2.5. density=1.2.
+    expect(d).toBeCloseTo(1.2, 2);
+  });
+});
+
+// ============================================================================
+// computeTier4Entry
+// ============================================================================
+
+describe('computeTier4Entry', () => {
+  // Fixture común: setup que pasa los 13 gates.
+  // Estructura típica: A long instrumental outro (lastVocalTime=180,
+  // bufferA=200, fade=6 → crossfadeStart=194, diff 14 ≥ 2 OK).
+  // B con chorus a 50s + vocal a 55s + intro real >= 4 bars + downbeats
+  // marcados hasta el chorus + introSlope path A activo.
+  // originalEntry alto (60) para que el snap candidate (<= upper bound 42)
+  // mejore con margen.
+  // `useSafeCurrent: false` fuerza safeCurrent=undefined (caso A missing).
+  function tier4Inputs(overrides?: {
+    transitionType?: TransitionType;
+    fadeDuration?: number;
+    useSafeCurrent?: false;
+    safeCurrentOverride?: Partial<SongAnalysis>;
+    safeNext?: Partial<SongAnalysis>;
+    profile?: Partial<TransitionProfile>;
+    bufferADuration?: number;
+    originalEntry?: number;
+  }) {
+    const safeCurrent =
+      overrides?.useSafeCurrent === false
+        ? undefined
+        : makeAnalysis({
+            hasVocalEndData: true,
+            lastVocalTime: 180,
+            ...(overrides?.safeCurrentOverride ?? {})
+          });
+    const safeNext = makeAnalysis({
+      vocalStartTime: 55,
+      chorusStartTime: 50,
+      hasIntroData: true,
+      introEndTime: 10,
+      introEndTimeHeuristic: 10,
+      downbeatTimes: [
+        0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46,
+        48, 50, 52
+      ],
+      introSlope: 0.02,
+      ...(overrides?.safeNext ?? {})
+    });
+    const profile = makeProfile({
+      bpmTrusted: true,
+      bpmA: 120,
+      bpmB: 120,
+      energyB: 0.4,
+      ...(overrides?.profile ?? {})
+    });
+    return {
+      safeCurrent,
+      safeNext,
+      profile,
+      bufferADuration: overrides?.bufferADuration ?? 200,
+      fadeDuration: overrides?.fadeDuration ?? 6,
+      originalEntry: overrides?.originalEntry ?? 60,
+      transitionType: (overrides?.transitionType ?? 'CROSSFADE') as TransitionType
+    };
+  }
+
+  it('CUT (no blendy) → typeIncompat', () => {
+    const r = computeTier4Entry(tier4Inputs({ transitionType: 'CUT' }));
+    expect(r.entry).toBeUndefined();
+    expect(r.telemetry.failedGate).toBe('typeIncompat');
+  });
+
+  it('fade < 4 → fadeShort', () => {
+    const r = computeTier4Entry(tier4Inputs({ fadeDuration: 3 }));
+    expect(r.entry).toBeUndefined();
+    expect(r.telemetry.failedGate).toBe('fadeShort');
+  });
+
+  it('A missing → aMissing', () => {
+    const r = computeTier4Entry(tier4Inputs({ useSafeCurrent: false }));
+    expect(r.telemetry.failedGate).toBe('aMissing');
+  });
+
+  it('A sin hasVocalEndData → noVocalEndData', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({
+        safeCurrentOverride: { hasVocalEndData: false }
+      })
+    );
+    expect(r.telemetry.failedGate).toBe('noVocalEndData');
+  });
+
+  it('A con vocals cerca del crossfade → outroVocal', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({
+        safeCurrentOverride: {
+          hasVocalEndData: true,
+          lastVocalTime: 195 // crossfadeStartA = 194, diff = -1 < 2
+        }
+      })
+    );
+    expect(r.telemetry.failedGate).toBe('outroVocal');
+  });
+
+  it('bpmTrusted=false → bpmUntrusted', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({ profile: { bpmTrusted: false } })
+    );
+    expect(r.telemetry.failedGate).toBe('bpmUntrusted');
+  });
+
+  it('bpmA en banda tóxica 140-180 → bpmToxic', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({ profile: { bpmA: 150, bpmB: 120 } })
+    );
+    expect(r.telemetry.failedGate).toBe('bpmToxic');
+  });
+
+  it('downbeats < 2 → noDownbeats', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({
+        safeNext: { downbeatTimes: [0] }
+      })
+    );
+    expect(r.telemetry.failedGate).toBe('noDownbeats');
+  });
+
+  it('bar duration fuera de [1, 4]s → invalidBarDur', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({
+        safeNext: { downbeatTimes: [0, 0.3, 0.6, 0.9, 1.2] }
+      })
+    );
+    expect(r.telemetry.failedGate).toBe('invalidBarDur');
+  });
+
+  it('perceptual gate falla cuando ningún path dispara', () => {
+    const r = computeTier4Entry(
+      tier4Inputs({
+        safeNext: { introSlope: -0.01 }, // path A no, density ya no entra, energyB bajo
+        profile: { energyB: 0.2 }
+      })
+    );
+    expect(r.telemetry.failedGate).toBe('perceptual');
+  });
+
+  it('vocalStart undefined → vocalStart gate', () => {
+    // Spread sin vocalStartTime — el helper lo deja en default (undefined).
+    const safeNext = makeAnalysis({
+      chorusStartTime: 50,
+      hasIntroData: true,
+      introEndTime: 10,
+      introEndTimeHeuristic: 10,
+      downbeatTimes: [
+        0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48
+      ],
+      introSlope: 0.02
+    });
+    const r = computeTier4Entry({
+      safeCurrent: makeAnalysis({ hasVocalEndData: true, lastVocalTime: 180 }),
+      safeNext,
+      profile: makeProfile({ bpmTrusted: true, bpmA: 120, bpmB: 120, energyB: 0.4 }),
+      bufferADuration: 200,
+      fadeDuration: 6,
+      originalEntry: 60,
+      transitionType: 'CROSSFADE'
+    });
+    expect(r.telemetry.failedGate).toBe('vocalStart');
+  });
+
+  it('setup completo válido → dispara y entry < originalEntry', () => {
+    const r = computeTier4Entry(tier4Inputs({ originalEntry: 60 }));
+    expect(r.entry).toBeDefined();
+    if (r.entry !== undefined) {
+      expect(r.entry).toBeLessThan(60 - 1.0);
+      expect(r.entry).toBeGreaterThan(0);
+    }
+  });
+
+  it('telemetry persiste introSlope + downbeatDensity aunque gates fallen después', () => {
+    // Pasa hasta gate 7 (perceptual) pero falla en vocalStart undefined.
+    const safeNext = makeAnalysis({
+      chorusStartTime: 50,
+      hasIntroData: true,
+      introEndTime: 10,
+      introEndTimeHeuristic: 10,
+      downbeatTimes: [
+        0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48
+      ],
+      introSlope: 0.05
+    });
+    const r = computeTier4Entry({
+      safeCurrent: makeAnalysis({ hasVocalEndData: true, lastVocalTime: 180 }),
+      safeNext,
+      profile: makeProfile({ bpmTrusted: true, bpmA: 120, bpmB: 120, energyB: 0.4 }),
+      bufferADuration: 200,
+      fadeDuration: 6,
+      originalEntry: 60,
+      transitionType: 'CROSSFADE'
+    });
+    expect(r.telemetry.introSlopeB).toBe(0.05);
+    expect(r.telemetry.downbeatDensityB20s).toBeDefined();
+  });
+});
+
+// ============================================================================
+// snapCutEntryToDownbeat
+// ============================================================================
+
+describe('snapCutEntryToDownbeat', () => {
+  it('tipo no-CUT → no snap', () => {
+    const r = snapCutEntryToDownbeat({
+      entry: 30,
+      transitionType: 'CROSSFADE',
+      next: makeAnalysis({ chorusStartTime: 32 }),
+      bufferBDuration: 200,
+      fadeDuration: 5
+    });
+    expect(r.snapped).toBe(false);
+    expect(r.entry).toBe(30);
+  });
+
+  it('next undefined → no snap', () => {
+    const r = snapCutEntryToDownbeat({
+      entry: 30,
+      transitionType: 'CUT',
+      next: undefined,
+      bufferBDuration: 200,
+      fadeDuration: 5
+    });
+    expect(r.snapped).toBe(false);
+  });
+
+  it('chorus ≤ 0.5 → no snap', () => {
+    const r = snapCutEntryToDownbeat({
+      entry: 30,
+      transitionType: 'CUT',
+      next: makeAnalysis({ chorusStartTime: 0 }),
+      bufferBDuration: 200,
+      fadeDuration: 5
+    });
+    expect(r.snapped).toBe(false);
+  });
+
+  it('entry ya AT/past chorus → no snap', () => {
+    const r = snapCutEntryToDownbeat({
+      entry: 32,
+      transitionType: 'CUT',
+      next: makeAnalysis({ chorusStartTime: 32 }),
+      bufferBDuration: 200,
+      fadeDuration: 5
+    });
+    expect(r.snapped).toBe(false);
+  });
+
+  it('entry más de 2 bars antes de chorus → respeta early CUT', () => {
+    // beat=0.5 → bar=2. chorus=32, 2 bars = 4. entry=20 < 32-4=28.
+    const r = snapCutEntryToDownbeat({
+      entry: 20,
+      transitionType: 'CUT',
+      next: makeAnalysis({
+        beatInterval: 0.5,
+        chorusStartTime: 32
+      }),
+      bufferBDuration: 200,
+      fadeDuration: 5
+    });
+    expect(r.snapped).toBe(false);
+  });
+
+  it('dead zone (≤2.5s antes de chorus) + keys compatibles → backward (-1 bar)', () => {
+    // beat=0.5 → bar=2. chorus=32, dead zone (29.5, 31.95). entry=31 dentro.
+    // -1 bar = 30, dentro de [0, maxEntry].
+    const r = snapCutEntryToDownbeat({
+      entry: 31,
+      transitionType: 'CUT',
+      next: makeAnalysis({
+        beatInterval: 0.5,
+        chorusStartTime: 32,
+        downbeatTimes: []
+      }),
+      bufferBDuration: 200,
+      fadeDuration: 5,
+      harmonicClashLevel: 0.0
+    });
+    expect(r.snapped).toBe(true);
+    expect(r.entry).toBeCloseTo(30, 1); // chorus - 1 bar
+  });
+
+  it('outside dead zone → minimum-shift forward al candidato AT chorus si compatible', () => {
+    // entry=29 fuera de dead zone (chorus-2.5 = 29.5 → 29 < 29.5). Outside.
+    // Wait: dead zone is (chorus-2.5, chorus-0.05). entry=29 NO está en dead zone.
+    // candidates after +0.5 floor: chorus-2bar=28<29.5, chorus-1bar=30, chorus=32.
+    // Pick min-shift among viable ≥ entry+0.5=29.5: 30 (-1 bar) y 32 (AT). 30 más cercano.
+    const r = snapCutEntryToDownbeat({
+      entry: 29,
+      transitionType: 'CUT',
+      next: makeAnalysis({
+        beatInterval: 0.5,
+        chorusStartTime: 32
+      }),
+      bufferBDuration: 200,
+      fadeDuration: 5,
+      harmonicClashLevel: 0.0
+    });
+    expect(r.snapped).toBe(true);
+    expect(r.entry).toBeCloseTo(30, 1);
+  });
+
+  it('harmonic clash → AT chorus excluido', () => {
+    // beat=0.5 → bar=2. chorus=32, entry=29.5. clash. Sin AT chorus, -1 bar=30 OK.
+    const r = snapCutEntryToDownbeat({
+      entry: 29.5,
+      transitionType: 'CUT',
+      next: makeAnalysis({
+        beatInterval: 0.5,
+        chorusStartTime: 32
+      }),
+      bufferBDuration: 200,
+      fadeDuration: 5,
+      harmonicClashLevel: 1.0 // clash
+    });
+    expect(r.snapped).toBe(true);
+    expect(r.entry).toBeLessThan(32);
+    expect(r.info).toContain('clash');
+  });
+
+  it('downbeat real cercano (<0.3s) override del target teórico', () => {
+    // target = chorus - 1 bar = 30. downbeat real at 30.1 → snap a 30.1.
+    const r = snapCutEntryToDownbeat({
+      entry: 31,
+      transitionType: 'CUT',
+      next: makeAnalysis({
+        beatInterval: 0.5,
+        chorusStartTime: 32,
+        downbeatTimes: [0, 30.1, 32]
+      }),
+      bufferBDuration: 200,
+      fadeDuration: 5,
+      harmonicClashLevel: 0.0
+    });
+    expect(r.snapped).toBe(true);
+    expect(r.entry).toBeCloseTo(30.1, 1);
   });
 });
 
