@@ -76,6 +76,8 @@ function makeContext(
     useLowpassA: boolean;
     useMidScoop: boolean;
     useHighShelfCut: boolean;
+    useBassKill: boolean;
+    useDynamicQ: boolean;
     preset: FilterAutomationContext['preset'];
   }> = {}
 ): FilterAutomationContext {
@@ -91,7 +93,9 @@ function makeContext(
     bassSwapTime: ctxOverrides.bassSwapTime ?? timings.volumeFadeStartTime + fadeDur * 0.25,
     useLowpassA: ctxOverrides.useLowpassA ?? false,
     useMidScoop: ctxOverrides.useMidScoop ?? false,
-    useHighShelfCut: ctxOverrides.useHighShelfCut ?? false
+    useHighShelfCut: ctxOverrides.useHighShelfCut ?? false,
+    useBassKill: ctxOverrides.useBassKill ?? false,
+    useDynamicQ: ctxOverrides.useDynamicQ ?? false
   };
 }
 
@@ -216,6 +220,81 @@ describe('applyFiltersA — band sweep', () => {
     expect(isPassthrough(r.stages[3])).toBe(false);
   });
 
+  it('useBassKill A: cosSquared 0 → −16dB sobre toda la rampa', () => {
+    // En t=rampStart → gain=0 (passthrough lowshelf). En t=rampEnd → -16dB.
+    // Verificamos que band 1 cambia monotónicamente.
+    const ctx = makeContext(
+      { transitionType: 'CROSSFADE' },
+      { useBassKill: true }
+    );
+    const totalDur = ctx.timings.transitionEndTime - ctx.timings.filterStartTime;
+    // En t=rampStart, gain=0 → passthrough.
+    const rStart = applyFiltersA(ctx.timings.filterStartTime, ctx);
+    expect(rStart.set).toBe(true);
+    expect(isPassthrough(rStart.stages[1])).toBe(true);
+    // En t cerca del final, gain ≈ -16 → no passthrough.
+    const rNearEnd = applyFiltersA(
+      ctx.timings.filterStartTime + totalDur * 0.9,
+      ctx
+    );
+    expect(rNearEnd.set).toBe(true);
+    expect(isPassthrough(rNearEnd.stages[1])).toBe(false);
+  });
+
+  it('useDynamicQ A: Q peaks alrededor del center 0.55', () => {
+    // Sin un getter directo de Q desde coefficients, verifico
+    // indirectamente que activar dynQ produce coefs DIFERENTES al baseline
+    // en center=0.55 vs en t=rampStart (donde bellValue ≈ exp(-1.68)≈0.19,
+    // bell apagada).
+    const ctxNoDQ = makeContext({ transitionType: 'CROSSFADE' });
+    const ctxDQ = makeContext(
+      { transitionType: 'CROSSFADE' },
+      { useDynamicQ: true }
+    );
+    const dur = ctxDQ.timings.transitionEndTime - ctxDQ.timings.filterStartTime;
+    const tPeak = ctxDQ.timings.filterStartTime + dur * 0.55;
+    const rNoDQ = applyFiltersA(tPeak, ctxNoDQ);
+    const rDQ = applyFiltersA(tPeak, ctxDQ);
+    expect(rNoDQ.set && rDQ.set).toBe(true);
+    // Mismo freq (band 0 sweep idéntico), distinto Q → b0/a1/a2 difieren.
+    expect(rNoDQ.stages[0].a1).not.toBeCloseTo(rDQ.stages[0].a1, 4);
+  });
+
+  it('useDynamicQ B: peak en center 0.40 dentro de B window', () => {
+    const ctxNoDQ = makeContext({ transitionType: 'CROSSFADE' });
+    const ctxDQ = makeContext(
+      { transitionType: 'CROSSFADE' },
+      { useDynamicQ: true }
+    );
+    const dur = ctxDQ.timings.fadeInEndTime - ctxDQ.timings.fadeInStartTime;
+    const tPeak = ctxDQ.timings.fadeInStartTime + dur * 0.40;
+    const rNoDQ = applyFiltersB(tPeak, ctxNoDQ);
+    const rDQ = applyFiltersB(tPeak, ctxDQ);
+    expect(rNoDQ.set && rDQ.set).toBe(true);
+    // band 0 freq idéntico, Q distinto.
+    expect(rNoDQ.stages[0].a1).not.toBeCloseTo(rDQ.stages[0].a1, 4);
+  });
+
+  it('useDynamicQ B disabled en anticipation mode (preserva preset Q)', () => {
+    const ctxAntic = makeContext({
+      transitionType: 'CROSSFADE',
+      needsAnticipation: true,
+      anticipationTime: 2.0
+    }, { useDynamicQ: true });
+    const ctxAnticNoDQ = makeContext({
+      transitionType: 'CROSSFADE',
+      needsAnticipation: true,
+      anticipationTime: 2.0
+    });
+    const dur = ctxAntic.timings.fadeInEndTime - ctxAntic.timings.fadeInStartTime;
+    const tPeak = ctxAntic.timings.fadeInStartTime + dur * 0.40;
+    const rAntic = applyFiltersB(tPeak, ctxAntic);
+    const rAnticNoDQ = applyFiltersB(tPeak, ctxAnticNoDQ);
+    expect(rAntic.set && rAnticNoDQ.set).toBe(true);
+    // En anticipation, dynQ está desactivado → Q debería ser idéntico al baseline.
+    expect(rAntic.stages[0].a1).toBeCloseTo(rAnticNoDQ.stages[0].a1, 5);
+  });
+
   it('pivot 40%: en t=pivot, freqA ≈ highpassA.midFreq', () => {
     // PRESET_NORMAL: highpassA.midFreq=4000. Pivot está en 40% del filter window.
     const ctx = makeContext({ transitionType: 'CROSSFADE' });
@@ -266,6 +345,28 @@ describe('applyFiltersB — invariantes', () => {
     expect(r.set).toBe(true);
     expect(r.stages[2]).toBe(PASSTHROUGH);
     expect(r.stages[3]).toBe(PASSTHROUGH);
+  });
+
+  it('useBassKill B: hold startGain hasta bassSwapTime, cosSquared después', () => {
+    // PRESET_NORMAL lowshelfB: startGain=-8, endGain=0. bassSwapTime al
+    // 25% del fade. En t<bassSwap → coefficients usan -8 dB. En
+    // bassSwap+ → cosSquared 0→1 sobre [bassSwap, fadeInEnd], gain
+    // sube de -8 a 0.
+    const ctx = makeContext(
+      { transitionType: 'CROSSFADE' },
+      { useBassKill: true }
+    );
+    const tEarly = ctx.timings.fadeInStartTime + 0.1; // antes de bassSwap
+    const rEarly = applyFiltersB(tEarly, ctx);
+    expect(rEarly.set).toBe(true);
+    // Band 1 lowshelf con gain -8 NO es passthrough (gain !== 0).
+    expect(isPassthrough(rEarly.stages[1])).toBe(false);
+    // En t=fadeInEnd, gain debería estar en endGain=0 → lowshelf
+    // passthrough (gain ≤ MIN_GAIN_DB_FOR_SHELF_PEAKING).
+    const rEnd = applyFiltersB(ctx.timings.fadeInEndTime - 0.001, ctx);
+    expect(rEnd.set).toBe(true);
+    // Cerca del final, gain debe estar muy cerca de 0 (passthrough en limit).
+    expect(isPassthrough(rEnd.stages[1])).toBe(true);
   });
 
   it('anticipation: 3 stages mapean correctamente', () => {

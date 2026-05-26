@@ -2,21 +2,22 @@
  * Filter automation — runtime coefficient computation for the 4-stage
  * biquad worklet on A and B.
  *
- * Port MVP de `applyFiltersA` / `applyFiltersB` en iOS
- * `CrossfadeExecutor.swift` v15.m:2479-3118. **No incluye** (van en
- * iteraciones sucesivas):
- *   - Pre-roll bands 0-3 con cascade staggering 150/300 ms.
+ * Port de `applyFiltersA` / `applyFiltersB` en iOS
+ * `CrossfadeExecutor.swift` v15.m:2479-3118. **Incluido tras Fase 2C-2**:
+ *   - Branch principal: sweep base por banda con expInterp (freq) +
+ *     linInterp (gain) + pivot al 40%.
  *   - bassKill cosSquared ramp (lowshelf A/B).
  *   - dynamicQ Gaussian bell sweep en highpass A/B.
+ *
+ * **No incluido todavía** (van en iteraciones sucesivas):
+ *   - Pre-roll bands 0-3 con cascade staggering 150/300 ms.
  *   - Phaser notch sweep en B band 2.
  *   - Stutter cut runtime gate.
- *   - Anticipation extension v15.d.
+ *   - Anticipation extension v15.d (bassKill arranca en anticipationStart).
  *
- * Branch principal preservado: sweep base de cada banda con expInterp
- * (frecuencias, log-uniforme) + linInterp (gains dB) + pivot al 40% del
- * filter window. CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL → todas las
- * bandas en passthrough (filtros bypassed). CUT family rebasea rampStart
- * al sub-intervalo `[cutStart, transitionEnd]`.
+ * CLEAN_HANDOFF / VINYL_STOP / SEQUENTIAL → todas las bandas en
+ * passthrough (filtros bypassed). CUT family rebasea rampStart al
+ * sub-intervalo `[cutStart, transitionEnd]`.
  *
  * Mapeo bands → stages worklet:
  *   - stage 0: highpass A (o lowpass A en energy-down).
@@ -80,7 +81,44 @@ export type FilterAutomationContext = {
   readonly useLowpassA: boolean;
   readonly useMidScoop: boolean;
   readonly useHighShelfCut: boolean;
+  /** Instant low-frequency cut at bassSwapTime — replaces the normal
+      lowshelf ramp with a cosSquared 0→-16dB curve on A, and a hold +
+      cosSquared startGain→endGain on B (split at bassSwapTime). */
+  readonly useBassKill: boolean;
+  /** Bell-shaped Q resonance sweep on the highpass — A bell center 0.55,
+      B bell center 0.40 (B fires first → "knob handoff" perception). */
+  readonly useDynamicQ: boolean;
 };
+
+// ============================================================================
+// MARK: - bassKill + dynamicQ constants (DSPFilterManager.swift:341, 285-294)
+// ============================================================================
+
+/** bassKill target depth (dB). Mirrors `DSPFilterManager.bassKillTargetDepth`.
+    −16 dB still marks the DJ "bass swap" gesture but avoids the snap that a
+    deeper cut (−18 dB+) produces when A's outro carries a long tail. */
+const BASS_KILL_TARGET_DEPTH = -16.0;
+
+/** dynamicQ A bell center as a fraction of `[rampStart, rampEnd]`. */
+const DYN_Q_BELL_CENTER_A = 0.55;
+/** dynamicQ A bell width — narrower for full crossfades (0.30), wider for
+    CUT-family local ramps (0.45) so the bell doesn't "blink" inside the
+    compressed window. */
+const DYN_Q_BELL_WIDTH_NORMAL = 0.30;
+const DYN_Q_BELL_WIDTH_CUT = 0.45;
+/** dynamicQ B bell center as a fraction of `[fadeInStart, fadeInEnd]`.
+    Earlier than A's so B's resonance peak fires first → "knob handoff". */
+const DYN_Q_BELL_CENTER_B = 0.40;
+const DYN_Q_BELL_WIDTH_B = 0.30;
+/** Peak Q reached at bell center. */
+const DYN_Q_PEAK_Q = 3.5;
+/** Hard ceiling — biquad self-oscillates above ~5.0. */
+const DYN_Q_MAX_Q = 4.0;
+
+function gaussianBell(progress: number, center: number, width: number): number {
+  const exponent = (-Math.pow((progress - center) / width, 2)) / 2.0;
+  return Math.exp(Math.max(-10, exponent));
+}
 
 /**
  * Output of `applyFiltersA` / `applyFiltersB` — the 4 stages of biquad
@@ -207,21 +245,47 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
       const p = dur > 0 ? (t - pivotTime) / dur : 1.0;
       freq = expInterp(hp.midFreq, hp.endFreq, p);
     }
-    band0A = calcHighpass(freq, hp.q, sampleRate);
+    // dynamicQ Gaussian bell: bell peaks at center 0.55 of the ramp
+    // window (CUT widens the bell to 0.45 so it doesn't blink). The bell
+    // adds (peakQ − baseQ) at the peak, capped at DYN_Q_MAX_Q.
+    let qValue = hp.q;
+    if (ctx.useDynamicQ && totalFilterDur > 0) {
+      const qProgress = (t - rampStart) / totalFilterDur;
+      const isCutLocalRamp =
+        config.transitionType === 'CUT' || config.transitionType === 'CUT_A_FADE_IN_B';
+      const bellWidth = isCutLocalRamp ? DYN_Q_BELL_WIDTH_CUT : DYN_Q_BELL_WIDTH_NORMAL;
+      const bellValue = gaussianBell(qProgress, DYN_Q_BELL_CENTER_A, bellWidth);
+      qValue = Math.min(DYN_Q_MAX_Q, hp.q + (DYN_Q_PEAK_Q - hp.q) * bellValue);
+    }
+    band0A = calcHighpass(freq, qValue, sampleRate);
   }
 
-  // ── Band 1: lowshelf bass swap (no bassKill in MVP) ──
+  // ── Band 1: lowshelf bass swap (with optional bassKill) ──
   let band1A: BiquadCoefficients = PASSTHROUGH;
   if (useBassManagement && preset.lowshelfA) {
     const ls = preset.lowshelfA;
     let gain: number;
-    if (t < effectiveBassSwapTime) {
-      // Pre-bass-swap: start → mid.
+    if (ctx.useBassKill) {
+      // cosSquared 0 → BASS_KILL_TARGET_DEPTH over the entire ramp window.
+      // Replaces the discrete "100 ms drop to −60 dB" legacy curve — the
+      // continuous ramp keeps the DJ bass-swap gesture without the snap
+      // perceived as "filters from nowhere" on tracks with a live tail.
+      const totalDur = rampEnd - rampStart;
+      if (totalDur > 0) {
+        const p = Math.min(1, Math.max(0, (t - rampStart) / totalDur));
+        const angle = (p * Math.PI) / 2;
+        const sinSq = Math.sin(angle) * Math.sin(angle);
+        gain = sinSq * BASS_KILL_TARGET_DEPTH;
+      } else {
+        gain = 0;
+      }
+    } else if (t < effectiveBassSwapTime) {
+      // Normal pre-bass-swap: start → mid.
       const dur = effectiveBassSwapTime - rampStart;
       const p = dur > 0 ? (t - rampStart) / dur : 1.0;
       gain = linInterp(ls.startGain, ls.midGain, p);
     } else {
-      // Post-bass-swap: mid → end.
+      // Normal post-bass-swap: mid → end.
       const dur = rampEnd - effectiveBassSwapTime;
       const p = dur > 0 ? (t - effectiveBassSwapTime) / dur : 1.0;
       gain = linInterp(ls.midGain, ls.endGain, p);
@@ -333,17 +397,59 @@ export function applyFiltersB(t: number, ctx: FilterAutomationContext): FilterSt
     const p = Math.min(1, (t - timings.fadeInStartTime) / dur);
     hpFreq = expInterp(preset.highpassB.startFreq, preset.highpassB.endFreq, p);
     if (useBassManagement) {
-      // Lowshelf swap completes at bassSwapTime (linear up to that point).
-      const bassDur = bassSwapTime - timings.fadeInStartTime;
-      const bassP = bassDur > 0 ? Math.min(1, (t - timings.fadeInStartTime) / bassDur) : 1.0;
-      lsGain = linInterp(preset.lowshelfB.startGain, preset.lowshelfB.endGain, bassP);
+      if (ctx.useBassKill) {
+        // bassKill B: hold startGain until bassSwapTime, then cosSquared
+        // startGain → endGain on [bassSwapTime, fadeInEndTime]. Symmetric
+        // to bassKill A — both run cosSquared on the same window so the
+        // perceived bass swap is smooth (no pile-up with A's −16 dB).
+        if (t < bassSwapTime) {
+          lsGain = preset.lowshelfB.startGain;
+        } else {
+          const bkDur = timings.fadeInEndTime - bassSwapTime;
+          if (bkDur > 0) {
+            const bkP = Math.min(1, Math.max(0, (t - bassSwapTime) / bkDur));
+            const angle = (bkP * Math.PI) / 2;
+            const sinSq = Math.sin(angle) * Math.sin(angle);
+            lsGain =
+              preset.lowshelfB.startGain +
+              (preset.lowshelfB.endGain - preset.lowshelfB.startGain) * sinSq;
+          } else {
+            lsGain = preset.lowshelfB.endGain;
+          }
+        }
+      } else {
+        // Normal lowshelf swap completes at bassSwapTime (linear).
+        const bassDur = bassSwapTime - timings.fadeInStartTime;
+        const bassP =
+          bassDur > 0 ? Math.min(1, (t - timings.fadeInStartTime) / bassDur) : 1.0;
+        lsGain = linInterp(preset.lowshelfB.startGain, preset.lowshelfB.endGain, bassP);
+      }
     } else {
       lsGain = linInterp(preset.lowshelfB.startGain, preset.lowshelfB.endGain, p);
     }
   }
 
-  const band0B = calcHighpass(hpFreq, preset.highpassB.q, sampleRate);
+  // dynamicQ B Gaussian bell (center 0.40, B fires first to "hand off"
+  // the resonance to A). Anchored to B's own window so it's independent
+  // of A's filterLead. Disabled in anticipation to preserve that path's
+  // multi-stage shape.
+  let qBValue = preset.highpassB.q;
+  if (ctx.useDynamicQ && !config.needsAnticipation) {
+    const bWindowDur = timings.fadeInEndTime - timings.fadeInStartTime;
+    if (bWindowDur > 0) {
+      const qProgress = (t - timings.fadeInStartTime) / bWindowDur;
+      const qProgressClamped = Math.min(1, Math.max(0, qProgress));
+      const bellValue = gaussianBell(qProgressClamped, DYN_Q_BELL_CENTER_B, DYN_Q_BELL_WIDTH_B);
+      qBValue = Math.min(
+        DYN_Q_MAX_Q,
+        preset.highpassB.q + (DYN_Q_PEAK_Q - preset.highpassB.q) * bellValue
+      );
+    }
+  }
+
+  const band0B = calcHighpass(hpFreq, qBValue, sampleRate);
   const band1B = calcLowShelf(preset.lowshelfB.frequency, lsGain, 1.0, sampleRate);
-  // MVP: bands 2 (notch sweep) and 3 stay passthrough.
+  // Bands 2 (notch sweep) and 3 stay passthrough in this iteration —
+  // notch sweep lands in Fase 2C-3.
   return { set: true, stages: [band0B, band1B, PASSTHROUGH, PASSTHROUGH] };
 }
