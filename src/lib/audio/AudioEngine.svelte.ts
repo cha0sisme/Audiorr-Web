@@ -295,6 +295,16 @@ class AudioEngine {
     this.wireChainNodes(chain);
     this.attachAudioElementListeners(chain);
 
+    // ── Clean-state guard: cada load() empieza con worklet en passthrough
+    //    y playbackRate=1.0. Sin esto, un chain contaminado de un
+    //    crossfade DJ previo (biquads en estado intermedio, playbackRate
+    //    time-stretched) seguiría aplicando esos efectos a la nueva
+    //    pista — el "AutoMix" se notaría desde el primer play. Mirror
+    //    iOS setupInitialEQ implícito al cargar.
+    chain.audio.playbackRate = 1.0;
+    chain.audio.preservesPitch = true;
+    if (chain.worklet) this.resetWorkletState(chain);
+
     chain.audio.src = songUrl;
     chain.lastSrc = songUrl;
     chain.triedRawFallback = false;
@@ -413,6 +423,13 @@ class AudioEngine {
 
     this.wireChainNodes(chain);
     this.attachAudioElementListeners(chain);
+
+    // Clean-state guard (idéntico a load() para chainA): biquads en
+    // passthrough + playbackRate=1.0. Garantiza que B arranca sin
+    // residuos del crossfade anterior.
+    chain.audio.playbackRate = 1.0;
+    chain.audio.preservesPitch = true;
+    if (chain.worklet) this.resetWorkletState(chain);
 
     chain.audio.src = songUrl;
     chain.lastSrc = songUrl;
