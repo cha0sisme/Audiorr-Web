@@ -354,10 +354,17 @@ class QueueManager {
     this.playbackMode = options.playbackMode ?? 'normal';
     this.contextUri = options.contextUri ?? null;
     if (this.playbackMode === 'dj') {
+      // SmartMix viene con un orden CURADO por el algoritmo (compatibilidad
+      // de transicion BPM/key/energy/vocal entre tracks consecutivos).
+      // Aplicar shuffle encima lo destrozaria con Fisher-Yates. Forzamos
+      // shuffleMode=false para que el toggle de UI refleje el estado real
+      // y la queue conserve el orden del decisor. Mirror iOS: SmartMix
+      // desactiva shuffle al arrancar.
+      this.shuffleMode = false;
       console.info('[DJ] queue armed — mode=dj contextUri=%s tracks=%d', this.contextUri, songs.length);
+    } else if (this.shuffleMode) {
+      this.applyShuffle(true);
     }
-
-    if (this.shuffleMode) this.applyShuffle(true);
 
     this.persistState();
     this.playCurrentSong();
