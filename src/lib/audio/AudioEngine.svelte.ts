@@ -818,6 +818,13 @@ class AudioEngine {
     this.endedHandled = true;
     this.isPlaying = false;
     this.stopProgressTimer();
+    // Durante un crossfade DJ el <audio> del chain saliente alcanza su
+    // duracion natural y dispara `ended` mientras el fade aun esta en curso.
+    // Si propagamos, el QueueManager hace next() (currentIndex++) ANTES del
+    // onCrossfadeCompleted que tambien avanza -- index queda +1 desfasado
+    // respecto al audio que realmente suena (chain B post-swap). El tick()
+    // paranoia ya filtra por isCrossfading; aqui replicamos el mismo guard.
+    if (this.isCrossfading) return;
     this.emit({ type: 'ended' });
   };
 
