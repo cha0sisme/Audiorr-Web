@@ -95,7 +95,14 @@
   }));
   const recentContexts = $derived(
     (recentContextsQ.data ?? []).filter(
-      (ctx) => ctx.type === 'album' || ctx.type === 'playlist' || ctx.type === 'artist'
+      (ctx) =>
+        (ctx.type === 'album' || ctx.type === 'playlist' || ctx.type === 'artist') &&
+        // Doble defensa: aunque el type vuelva como 'playlist' (entradas
+        // legacy donde el backend resuelve smartmix:<id> hacia su playlist
+        // base), filtramos por el scheme del contextUri. El QueueManager
+        // ya no envia 'smartmix:' al backend a partir de ahora, pero las
+        // entradas anteriores siguen contaminando hasta que se purguen.
+        !ctx.contextUri.startsWith('smartmix:')
     )
   );
 

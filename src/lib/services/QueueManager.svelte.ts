@@ -1323,7 +1323,17 @@ class QueueManager {
   }
 
   /** Construye el payload del PUT a partir del estado actual. Devuelve null
-      si no hay current song (queue vacía / index inválido). */
+      si no hay current song (queue vacía / index inválido).
+
+      Anti-smartmix (regla 2026-05-09, espejo del ScrobbleService
+      `scrobbleContextUri`): si la cola activa es SmartMix
+      (`playbackMode==='dj'` y/o `contextUri.startsWith('smartmix:')`), NO
+      enviamos el `contextUri` ni el `playbackMode='dj'` al backend. Si lo
+      hicieramos, el endpoint `/api/stats/recent-contexts` contamina el
+      Jump Back In con entradas SmartMix que al hacer click rompen
+      (cover de playlist + título de la canción que sonaba, vs el nombre
+      de la playlist real). El SmartMix queda persistido sólo localmente
+      via Dexie — para restauración cross-device cae a cola normal. */
   private buildLastPlaybackPayload(): LastPlaybackPayload | null {
     const cur = this.currentSong;
     if (!cur) return null;
@@ -1342,6 +1352,9 @@ class QueueManager {
         coverArt: s.coverArt ?? null,
         duration: s.duration
       }));
+    const isSmartMix =
+      this.playbackMode === 'dj' ||
+      (this.contextUri !== null && this.contextUri.startsWith('smartmix:'));
     const payload: LastPlaybackPayload = {
       songId: cur.id,
       title: cur.title,
@@ -1355,9 +1368,9 @@ class QueueManager {
       position: browser ? player.positionSec : 0,
       queue: queueItems,
       currentIndex: this.currentIndex,
-      playbackMode: this.playbackMode
+      playbackMode: isSmartMix ? 'normal' : this.playbackMode
     };
-    if (this.contextUri) payload.contextUri = this.contextUri;
+    if (!isSmartMix && this.contextUri) payload.contextUri = this.contextUri;
     return payload;
   }
 
