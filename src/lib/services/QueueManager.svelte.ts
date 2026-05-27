@@ -713,7 +713,9 @@ class QueueManager {
     this.persistState();
   }
 
-  /** Seek absoluto. Delega al engine via player. */
+  /** Seek absoluto. Delega al engine via player. El guard contra seek
+      durante crossfade vive en `player.seek` y `audioEngine.seek` (defensa
+      en profundidad) -- aqui solo normalizamos. */
   seekTo(timeSec: number): void {
     if (!browser) return;
     const dur = player.currentSong?.durationSec ?? 0;
@@ -721,7 +723,6 @@ class QueueManager {
       const normalized = Math.max(0, Math.min(1, timeSec / dur));
       player.seek(normalized);
     }
-    // Phase 2: prepareNextForCrossfade tras seek.
   }
 
   /** Flushea posición a Dexie sin debounce (típicamente onbeforeunload). */
@@ -1030,7 +1031,21 @@ class QueueManager {
   }
 
   onSeek(_to: number): void {
-    // TODO Phase 2: prepareNextForCrossfade tras seek (recomputa trigger time).
+    // Guards DJ tras seek -- ver `seekTo` para el bloqueo durante fade
+    // activo. Aqui, en flow normal (no firing):
+    //  - `preparedCrossfade` se MANTIENE: el config DJ no depende del
+    //    currentTime de A. Solo usa `bufferADuration` (duracion total),
+    //    el analisis estructural de A, y B's analysis + entryPoint. Un
+    //    seek HACIA ATRAS lejos del outro mantiene el prep listo para
+    //    cuando vuelvas a la zona de trigger. Seek HACIA ADELANTE entra
+    //    en la ventana de prepare o trigger -- el siguiente
+    //    onProgressUpdate dispara naturalmente.
+    //  - `prepareNext` (chain B cargado en el AudioEngine) tambien se
+    //    mantiene: misma URL, mismo startOffset.
+    //  - Edge case asumido: seek a remaining < totalTime sin preparedCrossfade
+    //    listo => prep async no llega a tiempo, se pierde el fade DJ y
+    //    onSongFinished hace next() normal. iOS cubre esto con analisis
+    //    pre-cargado al cargar la queue; web acepta el degradacion.
   }
 
   onError(): void {

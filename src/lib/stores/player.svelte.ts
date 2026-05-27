@@ -393,6 +393,13 @@ class PlayerStore {
 
   /** `normalizedProgress` ∈ [0, 1]. Convierte a segundos contra la duración. */
   seek(normalizedProgress: number) {
+    // Guard: si hay un crossfade activo, no movemos progress/positionSec
+    // ni delegamos al engine -- el slider del MiniPlayer / NowPlaying y los
+    // taps en lineas de lyrics se descartan silenciosamente durante el
+    // fade. El audioEngine.seek tiene el mismo guard como red de seguridad
+    // final; el de aqui evita el "saltito" visual donde la barra se mueve
+    // y luego rebota al siguiente progress tick.
+    if (audioEngine.isCrossfading) return;
     const p = Math.max(0, Math.min(1, normalizedProgress));
     this.progress = p;
     const dur = this.currentSong?.durationSec ?? audioEngine.duration ?? 0;

@@ -348,6 +348,14 @@ class AudioEngine {
 
   seek(timeSec: number): void {
     if (!this.chainA) return;
+    // Guard: durante cualquier crossfade activo (DJ con runCrossfadeConfig
+    // o equal-power con crossfade()) el runtime esta aplicando ramps de
+    // gain/EQ/rate en tiempo real sobre chain A y chain B. Mover el
+    // currentTime de A provoca clicks audibles, jumps de fase y descuadra
+    // el state del runtime (gainForPlayerA/B se calculan contra
+    // startFileTimeA fijado al inicio del fade). Mirror del iOS guard
+    // PlayerService.seek() durante isCrossfading.
+    if (this.isCrossfading) return;
     const clamped = Math.max(0, Math.min(timeSec, this.duration || timeSec));
     this.chainA.audio.currentTime = clamped;
     this.currentTime = clamped;
