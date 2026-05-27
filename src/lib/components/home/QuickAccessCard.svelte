@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
   import { MusicNote, Play } from 'phosphor-svelte';
+  import { createQuery } from '@tanstack/svelte-query';
   import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import { player, type PlaybackContext } from '$stores/player.svelte';
+  import * as nav from '$services/NavidromeService';
 
   type Props = HTMLAnchorAttributes & {
     /** ID del item — para detectar si el playback viene de aquí. */
@@ -28,6 +30,26 @@
   }: Props = $props();
 
   const isCurrent = $derived(player.isPlayingFrom(contextType, id));
+
+  // Para items playlist del Jump Back In, el backend a veces envia `title`
+  // con el nombre de la cancion en vez del nombre de la playlist (entries
+  // construidas desde scrobbles donde el title del scrobble es de la
+  // pista). Resolvemos el nombre real via Navidrome y override.
+  // Reutiliza la queryKey ['playlist', id] que ya consumen PlaylistCard y
+  // PlaylistDetail -- mismas fetches dedupeadas por TanStack.
+  const playlistQ = createQuery(() => ({
+    queryKey: ['playlist', id],
+    queryFn: () => nav.getPlaylist(id),
+    enabled: contextType === 'playlist' && !/^(mix|smart)-/.test(id),
+    staleTime: 60 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false
+  }));
+  const resolvedTitle = $derived(
+    contextType === 'playlist' && playlistQ.data?.name
+      ? playlistQ.data.name
+      : title
+  );
 
   let coverEl: HTMLDivElement | undefined = $state();
 
@@ -67,7 +89,7 @@
     {/if}
   </div>
 
-  <span class="title">{title}</span>
+  <span class="title">{resolvedTitle}</span>
 
   {#if !isCurrent}
     <span class="play-btn" aria-hidden="true">

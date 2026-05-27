@@ -55,6 +55,7 @@
   style:--play-bg-dynamic={bgColor}
   class="hero-play"
   class:collapsed
+  class:is-active={isActive}
   aria-label={collapsed ? (isActive ? 'Pausar' : 'Reproducir') : undefined}
 >
   {#if isActive}
@@ -113,6 +114,16 @@
       box-shadow var(--morph-duration) var(--morph-ease),
       filter var(--duration-fast) var(--ease-ios-default),
       transform var(--duration-fast) var(--ease-ios-default);
+  }
+
+  /* Width adaptativo al label: "Reproducir" (default) ocupa ~140px;
+     "Pausar" (isActive) ocupa ~108px. La misma transition de width que
+     usa el morph a círculo (var(--morph-duration)) anima fluido el
+     re-dimensionado cuando isActive cambia -- el look "homogeneo" del
+     hand-off con SmartMixButton. Mirror iOS `.frame(width: nil)` que
+     adapta al contenido. */
+  .hero-play.is-active:not(.collapsed) {
+    width: 108px;
   }
 
   .hero-play.collapsed {

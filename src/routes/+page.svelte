@@ -94,16 +94,29 @@
     staleTime: 60 * 1000
   }));
   const recentContexts = $derived(
-    (recentContextsQ.data ?? []).filter(
-      (ctx) =>
-        (ctx.type === 'album' || ctx.type === 'playlist' || ctx.type === 'artist') &&
-        // Doble defensa: aunque el type vuelva como 'playlist' (entradas
-        // legacy donde el backend resuelve smartmix:<id> hacia su playlist
-        // base), filtramos por el scheme del contextUri. El QueueManager
-        // ya no envia 'smartmix:' al backend a partir de ahora, pero las
-        // entradas anteriores siguen contaminando hasta que se purguen.
-        !ctx.contextUri.startsWith('smartmix:')
-    )
+    (recentContextsQ.data ?? [])
+      .filter(
+        (ctx) =>
+          (ctx.type === 'album' || ctx.type === 'playlist' || ctx.type === 'artist') &&
+          // Doble defensa: aunque el type vuelva como 'playlist' (entradas
+          // legacy donde el backend resuelve smartmix:<id> hacia su playlist
+          // base), filtramos por el scheme del contextUri. El QueueManager
+          // ya no envia 'smartmix:' al backend a partir de ahora, pero las
+          // entradas anteriores siguen contaminando hasta que se purguen.
+          !ctx.contextUri.startsWith('smartmix:')
+      )
+      // Sort defensivo por lastPlayedAt desc -- garantiza que la
+      // reproducción más reciente aparezca primera, independientemente del
+      // orden que devuelva el backend. Tras el scrobble (50% threshold) el
+      // ScrobbleService llama invalidateRecentContexts(); la query se
+      // refetchea y el sort coloca la entry de la última playlist/album
+      // escuchado al principio del carousel. Mirror del comportamiento iOS.
+      .slice()
+      .sort((a, b) => {
+        const ta = new Date(a.lastPlayedAt).getTime();
+        const tb = new Date(b.lastPlayedAt).getTime();
+        return tb - ta;
+      })
   );
 
   const topWeeklyQ = createQuery(() => ({

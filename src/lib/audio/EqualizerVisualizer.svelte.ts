@@ -45,15 +45,14 @@ function getBarProfile(numBands: number): number[] {
     case 3: return [0.88, 1.0, 0.82];
     case 4: return [0.82, 1.0, 0.95, 0.78];
     case 5: return [0.78, 0.92, 1.0, 0.9, 0.75];
-    // 6 bandas Apple Music style: perfil simétrico con dominio en el centro.
-    // Las barras del medio (mid + high-mid, posiciones 2-3) llegan al techo
-    // con voz/snare/instrumentos cálidos; los extremos (bass kick + aire/
-    // sibilancia) quedan cappeados al ~55% aunque la energía espectral
-    // bruta sea alta -- evita que un kick fuerte saque la barra 0 disparada
-    // mientras el resto está discreto, look "espectro plano" que NO es Apple.
-    // Apple concentra la actividad visual en el centro; extremos vibran
-    // discretos sin liderar nunca.
-    case 6: return [0.55, 0.85, 1.0, 1.0, 0.85, 0.55];
+    // 6 bandas Apple Music style: pirámide pronunciada para que el centro
+    // RESPIRE visualmente -- los mids (pos 2-3) saltan al techo con voz/
+    // snare/instrumentos cálidos, los intermedios (pos 1, 4) quedan a 70%,
+    // y los extremos (bass kick + aire/sibilancia) cappeados al 40% aunque
+    // la energía espectral bruta sea alta. Evita el look "espectro plano"
+    // y replica el comportamiento del Now Playing Indicator de Apple,
+    // donde las del medio dominan claramente sobre las laterales.
+    case 6: return [0.4, 0.7, 1.0, 1.0, 0.7, 0.4];
     default: return Array.from({ length: numBands }, () => 1.0);
   }
 }

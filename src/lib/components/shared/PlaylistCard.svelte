@@ -132,6 +132,13 @@
     }
     return owner ?? '';
   });
+
+  // En el contexto Jump Back In, el backend a veces envia `name` con el
+  // titulo de una cancion (entries derivadas de scrobble.title). Si la
+  // preview de Navidrome trae el nombre real, lo usamos como override.
+  // Para el resto de callers, previewQ.data?.name suele coincidir con la
+  // prop `name`, asi que el cambio es no-op.
+  const resolvedName = $derived(previewQ.data?.name ?? name);
 </script>
 
 <a
@@ -166,7 +173,7 @@
       <button
         type="button"
         class="play"
-        aria-label={`Reproducir ${name}`}
+        aria-label={`Reproducir ${resolvedName}`}
         onclick={handlePlayClick}
       >
         <Play size={14} weight="fill" />
@@ -174,7 +181,7 @@
     {/if}
   </div>
 
-  <p class="title">{name}</p>
+  <p class="title">{resolvedName}</p>
   <p class="subtitle">{subtitle}</p>
 </a>
 
