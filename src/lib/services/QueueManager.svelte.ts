@@ -1291,7 +1291,9 @@ class QueueManager {
       currentIndex: this.currentIndex,
       position: browser ? player.positionSec : 0,
       shuffleMode: this.shuffleMode,
-      repeatMode: this.repeatMode
+      repeatMode: this.repeatMode,
+      playbackMode: this.playbackMode,
+      contextUri: this.contextUri
     };
   }
 
@@ -1340,15 +1342,15 @@ class QueueManager {
   /** Construye el payload del PUT a partir del estado actual. Devuelve null
       si no hay current song (queue vacía / index inválido).
 
-      Anti-smartmix (regla 2026-05-09, espejo del ScrobbleService
-      `scrobbleContextUri`): si la cola activa es SmartMix
-      (`playbackMode==='dj'` y/o `contextUri.startsWith('smartmix:')`), NO
-      enviamos el `contextUri` ni el `playbackMode='dj'` al backend. Si lo
-      hicieramos, el endpoint `/api/stats/recent-contexts` contamina el
-      Jump Back In con entradas SmartMix que al hacer click rompen
-      (cover de playlist + título de la canción que sonaba, vs el nombre
-      de la playlist real). El SmartMix queda persistido sólo localmente
-      via Dexie — para restauración cross-device cae a cola normal. */
+      NOTA arquitectura: SÍ enviamos `playbackMode='dj'` y `contextUri='smartmix:<id>'`
+      cuando la cola activa es SmartMix. iOS hace lo mismo -- la persistencia
+      de lastPlayback alimenta el RESTORE cross-session/cross-device, no
+      `recentContexts` (Jump Back In). Esos dos endpoints son independientes:
+        - lastPlayback: snapshot completo de la cola + DJ state.
+        - recentContexts: agregado a partir de SCROBBLES, no de lastPlayback.
+      La protección contra contaminación del Jump Back In vive en
+      `ScrobbleService.scrobbleContextUri()`, que filtra smartmix: a la
+      hora de scrobblear. Mas defensa en frontend filtra por scheme. */
   private buildLastPlaybackPayload(): LastPlaybackPayload | null {
     const cur = this.currentSong;
     if (!cur) return null;
@@ -1367,9 +1369,6 @@ class QueueManager {
         coverArt: s.coverArt ?? null,
         duration: s.duration
       }));
-    const isSmartMix =
-      this.playbackMode === 'dj' ||
-      (this.contextUri !== null && this.contextUri.startsWith('smartmix:'));
     const payload: LastPlaybackPayload = {
       songId: cur.id,
       title: cur.title,
@@ -1383,9 +1382,9 @@ class QueueManager {
       position: browser ? player.positionSec : 0,
       queue: queueItems,
       currentIndex: this.currentIndex,
-      playbackMode: isSmartMix ? 'normal' : this.playbackMode
+      playbackMode: this.playbackMode
     };
-    if (!isSmartMix && this.contextUri) payload.contextUri = this.contextUri;
+    if (this.contextUri) payload.contextUri = this.contextUri;
     return payload;
   }
 
@@ -1423,6 +1422,23 @@ class QueueManager {
       this.shuffleMode = snap.shuffleMode;
       this.repeatMode = snap.repeatMode;
       this.pendingResumePosition = snap.position;
+      // Restore mode + contextUri con las mismas invariantes que el
+      // backend-restore: 'dj' solo se respeta si contextUri es SmartMix.
+      // Sin esto, un refresh de pestaña con SmartMix activo cargaba la
+      // queue pero perdía el DJ Mode hasta el siguiente clic en SmartMix.
+      const snapContextUri = snap.contextUri ?? null;
+      const snapMode: 'normal' | 'dj' =
+        snap.playbackMode === 'dj' ? 'dj' : 'normal';
+      if (
+        snapMode === 'dj' &&
+        snapContextUri !== null &&
+        snapContextUri.startsWith('smartmix:')
+      ) {
+        this.playbackMode = 'dj';
+      } else {
+        this.playbackMode = 'normal';
+      }
+      this.contextUri = snapContextUri;
       // No re-disparamos load — iOS tampoco lo hace. Pero SÍ sincronizamos
       // el `player` store con la metadata para que el MiniPlayer aparezca.
       // El primer click del usuario en play delega a `resumeFromRestore`.

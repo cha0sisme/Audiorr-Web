@@ -26,6 +26,14 @@ export type QueueSnapshot = {
   position: number;
   shuffleMode: boolean;
   repeatMode: RepeatMode;
+  /** Modo de la cola activa al persistir. Mirror iOS UserDefaults
+      `playbackMode`. Permite que un refresh de pestaña con SmartMix activo
+      re-arme el DJ Mode tras restore Dexie (sin esperar al backend). */
+  playbackMode?: 'normal' | 'dj';
+  /** URI canónico del contexto. Esquemas: `playlist:<id>`, `album:<id>`,
+      `artist:<id>`, `smartmix:<id>`. Junto con `playbackMode` permite
+      restaurar la sesión SmartMix completa. */
+  contextUri?: string | null;
   updatedAt: number;
 };
 
