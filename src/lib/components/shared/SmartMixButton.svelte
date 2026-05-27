@@ -59,6 +59,7 @@
 
   // ─── Handler único — mirror del Swift smartMixButton.action ────────────
   function handleClick() {
+    console.info('[DJ] SmartMixButton click — status=%s isSmartMixContext=%s', status, isSmartMixContext);
     if (isSmartMixContext) {
       player.toggle();
       return;
@@ -68,6 +69,12 @@
       return;
     }
     if (status === 'ready') {
+      // Mirror del resto de callers (PlaylistCard / PlaylistDetail / AlbumCard / etc):
+      // setear `player.context` ANTES de queueManager.play para que las cards
+      // de la playlist base muestren el EqualizerIcon durante el SmartMix.
+      // Sin esto, isPlayingFrom('playlist', id) devuelve false durante toda la
+      // sesion SmartMix.
+      player.context = { type: 'playlist', id: playlistId };
       queueManager.play(smartMixManager.generatedMix, 0, {
         playbackMode: 'dj',
         contextUri: `smartmix:${playlistId}`

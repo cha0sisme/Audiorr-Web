@@ -31,6 +31,7 @@
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
+  import { registerQueryClient } from '$services/query-bus';
 
   /** Rutas que se renderizan SIN shell (sin sidebar, sin mini player).
       Login es full-screen — el shell distrae. */
@@ -116,6 +117,10 @@
       }
     }
   });
+
+  // Expone el client a servicios plain-TS (ScrobbleService) que necesitan
+  // invalidar queries fuera del context de Svelte.
+  registerQueryClient(queryClient);
 
   /** Refresca `coverContentHash` de todas las playlists.
       Mirror de iOS `AppDelegate.swift:219 didBecomeActive`, que cubre tanto

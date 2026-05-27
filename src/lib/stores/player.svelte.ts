@@ -300,9 +300,17 @@ class PlayerStore {
   }
 
   /** ¿El playback actual viene de este contexto? Lo usan AlbumCard, PlaylistCard,
-      ArtistCard, QuickAccessCard para decidir si renderizan el equalizer. */
+      ArtistCard, QuickAccessCard para decidir si renderizan el equalizer.
+
+      Defensa SmartMix: la cola SmartMix de una playlist tambien debe marcar
+      la PlaylistCard base como "playing from". El contextUri es
+      `smartmix:<id>` y el `player.context` se setea a `{type:'playlist', id}`
+      desde SmartMixButton; este branch cubre tambien restores cross-device
+      donde el `context` puede no estar repoblado pero el contextUri si. */
   isPlayingFrom(type: NonNullable<PlaybackContext>['type'], id: string): boolean {
-    return this.context?.type === type && this.context?.id === id;
+    if (this.context?.type === type && this.context?.id === id) return true;
+    if (type === 'playlist' && this.contextUri === `smartmix:${id}`) return true;
+    return false;
   }
 
   /** ¿La cola activa es el SmartMix de esta playlist concreta? Mirror exacto

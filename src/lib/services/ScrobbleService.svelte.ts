@@ -28,6 +28,7 @@ import { player } from '$stores/player.svelte';
 import { scrobble as scrobbleNavidrome } from '$services/NavidromeService';
 import { recordScrobble, type ScrobblePayload } from '$services/scrobble';
 import { connectService } from '$services/ConnectService.svelte';
+import { invalidateRecentContexts } from '$services/query-bus';
 import type { PersistableSong } from '$services/QueueManager.svelte';
 
 // ============================================================================
@@ -158,6 +159,13 @@ class ScrobbleService {
     if (song) {
       const playedAt = new Date(this.startTime);
       const contextUri = this.scrobbleContextUri();
+      // El scrobble acaba de actualizar recentContexts en el backend. Invalidar
+      // la query TanStack para que Jump Back In refleje el nuevo item al
+      // siguiente acceso al home (o inmediato si el home esta montado).
+      // No invalidamos cuando no hay contextUri (scrobbles SmartMix / DJ mode
+      // tienen contextUri=null por scrobbleContextUri() y no generan
+      // recentContext en el backend, asi que no hay nada que refrescar).
+      if (contextUri) invalidateRecentContexts();
       if (connectService.hubConnected) {
         connectService.emitScrobble({
           songId: song.id,
