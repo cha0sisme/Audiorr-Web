@@ -205,6 +205,17 @@ class PlayerStore {
       });
     });
 
+    audioEngine.on('crossfadeend', (e) => {
+      if (e.type !== 'crossfadeend') return;
+      // El AudioEngine ya hizo el swap A↔B. QueueManager avanza currentIndex
+      // y sincroniza `player.currentSong` con el nuevo A. Sin este cableo,
+      // `djCrossfadeFiring` queda pegado a true tras el primer fade DJ y
+      // bloquea todos los crossfades posteriores.
+      void import('$services/QueueManager.svelte').then(({ queueManager }) => {
+        queueManager.onCrossfadeCompleted(e.startOffset);
+      });
+    });
+
     audioEngine.on('error', (e) => {
       if (e.type !== 'error') return;
       console.error('[player] AudioEngine error:', e.message, e.code);

@@ -353,6 +353,9 @@ class QueueManager {
     this.currentIndex = idx;
     this.playbackMode = options.playbackMode ?? 'normal';
     this.contextUri = options.contextUri ?? null;
+    if (this.playbackMode === 'dj') {
+      console.info('[DJ] queue armed — mode=dj contextUri=%s tracks=%d', this.contextUri, songs.length);
+    }
 
     if (this.shuffleMode) this.applyShuffle(true);
 
@@ -891,6 +894,7 @@ class QueueManager {
         remaining > 0 &&
         remaining <= PREPARE_LEAD
       ) {
+        console.info('[DJ] prepare window — remaining=%ss duration=%ss', remaining.toFixed(1), _duration.toFixed(1));
         void this.prepareCrossfadeIfDJ(_duration);
       }
       // Trigger cuando estamos dentro de `totalTime` del final. Doble
@@ -901,6 +905,7 @@ class QueueManager {
         remaining > 0 &&
         remaining <= this.preparedCrossfade.config.totalTime
       ) {
+        console.info('[DJ] trigger — remaining=%ss totalTime=%ss', remaining.toFixed(2), this.preparedCrossfade.config.totalTime.toFixed(2));
         void this.triggerDjCrossfade();
       }
     }
@@ -921,10 +926,14 @@ class QueueManager {
     if (this.djPreparing) return;
     const current = this.currentSong;
     const nextIdx = this.peekNextIndex();
-    if (current === null || nextIdx === null) return;
+    if (current === null || nextIdx === null) {
+      console.info('[DJ] prep skip — no current or no next (last track / queue empty)');
+      return;
+    }
     const next = this.queue[nextIdx];
     if (next === undefined) return;
     this.djPreparing = true;
+    console.info('[DJ] prep start — A=%s B=%s', current.id, next.id);
     try {
       const [{ analyzeSong }, { getStreamUrl }, { analysisResultToSongAnalysis }, { calculateCrossfadeConfig }] =
         await Promise.all([
@@ -935,7 +944,10 @@ class QueueManager {
         ]);
       const streamA = getStreamUrl(current.id);
       const streamB = getStreamUrl(next.id);
-      if (!streamA || !streamB) return;
+      if (!streamA || !streamB) {
+        console.warn('[DJ] prep abort — streamA=%s streamB=%s', !!streamA, !!streamB);
+        return;
+      }
       const [analysisA, analysisB] = await Promise.all([
         analyzeSong({ songId: current.id, streamUrl: streamA, duration: durationA }),
         analyzeSong({ songId: next.id, streamUrl: streamB, duration: next.duration })
@@ -958,8 +970,11 @@ class QueueManager {
         })
       });
       this.preparedCrossfade = { config, nextSongId: next.id };
+      console.info('[DJ] prep ready — type=%s fadeDur=%ss totalTime=%ss entry=%ss',
+        config.transitionType, config.fadeDuration.toFixed(2),
+        config.totalTime.toFixed(2), config.entryPoint.toFixed(2));
     } catch (err) {
-      console.warn('[QueueManager] DJ crossfade prep failed — fallback al avance natural', err);
+      console.warn('[DJ] prep failed — fallback al avance natural', err);
     } finally {
       this.djPreparing = false;
     }
