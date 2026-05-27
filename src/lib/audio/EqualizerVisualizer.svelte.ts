@@ -45,11 +45,15 @@ function getBarProfile(numBands: number): number[] {
     case 3: return [0.88, 1.0, 0.82];
     case 4: return [0.82, 1.0, 0.95, 0.78];
     case 5: return [0.78, 0.92, 1.0, 0.9, 0.75];
-    // 6 bandas: bass / low-mid / mid / high-mid / presencia / aire.
-    // Líder en mid (1.0), asimetría hacia el centro como Apple. Las
-    // bandas extremas (sub-bass + air) un punto por debajo para evitar
-    // saturación visual con kicks fuertes o sibilancia agresiva.
-    case 6: return [0.82, 0.95, 1.0, 0.95, 0.85, 0.75];
+    // 6 bandas Apple Music style: perfil simétrico con dominio en el centro.
+    // Las barras del medio (mid + high-mid, posiciones 2-3) llegan al techo
+    // con voz/snare/instrumentos cálidos; los extremos (bass kick + aire/
+    // sibilancia) quedan cappeados al ~55% aunque la energía espectral
+    // bruta sea alta -- evita que un kick fuerte saque la barra 0 disparada
+    // mientras el resto está discreto, look "espectro plano" que NO es Apple.
+    // Apple concentra la actividad visual en el centro; extremos vibran
+    // discretos sin liderar nunca.
+    case 6: return [0.55, 0.85, 1.0, 1.0, 0.85, 0.55];
     default: return Array.from({ length: numBands }, () => 1.0);
   }
 }
@@ -149,14 +153,17 @@ class EqualizerVisualizer {
         // dB del AnalyserNode, los beats son drásticamente visibles.
         const enhanced = Math.pow(avg, 0.45);
         const prev = levels[b]!;
-        // Envelope follower MUY reactivo:
-        // - Attack 95% — prácticamente instant, sin lag perceptible.
-        // - Release 30% por frame — decay visible en ~3-4 frames (~60 ms),
-        //   las barras BAJAN drásticamente entre beats.
+        // Envelope follower Apple-style:
+        // - Attack 95% -- prácticamente instant en el beat, sin lag.
+        // - Release 12% por frame -- decay perceptible en ~10 frames
+        //   (~160 ms a 60 fps). Las barras "respiran" entre beats en vez
+        //   de caer pico-cero (efecto VU meter). Es la diferencia visual
+        //   clave entre el Now Playing Indicator de Apple Music y un
+        //   visualizer industrial: Apple suaviza, no martillea.
         if (enhanced > prev) {
           levels[b] = prev * 0.05 + enhanced * 0.95;
         } else {
-          levels[b] = prev * 0.7 + enhanced * 0.3;
+          levels[b] = prev * 0.88 + enhanced * 0.12;
         }
       }
     }
