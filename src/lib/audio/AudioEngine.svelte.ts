@@ -815,16 +815,22 @@ class AudioEngine {
 
   private onAudioEnded = () => {
     if (this.endedHandled) return;
+    // Durante un crossfade DJ el <audio> del chain saliente alcanza su
+    // duracion natural y dispara `ended` mientras el fade aun esta en curso.
+    // En ese caso: NO emitir 'ended' (impediria que QueueManager hiciera
+    // next() antes del onCrossfadeCompleted -- index quedaria desfasado),
+    // NO parar el progressTimer ni isPlaying (el chain B sigue sonando y
+    // tras el swap pasara a ser chain A; el tick() necesita seguir leyendo
+    // para que la barra de progreso y el tiempo del MiniPlayer se actualicen
+    // con la cancion entrante). Solo marcamos endedHandled para que no se
+    // re-procese -- swapChainsAfterCrossfade lo resetea para el nuevo chainA.
+    if (this.isCrossfading) {
+      this.endedHandled = true;
+      return;
+    }
     this.endedHandled = true;
     this.isPlaying = false;
     this.stopProgressTimer();
-    // Durante un crossfade DJ el <audio> del chain saliente alcanza su
-    // duracion natural y dispara `ended` mientras el fade aun esta en curso.
-    // Si propagamos, el QueueManager hace next() (currentIndex++) ANTES del
-    // onCrossfadeCompleted que tambien avanza -- index queda +1 desfasado
-    // respecto al audio que realmente suena (chain B post-swap). El tick()
-    // paranoia ya filtra por isCrossfading; aqui replicamos el mismo guard.
-    if (this.isCrossfading) return;
     this.emit({ type: 'ended' });
   };
 
