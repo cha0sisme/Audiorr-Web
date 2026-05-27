@@ -234,6 +234,13 @@ class QueueManager {
   /** True cuando la fetch de análisis para el siguiente trío está en
       flight. Evita reentry en `prepareCrossfadeIfDJ()`. */
   private djPreparing = false;
+  /** Token monotónico para invalidar preparaciones en vuelo cuando el
+      usuario hace seek (`onSeek` lo incrementa). Cuando `prepareCrossfadeIfDJ`
+      termina su fetch async, comprueba que el token sigue vigente antes de
+      escribir `preparedCrossfade` -- si no, descarta el resultado (era de
+      una posicion ya superada). Mirror del patron iOS de re-calculo
+      continuo del trigger tras cada seek. */
+  private djPrepToken = 0;
   /** Si true, los próximos save al backend se suprimen — usado durante el
       restore para evitar el loop "lo que acabamos de leer del backend lo
       volvemos a escribir". El flag se limpia tras el primer save real
@@ -941,7 +948,12 @@ class QueueManager {
     const next = this.queue[nextIdx];
     if (next === undefined) return;
     this.djPreparing = true;
-    console.info('[DJ] prep start — A=%s B=%s', current.id, next.id);
+    // Capturar token al iniciar la fetch. Si el usuario hace seek mientras
+    // los await estan en vuelo, `onSeek` incrementa `djPrepToken` y al
+    // resolver descartaremos el resultado (su config se computo con la
+    // posicion anterior).
+    const myToken = this.djPrepToken;
+    console.info('[DJ] prep start — A=%s B=%s token=%d', current.id, next.id, myToken);
     try {
       const [{ analyzeSong }, { getStreamUrl }, { analysisResultToSongAnalysis }, { calculateCrossfadeConfig }] =
         await Promise.all([
@@ -960,6 +972,14 @@ class QueueManager {
         analyzeSong({ songId: current.id, streamUrl: streamA, duration: durationA }),
         analyzeSong({ songId: next.id, streamUrl: streamB, duration: next.duration })
       ]);
+      // Guard tras await: si el token cambio mientras esperabamos al
+      // backend, el seek invalido este prep -- descartamos sin escribir
+      // preparedCrossfade. El proximo onProgressUpdate disparara otro
+      // prepareCrossfadeIfDJ con la posicion actual.
+      if (myToken !== this.djPrepToken) {
+        console.info('[DJ] prep stale — discarding (seek mid-fetch)');
+        return;
+      }
       const songA = analysisResultToSongAnalysis(analysisA, durationA);
       const songB = analysisResultToSongAnalysis(analysisB, next.duration);
       const config = calculateCrossfadeConfig({
@@ -977,6 +997,12 @@ class QueueManager {
           replayGainLinear: next.replayGainMultiplier
         })
       });
+      // Segundo guard tras el prepareNext (otro await interno posible) -- si
+      // un seek llego en ese instante, descartamos sin asignar.
+      if (myToken !== this.djPrepToken) {
+        console.info('[DJ] prep stale — discarding (seek post-prepareNext)');
+        return;
+      }
       this.preparedCrossfade = { config, nextSongId: next.id };
       console.info('[DJ] prep ready — type=%s fadeDur=%ss totalTime=%ss entry=%ss',
         config.transitionType, config.fadeDuration.toFixed(2),
@@ -1038,21 +1064,28 @@ class QueueManager {
   }
 
   onSeek(_to: number): void {
-    // Guards DJ tras seek -- ver `seekTo` para el bloqueo durante fade
-    // activo. Aqui, en flow normal (no firing):
-    //  - `preparedCrossfade` se MANTIENE: el config DJ no depende del
-    //    currentTime de A. Solo usa `bufferADuration` (duracion total),
-    //    el analisis estructural de A, y B's analysis + entryPoint. Un
-    //    seek HACIA ATRAS lejos del outro mantiene el prep listo para
-    //    cuando vuelvas a la zona de trigger. Seek HACIA ADELANTE entra
-    //    en la ventana de prepare o trigger -- el siguiente
-    //    onProgressUpdate dispara naturalmente.
-    //  - `prepareNext` (chain B cargado en el AudioEngine) tambien se
-    //    mantiene: misma URL, mismo startOffset.
-    //  - Edge case asumido: seek a remaining < totalTime sin preparedCrossfade
-    //    listo => prep async no llega a tiempo, se pierde el fade DJ y
-    //    onSongFinished hace next() normal. iOS cubre esto con analisis
-    //    pre-cargado al cargar la queue; web acepta el degradacion.
+    // Re-calculo continuo del trigger DJ tras cada seek -- mirror iOS.
+    // Algunos parametros del config (notablemente `applyBeatSync` cross-phase
+    // A↔B en DJ mode) SI dependen del currentTime de A. Tras un seek el
+    // entryPoint/totalTime/anticipation pueden cambiar. Estrategia:
+    //   1. Bump del token -- invalida cualquier prep async en vuelo (el
+    //      handler de prepareCrossfadeIfDJ comprueba el token tras los
+    //      awaits y descarta sin asignar si cambio).
+    //   2. Vaciar preparedCrossfade -- el siguiente onProgressUpdate vera
+    //      el slot libre y, si remaining <= PREPARE_LEAD (35s), disparara
+    //      un prep nuevo con la posicion actualizada. Si el seek nos saca
+    //      de la ventana de outro, el prep se queda sin disparar hasta que
+    //      volvamos.
+    //   3. djCrossfadeFiring no se toca: durante un fade ya activo, el
+    //      guard en audioEngine.seek descarta el seek antes de llegar aqui.
+    // Edge case asumido: seek a remaining < totalTime sin prep listo =>
+    // fetch async no llega a tiempo y se pierde el fade DJ; onSongFinished
+    // hace next() normal. iOS cubre esto con analisis pre-cargado al armar
+    // la queue; web acepta la degradacion.
+    if (this.playbackMode !== 'dj') return;
+    this.djPrepToken += 1;
+    this.preparedCrossfade = undefined;
+    console.info('[DJ] seek — prep invalidado (token=%d)', this.djPrepToken);
   }
 
   onError(): void {
