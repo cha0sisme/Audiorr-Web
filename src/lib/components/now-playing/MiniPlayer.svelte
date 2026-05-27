@@ -192,7 +192,7 @@
            del Now Playing Indicator de iOS Music — 3 barras delgadas,
            bottom-anchored, envelope follower con release lento. -->
       <span class="eq-slot" aria-hidden={!isPlaying}>
-        <EqualizerIcon bars={4} height={19} barWidth={3} />
+        <EqualizerIcon height={19} barWidth={3} />
       </span>
     </div>
 
@@ -398,7 +398,7 @@
          Tamaño un poco menor que en expanded para que case con el footprint
          del pill (60px tall). -->
     <span class="eq-slot eq-slot-compact" aria-hidden={!isPlaying}>
-      <EqualizerIcon bars={4} height={14} barWidth={2} />
+      <EqualizerIcon height={14} />
     </span>
 
     <div class="compact-controls">
@@ -650,8 +650,9 @@
     gap: 4px;
     height: 12px;
     margin-top: 2px;
-    font-size: 12px;
-    font-weight: 400;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     color: var(--automix-text);
     opacity: 0;
     transition: opacity var(--duration-fast) var(--ease-ios-default);
@@ -728,8 +729,9 @@
     align-items: center;
     gap: 4px;
     margin: 0;
-    font-size: 11px;
-    font-weight: 400;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     line-height: 1.25;
     color: var(--automix-text);
     overflow: hidden;

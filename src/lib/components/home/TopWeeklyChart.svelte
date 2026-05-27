@@ -198,11 +198,7 @@
         </CoverImage>
         {#if isCurrent}
           <span class="cover-overlay" aria-hidden="true">
-            <EqualizerIcon
-              color="#fff"
-              height={14}
-              barWidth={2}
-            />
+            <EqualizerIcon color="#fff" height={14} />
           </span>
         {/if}
       </div>

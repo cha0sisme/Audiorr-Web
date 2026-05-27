@@ -35,7 +35,9 @@
 
 <style>
   .wave {
-    display: inline-flex;
+    /* inline-block (no flex) para que `letter-spacing` del padre se aplique
+       entre los .char individuales (los flex items ignoran letter-spacing). */
+    display: inline-block;
     color: inherit;
   }
 

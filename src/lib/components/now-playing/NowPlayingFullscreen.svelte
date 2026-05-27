@@ -1658,8 +1658,9 @@
     gap: 4px;
     height: 14px;
     margin-top: -2px;
-    font-size: var(--text-xs);
-    font-weight: 500;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     color: rgba(255, 255, 255, 0.85);
     opacity: 0;
     transition: opacity var(--duration-fast) var(--ease-ios-default);

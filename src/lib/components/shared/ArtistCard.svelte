@@ -54,11 +54,7 @@
 
     {#if isCurrent}
       <div class="playing-overlay" aria-hidden="true">
-        <EqualizerIcon
-          color="#fff"
-          height={18}
-          barWidth={2}
-        />
+        <EqualizerIcon color="#fff" height={18} />
       </div>
     {/if}
   </div>

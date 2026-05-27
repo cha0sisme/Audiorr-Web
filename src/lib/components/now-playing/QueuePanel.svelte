@@ -97,11 +97,7 @@
               {/snippet}
             </CoverImage>
             <span class="qp-thumb-overlay">
-              <EqualizerIcon
-                color="#fff"
-                height={14}
-                barWidth={2}
-              />
+              <EqualizerIcon color="#fff" height={14} />
             </span>
           </span>
           <span class="qp-meta">

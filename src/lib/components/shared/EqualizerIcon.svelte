@@ -3,10 +3,12 @@
    * EqualizerIcon — réplica 1:1 del Now Playing Indicator de iOS 26 Apple
    * Music (Control Center, Lock Screen, Dynamic Island).
    *
-   * Geometría (calibrada contra el screenshot oficial WWDC25):
-   *  - 4 barras capsule (rounded ambos extremos)
+   * Geometría (calibrada contra el screenshot oficial WWDC25 — variante 6
+   * bandas para más resolución espectral: bass, low-mid, mid, high-mid,
+   * presencia, aire):
+   *  - 6 barras capsule (rounded ambos extremos)
    *  - Alineadas al CENTRO vertical → crecen simétricamente desde el medio
-   *  - Anchura uniforme, gap mínimo (1px)
+   *  - Anchura uniforme, gap proporcional (ratio 1:1)
    *  - Cada barra tiene altura MÁXIMA distinta (perfil per-bar en el
    *    visualizer) → nunca se ve uniforme, "líderes" y "cortas"
    *
@@ -19,7 +21,7 @@
   import { equalizerVisualizer } from '$lib/audio/EqualizerVisualizer.svelte';
 
   type Props = {
-    /** Número de barras. iOS 26 Now Playing Indicator usa 4 — canónico. */
+    /** Número de barras. Default 6 — más resolución espectral (bass→aire). */
     bars?: number;
     /** Altura del icono en px. iOS usa ~14-16. */
     height?: number;
@@ -32,12 +34,12 @@
   };
 
   let {
-    bars = 4,
+    bars = 6,
     height = 14,
     // Anchura ENTERA: con 2.5 el browser redondea distinto por barra y los
-    // gaps quedan visualmente irregulares (típicamente entre la 2ª y 3ª).
-    // 3px también casa mejor con el screenshot oficial iOS 26.
-    barWidth = 3,
+    // gaps quedan visualmente irregulares. Con 6 barras default barWidth=2
+    // mantiene el ancho total cercano al de 4 barras × 3px del diseño previo.
+    barWidth = 2,
     color,
     label = 'Reproduciendo'
   }: Props = $props();
@@ -75,11 +77,11 @@
   .eq {
     display: inline-flex;
     align-items: center;
-    /* Gap proporcional al ancho de barra (ratio ~1.2:1) — paridad con la
-       captura oficial iOS 26. Con 2px las barras se ven amontonadas y el
-       subpixel rounding del border-radius capsule hace que los gaps
-       parezcan irregulares; con 3px+ el espacio es claramente uniforme. */
-    gap: 3px;
+    /* Gap proporcional al ancho de barra (ratio 1:1) — con 6 barras el
+       diseño Apple pide más densidad de información sin amontonar. Igualar
+       gap a barWidth (`var(--eq-bw)`) mantiene el ritmo visual uniforme
+       independientemente del tamaño del icono. */
+    gap: var(--eq-bw);
     height: var(--eq-h);
     line-height: 1;
     vertical-align: middle;

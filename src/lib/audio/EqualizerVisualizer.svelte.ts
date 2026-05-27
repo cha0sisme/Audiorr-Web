@@ -45,6 +45,11 @@ function getBarProfile(numBands: number): number[] {
     case 3: return [0.88, 1.0, 0.82];
     case 4: return [0.82, 1.0, 0.95, 0.78];
     case 5: return [0.78, 0.92, 1.0, 0.9, 0.75];
+    // 6 bandas: bass / low-mid / mid / high-mid / presencia / aire.
+    // Líder en mid (1.0), asimetría hacia el centro como Apple. Las
+    // bandas extremas (sub-bass + air) un punto por debajo para evitar
+    // saturación visual con kicks fuertes o sibilancia agresiva.
+    case 6: return [0.82, 0.95, 1.0, 0.95, 0.85, 0.75];
     default: return Array.from({ length: numBands }, () => 1.0);
   }
 }
@@ -201,6 +206,14 @@ class EqualizerVisualizer {
       case 3: return [[1, 4], [4, 16], [16, 70]];
       case 4: return [[1, 3], [3, 9], [9, 27], [27, 70]];
       case 5: return [[1, 3], [3, 7], [7, 16], [16, 36], [36, 70]];
+      // 6 bandas (sampleRate ~44.1-48 kHz, fftSize=256, ~187 Hz/bin):
+      //  - Bass+kick      bins [1,3)   ~187-561 Hz  — kick (60-150), bajo (80-250).
+      //  - Low-mid        bins [3,6)   ~561-1122 Hz — voz baja, calidez instr.
+      //  - Mid            bins [6,12)  ~1122-2244 Hz — voz fundamental, snare body.
+      //  - High-mid       bins [12,22) ~2244-4114 Hz — presencia, claridad voz.
+      //  - Presencia      bins [22,40) ~4114-7480 Hz — brillo, snare crack.
+      //  - Aire/cymbals   bins [40,70) ~7480-13094 Hz — hi-hat, "air", sibilancia.
+      case 6: return [[1, 3], [3, 6], [6, 12], [12, 22], [22, 40], [40, 70]];
     }
     // Fallback log-spaced para counts no canónicos.
     const minBin = 1;

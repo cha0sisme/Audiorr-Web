@@ -220,23 +220,14 @@
       </CoverImage>
       {#if isCurrent}
         <span class="cover-overlay">
-          <EqualizerIcon
-            bars={4}
-            color="#fff"
-            height={14}
-            barWidth={2}
-          />
+          <EqualizerIcon color="#fff" height={14} />
         </span>
       {/if}
     </span>
   {:else}
     <span class="indicator" aria-hidden="true">
       {#if isCurrent}
-        <EqualizerIcon
-          bars={4}
-          height={14}
-          barWidth={2}
-        />
+        <EqualizerIcon height={14} />
       {:else if hovered}
         <Play size={14} weight="fill" />
       {:else}
