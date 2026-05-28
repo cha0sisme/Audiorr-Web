@@ -6,14 +6,14 @@
  *   GET  /api/canvas/generate/jobs/:id     → GenerationJob | 404
  *   GET  /api/canvas/generate/jobs         → { jobs: GenerationJob[] }
  *
- * Hace fetch directo (no usa `backendService.post`) porque necesitamos
- * leer el body del 409 para distinguir `existingCanvas` (modal de
- * confirmación) de `existingJob` (info "ya hay job en curso") y propagar
- * mensajes 400/404/503 al usuario.
+ * Usa `backendService.authedFetch` (no los helpers tipados `get`/`post`)
+ * porque necesitamos leer el body del 409 para distinguir `existingCanvas`
+ * (modal de confirmación) de `existingJob` (info "ya hay job en curso") y
+ * propagar mensajes 400/404/503 al usuario. authedFetch aporta el Bearer +
+ * el refresh-on-401; el parseo de errores sigue siendo manual aquí.
  */
 
-import { browser } from '$app/environment';
-import { env } from '$env/dynamic/public';
+import { backendService } from '$services/BackendService.svelte';
 import { credentials } from '$stores/credentials.svelte';
 import {
   CanvasEntrySchema,
@@ -26,25 +26,6 @@ import {
   type CanvasGenerationJob,
   type CanvasGenerationJobList
 } from '$types/backend';
-
-function resolveBaseUrl(): string {
-  if (import.meta.env.DEV) return '';
-  if (browser && window.__AUDIORR_BACKEND_URL__) {
-    return window.__AUDIORR_BACKEND_URL__.replace(/\/+$/, '');
-  }
-  const fromEnv = env.PUBLIC_BACKEND_URL;
-  if (fromEnv) return fromEnv.replace(/\/+$/, '');
-  return '';
-}
-
-/** Lazy getter — mismo motivo que BackendService.baseUrl: si lo
-    evaluamos a nivel module, en el SSR de adapter-node `browser` es
-    `false` y `window.__AUDIORR_BACKEND_URL__` no existe, dejando BASE
-    congelado en '' y mandando POST /api/canvas/generate al SvelteKit
-    server (404) en lugar del backend. */
-function BASE(): string {
-  return resolveBaseUrl();
-}
 
 export interface CanvasGenerateInput {
   songId: string;
@@ -111,12 +92,10 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 export async function enqueueCanvasJob(
   input: CanvasGenerateInput
 ): Promise<CanvasGenerateEnqueued> {
-  const url = `${BASE()}/api/canvas/generate`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await backendService.authedFetch('/api/canvas/generate', {
       method: 'POST',
-      credentials: 'omit',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(input)
     });
@@ -178,10 +157,12 @@ export async function enqueueCanvasJob(
 /** Estado de un job. 404 → null. Otros errores tiran `CanvasGenerateError`
     con `kind: 'server'`. */
 export async function getCanvasJob(jobId: string): Promise<CanvasGenerationJob | null> {
-  const url = `${BASE()}/api/canvas/generate/jobs/${encodeURIComponent(jobId)}`;
   let res: Response;
   try {
-    res = await fetch(url, { credentials: 'omit', headers: authHeaders() });
+    res = await backendService.authedFetch(
+      `/api/canvas/generate/jobs/${encodeURIComponent(jobId)}`,
+      { headers: authHeaders() }
+    );
   } catch (e) {
     throw new CanvasGenerateError(
       'server',
@@ -198,10 +179,11 @@ export async function getCanvasJob(jobId: string): Promise<CanvasGenerationJob |
 
 /** Lista jobs en memoria del backend. Útil para histórico reciente. */
 export async function listCanvasJobs(): Promise<CanvasGenerationJobList> {
-  const url = `${BASE()}/api/canvas/generate/jobs`;
   let res: Response;
   try {
-    res = await fetch(url, { credentials: 'omit', headers: authHeaders() });
+    res = await backendService.authedFetch('/api/canvas/generate/jobs', {
+      headers: authHeaders()
+    });
   } catch (e) {
     throw new CanvasGenerateError(
       'server',

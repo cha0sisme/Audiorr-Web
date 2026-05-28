@@ -88,9 +88,9 @@
     close();
     goto('/settings');
   }
-  function handleLogout() {
+  async function handleLogout() {
     close();
-    disconnect();
+    await disconnect();
     goto('/login', { replaceState: true });
   }
 

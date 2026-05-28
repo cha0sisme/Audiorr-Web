@@ -23,7 +23,7 @@ import { credentials } from '$stores/credentials.svelte';
 import { backendService } from '$services/BackendService.svelte';
 import { player, type Song } from '$stores/player.svelte';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
-import { getCoverArtUrl } from '$services/NavidromeService';
+import { getCoverArtUrl, ensureBackendSession } from '$services/NavidromeService';
 import { diagnosticsBus } from '$stores/diagnostics-bus.svelte';
 import { TransitionRecordSchema } from '$types/diagnostics';
 
@@ -81,8 +81,6 @@ type RemoteCommandPayload = {
   targetDeviceId?: string;
   serverTime?: number;
 };
-
-type LoginResponse = { token: string; username: string; expiresIn?: number };
 
 // ============================================================================
 // DeviceId — sessionStorage por pestaña (cada pestaña es un device propio).
@@ -427,33 +425,12 @@ class ConnectService {
   // Auth + WebSocket
   // ==========================================================================
 
-  /** POST /api/auth/login → sessionToken para el handshake socket.io.
-      El login en NavidromeService (commit c0e74c7) tira un POST gemelo para
-      persistir creds en el backend pero no expone el token al caller — aquí
-      hacemos otro request explícito que sí lo lee. */
+  /** sessionToken Bearer para el handshake socket.io. Reutiliza la sesión
+      acuñada por el login web (`authToken` store); si no existe (recarga tras
+      migración), `ensureBackendSession` la re-acuña. Antes hacía un segundo
+      `/api/auth/login` redundante — ahora hay una sola fuente de verdad. */
   private async authenticate(): Promise<string> {
-    const c = credentials.current;
-    if (!c) throw new Error('No hay credenciales Navidrome');
-
-    const url = `${backendService.baseUrl}/api/auth/login`;
-    const res = await fetch(url, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serverUrl: c.serverUrl,
-        username: c.username,
-        token: c.token,
-        salt: c.salt
-      })
-    });
-
-    if (!res.ok) {
-      throw new Error(`Login failed: ${res.status} ${res.statusText}`);
-    }
-    const data = (await res.json()) as LoginResponse;
-    if (!data?.token) throw new Error('Login response missing token');
-    return data.token;
+    return ensureBackendSession();
   }
 
   private openSocket(token: string): void {

@@ -12,6 +12,27 @@
   let password = $state('');
   let connecting = $state(false);
   let connectError = $state<string | undefined>();
+  /** Segundos restantes de lockout tras un 429 del backend (brute-force
+      guard). Mientras > 0, el submit queda deshabilitado y mostramos cuenta
+      atrás en vez de re-permitir clics que el backend rechazaría igual. */
+  let cooldown = $state(0);
+  let cooldownTimer: ReturnType<typeof setInterval> | null = null;
+
+  function startCooldown(seconds: number) {
+    cooldown = seconds;
+    if (cooldownTimer) clearInterval(cooldownTimer);
+    cooldownTimer = setInterval(() => {
+      cooldown -= 1;
+      if (cooldown <= 0 && cooldownTimer) {
+        clearInterval(cooldownTimer);
+        cooldownTimer = null;
+      }
+    }, 1000);
+  }
+
+  $effect(() => () => {
+    if (cooldownTimer) clearInterval(cooldownTimer);
+  });
 
   // Si ya estás conectado, te mandamos al home — no tiene sentido re-mostrar
   // el form. Click "Desconectar" en /settings te trae acá de vuelta.
@@ -23,7 +44,7 @@
 
   async function handleConnect(e: SubmitEvent) {
     e.preventDefault();
-    if (connecting) return;
+    if (connecting || cooldown > 0) return;
     connecting = true;
     connectError = undefined;
     try {
@@ -35,6 +56,15 @@
       );
       goto('/', { replaceState: true });
     } catch (err) {
+      // Brute-force guard del backend: respetamos el Retry-After en vez de
+      // dejar al usuario martillear el botón contra un lockout.
+      if (err instanceof NavidromeError && err.code === 429) {
+        const seconds = err.retryAfter ?? 30;
+        startCooldown(seconds);
+        connectError = `Demasiados intentos. Reintenta en ${seconds} segundos`;
+        toasts.error('Demasiados intentos', `Espera ${seconds} segundos antes de reintentar`);
+        return;
+      }
       const msg =
         err instanceof NavidromeError
           ? err.message
@@ -84,8 +114,14 @@
       />
 
       <div class="actions">
-        <Button type="submit" loading={connecting} size="lg">
-          {connecting ? 'Conectando…' : 'Conectar'}
+        <Button type="submit" loading={connecting} disabled={cooldown > 0} size="lg">
+          {#if cooldown > 0}
+            Reintenta en {cooldown}s
+          {:else if connecting}
+            Conectando…
+          {:else}
+            Conectar
+          {/if}
         </Button>
       </div>
     </form>

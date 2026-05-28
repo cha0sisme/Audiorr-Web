@@ -38,6 +38,7 @@ import {
   type StructuredLyrics
 } from '$types/navidrome';
 import { credentials, type NavidromeCredentials } from '$stores/credentials.svelte';
+import { authToken } from '$stores/auth-token.svelte';
 
 const CLIENT_NAME = 'Audiorr-Web';
 const API_VERSION = '1.16.1';
@@ -47,14 +48,35 @@ const API_VERSION = '1.16.1';
 // ============================================================================
 
 export class NavidromeError extends Error {
+  /** Segundos a esperar (header `Retry-After`) en errores 429 del login
+      backend. Undefined si no aplica. */
+  retryAfter?: number;
   constructor(
     public code: number,
-    message: string
+    message: string,
+    retryAfter?: number
   ) {
     super(message);
     this.name = 'NavidromeError';
+    if (retryAfter !== undefined) this.retryAfter = retryAfter;
   }
 }
+
+// ============================================================================
+// Login backend (sesión Bearer)
+// ============================================================================
+
+/** Shape que devuelve `POST /api/auth/login` según la especificación del
+    Audiorr Backend. `refreshExpiresIn` se ignora — el web solo necesita la
+    caducidad del sessionToken. */
+const BackendLoginResponseSchema = z.object({
+  token: z.string(),
+  refreshToken: z.string(),
+  isAdmin: z.boolean(),
+  expiresIn: z.number(),
+  refreshExpiresIn: z.number().optional(),
+  username: z.string().optional()
+});
 
 // ============================================================================
 // Helpers
@@ -150,16 +172,38 @@ export async function connect(input: {
   const env = await call(candidate, 'ping');
   const envelope = SubsonicEnvelopeSchema.parse(env);
 
-  credentials.set(candidate);
+  // Sesión Bearer del backend. A diferencia del flujo anterior (non-fatal
+  // console.warn), ahora es BLOQUEANTE: sin sessionToken las features bundle
+  // y las rutas admin fallarían silenciosamente. Persistimos credentials Y
+  // authToken solo si AMBOS pasos validan, para que un fallo del backend deje
+  // al usuario en /login con un mensaje claro en vez de medio-logueado.
+  const session = await backendLogin(candidate);
 
-  // Notifica al backend Audiorr para que persista las creds Subsonic del user
-  // y los crons (Daily Mixes, Smart Playlists) puedan generar playlists con
-  // owner correcto. Non-fatal: el login a Navidrome ya fue válido; si el
-  // backend rechaza o está caído, los crons no funcionarán para este user
-  // hasta que se reintente login, pero la sesión web sigue operativa.
+  credentials.set(candidate);
+  authToken.set(session);
+
+  return {
+    version: envelope.version,
+    serverVersion: envelope.serverVersion
+  };
+}
+
+/**
+ * `POST /api/auth/login` con el token Subsonic (md5(password+salt)) — el
+ * backend re-valida contra Navidrome y emite el par sessionToken+refreshToken.
+ * Traduce los status codes del backend a `NavidromeError` con código para que
+ * la pantalla de login muestre el mensaje adecuado (401/403/429/503).
+ */
+async function backendLogin(candidate: NavidromeCredentials): Promise<{
+  sessionToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  isAdmin: boolean;
+}> {
+  const url = `${backendService.baseUrl}/api/auth/login`;
+  let res: Response;
   try {
-    const url = `${backendService.baseUrl}/api/auth/login`;
-    const res = await fetch(url, {
+    res = await fetch(url, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
@@ -170,22 +214,79 @@ export async function connect(input: {
         salt: candidate.salt
       })
     });
-    if (!res.ok) {
-      console.warn(
-        `[Audiorr] Backend rechazó la persistencia de creds (${res.status}). Los crons no actuarán para "${candidate.username}" hasta el próximo login.`
-      );
-    }
-  } catch (err) {
-    console.warn('[Audiorr] No se pudo notificar al backend Audiorr:', err);
+  } catch {
+    throw new NavidromeError(503, 'No se pudo contactar con el servidor Audiorr');
   }
 
+  if (!res.ok) {
+    if (res.status === 429) {
+      const header = res.headers.get('Retry-After');
+      const seconds = header ? Number.parseInt(header, 10) : NaN;
+      throw new NavidromeError(
+        429,
+        'Demasiados intentos',
+        Number.isFinite(seconds) ? seconds : undefined
+      );
+    }
+    const msg =
+      res.status === 403
+        ? 'Cuenta no autorizada en este servidor'
+        : res.status === 503
+          ? 'Servidor Navidrome temporalmente no disponible'
+          : 'Credenciales inválidas';
+    throw new NavidromeError(res.status, msg);
+  }
+
+  const data = BackendLoginResponseSchema.parse(await res.json());
   return {
-    version: envelope.version,
-    serverVersion: envelope.serverVersion
+    sessionToken: data.token,
+    refreshToken: data.refreshToken,
+    expiresAt: Date.now() + data.expiresIn * 1000,
+    isAdmin: data.isAdmin
   };
 }
 
-export function disconnect(): void {
+/**
+ * Devuelve el sessionToken Bearer vigente, acuñándolo si hace falta.
+ *
+ * Casos:
+ *   - Sesión ya en el store → la devuelve directa.
+ *   - Usuario con credentials pero sin authToken (recarga tras migración, o
+ *     sesión perdida) → re-loguea contra el backend con las creds Subsonic
+ *     guardadas y persiste el par nuevo. Evita forzar un re-login manual.
+ *
+ * Lo consume ConnectService para el handshake Socket.IO; cualquier error se
+ * propaga como NavidromeError.
+ */
+export async function ensureBackendSession(): Promise<string> {
+  const existing = authToken.current?.sessionToken;
+  if (existing) return existing;
+  const c = credentials.current;
+  if (!c) throw new NavidromeError(401, 'No hay credenciales configuradas');
+  const session = await backendLogin(c);
+  authToken.set(session);
+  return session.sessionToken;
+}
+
+/**
+ * Cierra sesión. Best-effort en el backend (`POST /api/auth/logout` con el
+ * Bearer actual → 204); si falla, igualmente limpiamos el estado local. Borra
+ * credentials Subsonic y la sesión Bearer.
+ */
+export async function disconnect(): Promise<void> {
+  const token = authToken.current?.sessionToken;
+  if (token) {
+    try {
+      await fetch(`${backendService.baseUrl}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+    } catch {
+      // Logout server-side best-effort — el estado local se limpia igual.
+    }
+  }
+  authToken.clear();
   credentials.clear();
 }
 

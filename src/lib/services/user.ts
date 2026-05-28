@@ -49,10 +49,8 @@ export async function updateAvatar(
   avatarUrl: string | null
 ): Promise<{ avatarUrl: string | null }> {
   const path = `/api/user/${encodeURIComponent(username)}/avatar`;
-  const url = `${backendService.baseUrl}${path}`;
-  const res = await fetch(url, {
+  const res = await backendService.authedFetch(path, {
     method: 'PUT',
-    credentials: 'omit',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ avatarUrl })
   });
@@ -71,10 +69,8 @@ export async function setPinnedPlaylists(
   pinnedPlaylists: PinnedPlaylist[]
 ): Promise<PinnedPlaylist[]> {
   const path = `/api/user/${encodeURIComponent(username)}/pinned-playlists`;
-  const url = `${backendService.baseUrl}${path}`;
-  const res = await fetch(url, {
+  const res = await backendService.authedFetch(path, {
     method: 'POST',
-    credentials: 'omit',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pinnedPlaylists })
   });
@@ -91,8 +87,7 @@ export async function unpinPlaylist(
   playlistId: string
 ): Promise<PinnedPlaylist[]> {
   const path = `/api/user/${encodeURIComponent(username)}/pinned-playlists/${encodeURIComponent(playlistId)}`;
-  const url = `${backendService.baseUrl}${path}`;
-  const res = await fetch(url, { method: 'DELETE', credentials: 'omit' });
+  const res = await backendService.authedFetch(path, { method: 'DELETE' });
   if (!res.ok) {
     throw new BackendError(res.status, `Backend ${res.status}: ${res.statusText}`);
   }
