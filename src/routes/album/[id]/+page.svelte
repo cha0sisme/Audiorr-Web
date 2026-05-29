@@ -77,6 +77,15 @@
   // Animated artwork (Apple Music motion artwork) — decorativo en el hero.
   // 404 del backend = sin entrada (caso normal) → null silencioso → fallback al cover estático.
   // NO toca el lightbox ni la extracción de paleta (ambos siguen sobre coverUrl).
+  //
+  // DISEÑO: el <video> se posiciona como overlay absoluto SOBRE el <button>
+  // del cover (no dentro de él), con pointer-events:none. Esto garantiza:
+  //   1. La View Transition card→hero siempre captura el CoverImage estático
+  //      (que ya carga antes de la query de artwork) — la transición zoomIn
+  //      no se ve afectada.
+  //   2. El click en el hero sigue abriendo el lightbox del cover estático.
+  //   3. El cursor zoom-in y el hover-scale del <button> no afectan al vídeo.
+  //   4. El vídeo aparece con fade-in suave (animation-delay) tras la VT.
   const artworkQ = createQuery(() => ({
     queryKey: ['albumArtwork', albumId],
     queryFn: () => fetchAlbumArtwork(albumId),
@@ -250,63 +259,60 @@
 
 <div class="album-detail">
   <header class="hero" style:--hero-bg={heroBg}>
-    {#if coverUrl}
-      <button
-        type="button"
-        class="hero-cover hero-cover-btn"
-        style:view-transition-name={albumId ? `album-${albumId}` : undefined}
-        onclick={() => (lightboxOpen = true)}
-        aria-label={album ? `Ampliar portada de ${album.name}` : 'Ampliar portada'}
-      >
-        {#if showMotionArtwork}
-          <!-- Animated artwork (Apple Music motion artwork). Decorativo: no cambia
-               el lightbox ni la paleta, que siguen usando coverUrl estático.
-               Fallback al CoverImage si el vídeo no carga (onerror). -->
-          <video
-            class="hero-motion-video"
-            src={artworkVideoUrl}
-            autoplay
-            loop
-            muted
-            playsinline
-            preload="auto"
-            aria-hidden="true"
-            onerror={() => (videoLoadError = true)}
-          ></video>
-        {:else}
+    <!-- Wrapper relativo que agrupa el cover (button o div) + el overlay de
+         motion artwork. Necesario para posicionar el <video> sobre el cover
+         sin modificar el flujo del grid del hero. -->
+    <div class="hero-cover-wrap">
+      {#if coverUrl}
+        <!-- El <button> es el target de la View Transition (view-transition-name)
+             y del lightbox. Siempre contiene el CoverImage estático: esto garantiza
+             que la transición zoomIn card→hero capture el cover ya cargado, y que
+             el click siga abriendo el lightbox de la imagen, no del vídeo. -->
+        <button
+          type="button"
+          class="hero-cover hero-cover-btn"
+          style:view-transition-name={albumId ? `album-${albumId}` : undefined}
+          onclick={() => (lightboxOpen = true)}
+          aria-label={album ? `Ampliar portada de ${album.name}` : 'Ampliar portada'}
+        >
           <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
             {#snippet fallback()}
               <MusicNote size="100%" weight="regular" />
             {/snippet}
           </CoverImage>
-        {/if}
-      </button>
-    {:else}
-      <div
-        class="hero-cover"
-        style:view-transition-name={albumId ? `album-${albumId}` : undefined}
-      >
-        {#if showMotionArtwork}
-          <video
-            class="hero-motion-video"
-            src={artworkVideoUrl}
-            autoplay
-            loop
-            muted
-            playsinline
-            preload="auto"
-            aria-hidden="true"
-            onerror={() => (videoLoadError = true)}
-          ></video>
-        {:else}
+        </button>
+      {:else}
+        <div
+          class="hero-cover"
+          style:view-transition-name={albumId ? `album-${albumId}` : undefined}
+        >
           <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
             {#snippet fallback()}
               <MusicNote size="100%" weight="regular" />
             {/snippet}
           </CoverImage>
-        {/if}
-      </div>
-    {/if}
+        </div>
+      {/if}
+
+      {#if showMotionArtwork}
+        <!-- Animated artwork overlay — decorativo, no interactivo.
+             pointer-events:none → no captura clicks ni cursor del usuario.
+             Se posiciona sobre el cover con position:absolute, fade-in animado
+             con animation-delay para dejar que la View Transition termine primero.
+             El cover estático sigue siendo el target del lightbox y de la VT. -->
+        <video
+          class="hero-motion-video"
+          src={artworkVideoUrl}
+          autoplay
+          loop
+          muted
+          playsinline
+          preload="auto"
+          aria-hidden="true"
+          onerror={() => (videoLoadError = true)}
+        ></video>
+      {/if}
+    </div>
 
     <div class="hero-meta">
       {#if albumQ.isPending}
@@ -477,17 +483,28 @@
     transition: background var(--duration-normal) var(--ease-ios-default);
   }
 
-  .hero-cover {
+  /* Wrapper que agrupa el cover (button/div) + el overlay de motion artwork.
+     position:relative como contexto de posicionamiento para el <video> overlay.
+     Las dimensiones se definen aquí (232×232) y el cover las hereda al 100%. */
+  .hero-cover-wrap {
     position: relative;
     width: 232px;
     height: 232px;
+    flex-shrink: 0;
+  }
+
+  .hero-cover {
+    position: relative;
+    width: 100%;
+    height: 100%;
     border-radius: var(--radius-md);
     overflow: hidden;
     box-shadow: var(--shadow-2xl);
-    flex-shrink: 0;
   }
   /* Variante <button> cuando el cover es clickable (abre lightbox). Reset
-     del chrome de button + cursor zoom-in + hover scale sutil. */
+     del chrome de button + cursor zoom-in + hover scale sutil.
+     El zoom aplica al cover estático (la imagen), NO al vídeo decorativo
+     que vive fuera de este elemento como overlay independiente. */
   .hero-cover-btn {
     border: none;
     padding: 0;
@@ -509,15 +526,27 @@
       0 0 0 3px rgb(255 255 255 / 0.6);
   }
 
-  /* Animated artwork: ocupa exactamente el mismo espacio que el CoverImage.
-     object-fit:cover + width/height 100% encuadra el vídeo 1:1 sin recortes
-     visibles (el backend ya sirve la variante cuadrada). */
+  /* Animated artwork overlay: cubre exactamente el área del cover-wrap.
+     - position:absolute + inset:0 → se superpone al cover estático.
+     - pointer-events:none → no captura clicks, cursor, hover. El usuario
+       interactúa con el <button> debajo (lightbox, zoom-in cursor).
+     - border-radius:inherit → hereda el redondeo del .hero-cover-wrap.
+     - Fade-in animado con animation-delay de ~350ms para dejar que la
+       View Transition card→hero termine antes de que el vídeo sea visible. */
   .hero-motion-video {
-    display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: inherit;
+    border-radius: var(--radius-md);
+    pointer-events: none;
+    animation: motion-video-fadein var(--duration-normal) var(--ease-ios-default) 350ms both;
+  }
+
+  @keyframes motion-video-fadein {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
 
   .hero-meta {
@@ -708,7 +737,7 @@
       padding: var(--space-8) var(--space-4) var(--space-6);
       justify-items: center;
     }
-    .hero-cover { width: 192px; height: 192px; }
+    .hero-cover-wrap { width: 192px; height: 192px; }
     .hero-meta { justify-items: center; }
     .title {
       font-size: var(--text-3xl);
