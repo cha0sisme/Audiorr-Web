@@ -528,11 +528,17 @@
 
   /* Animated artwork overlay: cubre exactamente el área del cover-wrap.
      - position:absolute + inset:0 → se superpone al cover estático.
+     - z-index:1 explícito → garantiza que está sobre el .hero-cover (z-index:auto)
+       dentro del stacking context del .hero-cover-wrap, sin depender del orden DOM.
      - pointer-events:none → no captura clicks, cursor, hover. El usuario
        interactúa con el <button> debajo (lightbox, zoom-in cursor).
-     - border-radius:inherit → hereda el redondeo del .hero-cover-wrap.
+     - border-radius: var(--radius-md) para encajar con el cover.
      - Fade-in animado con animation-delay de ~350ms para dejar que la
-       View Transition card→hero termine antes de que el vídeo sea visible. */
+       View Transition card→hero termine antes de que el vídeo sea visible.
+     NOTA: usamos propiedades animation-* individuales (no el shorthand) porque
+     el shorthand "animation" no puede resolver var() en timing-function en tiempo
+     de parse — Chrome/Safari pueden rechazar el shorthand entero dejando el
+     elemento en opacity:0 permanente. Las propiedades individuales sí aceptan var(). */
   .hero-motion-video {
     position: absolute;
     inset: 0;
@@ -541,7 +547,13 @@
     object-fit: cover;
     border-radius: var(--radius-md);
     pointer-events: none;
-    animation: motion-video-fadein var(--duration-normal) var(--ease-ios-default) 350ms both;
+    z-index: 1;
+    animation-name: motion-video-fadein;
+    animation-duration: var(--duration-normal);
+    animation-timing-function: var(--ease-ios-default);
+    animation-delay: 350ms;
+    animation-fill-mode: both;
+    animation-iteration-count: 1;
   }
 
   @keyframes motion-video-fadein {
