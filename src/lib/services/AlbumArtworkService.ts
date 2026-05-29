@@ -1,8 +1,10 @@
 /**
  * AlbumArtworkService — Animated artwork (Apple Music motion artwork) por álbum.
  *
- *   GET /api/album-artwork/:albumId → AlbumArtworkEntry | 404
- *   GET /api/album-artwork/files/album_<albumId>.mp4 → static MP4 (H.264 1:1)
+ *   GET  /api/album-artwork/:albumId            → AlbumArtworkEntry | 404
+ *   GET  /api/album-artwork/files/album_<id>.mp4 → static MP4 (H.264 1:1)
+ *   POST /api/album-artwork/fetch               → 202 ArtworkFetchEnqueued (ADMIN)
+ *   GET  /api/album-artwork/jobs/:id            → ArtworkJob (ADMIN)
  *
  * 404 es el estado normal cuando el álbum no tiene entrada aún. No es un error
  * ruidoso: significa "sin animated artwork (todavía)" → el caller usa el cover
@@ -13,9 +15,16 @@
  */
 
 import { backendService } from '$services/BackendService.svelte';
-import { AlbumArtworkEntrySchema, type AlbumArtworkEntry } from '$types/backend';
+import {
+  AlbumArtworkEntrySchema,
+  ArtworkFetchEnqueuedSchema,
+  ArtworkJobSchema,
+  type AlbumArtworkEntry,
+  type ArtworkFetchEnqueued,
+  type ArtworkJob
+} from '$types/backend';
 
-export type { AlbumArtworkEntry };
+export type { AlbumArtworkEntry, ArtworkFetchEnqueued, ArtworkJob };
 
 /**
  * Fetches the animated artwork entry for the given Navidrome album id.
@@ -42,4 +51,33 @@ export async function fetchAlbumArtwork(albumId: string): Promise<AlbumArtworkEn
 export function resolveArtworkVideoUrl(entry: AlbumArtworkEntry | null): string | null {
   if (!entry?.fileUrl) return null;
   return backendService.fileUrl(entry.fileUrl);
+}
+
+/**
+ * Dispara la descarga de animated artwork para un álbum (ADMIN, requiere Bearer).
+ * POST /api/album-artwork/fetch — body { albumId, artist, title }.
+ * Devuelve el jobId para hacer poll con `pollArtworkJob`.
+ *
+ * 409 = ya existe artwork sin `force`, o hay un job activo — propaga BackendError
+ * para que el caller lo maneje.
+ */
+export async function triggerArtworkFetch(params: {
+  albumId: string;
+  artist: string;
+  title: string;
+}): Promise<ArtworkFetchEnqueued> {
+  return backendService.post(
+    '/api/album-artwork/fetch',
+    params,
+    ArtworkFetchEnqueuedSchema
+  );
+}
+
+/**
+ * Consulta el estado de un job de descarga de animated artwork (ADMIN, requiere Bearer).
+ * GET /api/album-artwork/jobs/:id
+ * Devuelve el estado actual del job. El caller hace polling hasta `done` o `failed`.
+ */
+export async function pollArtworkJob(jobId: string): Promise<ArtworkJob | null> {
+  return backendService.get(`/api/album-artwork/jobs/${jobId}`, ArtworkJobSchema);
 }

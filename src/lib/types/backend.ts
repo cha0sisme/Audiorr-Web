@@ -647,9 +647,37 @@ export const AlbumArtworkEntrySchema = z.object({
   title: z.string().optional(),
   artist: z.string().optional(),
   cachedAt: z.string().optional(),
-  fileUrl: z.string().nullable()
+  fileUrl: z.string().nullable(),
+  /** URL del .mp4 tall (9:16) para iOS. La web usa `fileUrl` (square 1:1). */
+  fileUrlTall: z.string().nullable().optional()
 });
 export type AlbumArtworkEntry = z.infer<typeof AlbumArtworkEntrySchema>;
+
+// ============================================================================
+// Album Artwork — fetch job  POST /api/album-artwork/fetch
+//                            GET  /api/album-artwork/jobs/:id
+// ============================================================================
+
+/** Estado del job de descarga de animated artwork. */
+export const ArtworkJobStatusSchema = z.enum(['queued', 'running', 'done', 'failed']);
+export type ArtworkJobStatus = z.infer<typeof ArtworkJobStatusSchema>;
+
+/** Respuesta del POST /api/album-artwork/fetch (202). */
+export const ArtworkFetchEnqueuedSchema = z.object({
+  jobId: z.string(),
+  job: z.object({}).passthrough()
+});
+export type ArtworkFetchEnqueued = z.infer<typeof ArtworkFetchEnqueuedSchema>;
+
+/** Respuesta del GET /api/album-artwork/jobs/:id. */
+export const ArtworkJobSchema = z.object({
+  status: ArtworkJobStatusSchema,
+  matchStatus: z.string().nullable().optional(),
+  outputUrl: z.string().nullable().optional(),
+  outputUrlTall: z.string().nullable().optional(),
+  error: z.string().nullable().optional()
+});
+export type ArtworkJob = z.infer<typeof ArtworkJobSchema>;
 
 // ============================================================================
 // Last Playback — /api/user/:username/last-playback
