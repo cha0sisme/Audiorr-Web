@@ -240,7 +240,7 @@ export type GenerateAllSmartPlaylistsResponse = z.infer<
 >;
 
 // ============================================================================
-// Spotify Sync — /api/sync/*
+// Spotify Sync — /api/sync/*  (legacy, retrocompat)
 // ============================================================================
 
 /** Playlist de Spotify sincronizada hacia Navidrome. */
@@ -290,6 +290,97 @@ export type SyncPreview = z.infer<typeof SyncPreviewSchema>;
 export const StatusOkSchema = z.object({
   status: z.string()
 });
+
+// ============================================================================
+// Multi-source Sync — /api/sync/* v2 (source-aware, Spotify + Deezer)
+// El backend emite `source` + `externalId` a partir del commit adec1dc.
+// Los campos legacy (`spotifyId`) siguen presentes como alias → retrocompat.
+// ============================================================================
+
+/** Fuentes de sync soportadas por el backend. */
+export const SyncSourceSchema = z.enum(['spotify', 'deezer']);
+export type SyncSource = z.infer<typeof SyncSourceSchema>;
+
+/**
+ * Playlist sincronizada source-aware.
+ * - `externalId` / `source`: campos canónicos.
+ * - `spotifyId`: alias legacy que el backend sigue emitiendo (= externalId).
+ *
+ * Se marca `source` como optional con default 'spotify' para tolerar
+ * un backend pre-adec1dc en el mismo deploy (migración idempotente).
+ */
+export const SyncedPlaylistV2Schema = z.object({
+  source: SyncSourceSchema.optional().default('spotify'),
+  externalId: z.string(),
+  /** Alias legacy — el backend lo emite como alias de externalId. */
+  spotifyId: z.string().optional(),
+  navidromeId: z.string().nullable(),
+  name: z.string(),
+  lastSync: z.string().nullable(),
+  trackCount: z.number(),
+  matchCount: z.number(),
+  enabled: z.boolean(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional()
+});
+export type SyncedPlaylistV2 = z.infer<typeof SyncedPlaylistV2Schema>;
+export const SyncedPlaylistsV2ArraySchema = z.array(SyncedPlaylistV2Schema);
+
+/**
+ * Track de la fuente externa dentro de un preview.
+ * El campo se llama `spotify` por naming legacy incluso cuando la fuente es
+ * Deezer — así lo devuelve el backend (ver §5 de la issue 2026-05-29).
+ */
+export const ExternalTrackSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  artist: z.string(),
+  album: z.string(),
+  duration_ms: z.number()
+});
+export type ExternalTrack = z.infer<typeof ExternalTrackSchema>;
+
+/** Preview source-aware. `tracks[].spotify` contiene el track de la fuente. */
+export const SyncPreviewV2Schema = z.object({
+  source: SyncSourceSchema.optional().default('spotify'),
+  id: z.string().optional(),
+  name: z.string(),
+  trackCount: z.number(),
+  matchCount: z.number(),
+  percentage: z.number(),
+  tracks: z.array(
+    z.object({
+      /** Naming legacy — contiene el track de la fuente, sea Spotify o Deezer. */
+      spotify: ExternalTrackSchema,
+      found: z.boolean(),
+      navidromeId: z.string().optional(),
+      isManual: z.boolean().optional()
+    })
+  )
+});
+export type SyncPreviewV2 = z.infer<typeof SyncPreviewV2Schema>;
+
+/** Petición de match manual multi-fuente. */
+export const ManualMatchRequestSchema = z.object({
+  source: SyncSourceSchema,
+  externalTrackId: z.string(),
+  navidromeSongId: z.string(),
+  trackName: z.string().optional(),
+  artistName: z.string().optional(),
+  navidromeTitle: z.string().optional(),
+  navidromeArtist: z.string().optional()
+});
+export type ManualMatchRequest = z.infer<typeof ManualMatchRequestSchema>;
+
+/** Respuesta de search-songs — lista de canciones Navidrome para match manual. */
+export const SearchSongItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist: z.string(),
+  album: z.string().optional()
+});
+export type SearchSongItem = z.infer<typeof SearchSongItemSchema>;
+export const SearchSongsResponseSchema = z.array(SearchSongItemSchema);
 
 // ============================================================================
 // Admin: usuarios del sistema — /api/user/admin/users
