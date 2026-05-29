@@ -539,7 +539,6 @@
   <ImageLightbox
     src={coverUrl}
     alt={artist?.name ?? ''}
-    shape="circle"
     onClose={() => (lightboxOpen = false)}
   />
 {/if}

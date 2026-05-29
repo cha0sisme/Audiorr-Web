@@ -388,6 +388,7 @@
         <button
           type="button"
           class="hero-cover hero-cover-btn"
+          class:has-motion={showMotionArtwork}
           style:view-transition-name={albumId ? `album-${albumId}` : undefined}
           onclick={() => (lightboxOpen = true)}
           aria-label={album ? `Ampliar portada de ${album.name}` : 'Ampliar portada'}
@@ -644,6 +645,14 @@
   .hero-cover-btn:active {
     transform: scale(0.98);
     transition-duration: var(--duration-instant);
+  }
+  /* Con motion artwork el cover estático queda DEBAJO del <video> overlay
+     (quieto). Escalarlo en hover hace que la imagen "asome" por detrás del
+     vídeo inmóvil — efecto roto. Cuando hay motion, anulamos el zoom; el
+     click sigue abriendo el lightbox del cover estático. */
+  .hero-cover-btn.has-motion:hover,
+  .hero-cover-btn.has-motion:active {
+    transform: none;
   }
   .hero-cover-btn:focus-visible {
     outline: none;

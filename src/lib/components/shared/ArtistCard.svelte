@@ -24,7 +24,12 @@
 
   let coverEl: HTMLDivElement | undefined = $state();
   function handleClick() {
-    if (coverEl) coverEl.style.viewTransitionName = `artist-${id}`;
+    if (coverEl) {
+      coverEl.style.viewTransitionName = `artist-${id}`;
+      // Ver nota en AlbumCard: el layout limpia este nombre tras navegar para
+      // que un residuo no duplique el name del detalle y aborte la transición.
+      coverEl.dataset.vtActive = '';
+    }
   }
 
   // 0 álbumes = artista colaborador sin discografía propia indexada

@@ -17,12 +17,10 @@
   type Props = {
     src: string;
     alt: string;
-    /** 'square' por defecto. 'circle' para avatares de artista. */
-    shape?: 'square' | 'circle';
     onClose: () => void;
   };
 
-  let { src, alt, shape = 'square', onClose }: Props = $props();
+  let { src, alt, onClose }: Props = $props();
 
   // Body scroll lock + ESC handler mientras el lightbox está abierto.
   onMount(() => {
@@ -50,7 +48,7 @@
     onclick={onClose}
     aria-label="Cerrar imagen ampliada"
   ></button>
-  <img class="image" class:circle={shape === 'circle'} {src} {alt} />
+  <img class="image" {src} {alt} />
   <button class="close" onclick={onClose} aria-label="Cerrar">
     <X size={20} weight="bold" />
   </button>
@@ -94,14 +92,6 @@
     box-shadow: var(--shadow-2xl);
     pointer-events: none;
     animation: lightbox-image-in 320ms cubic-bezier(0.32, 0.72, 0, 1);
-  }
-  .image.circle {
-    /* Avatares de artista: redondos, max-size más conservador para que
-       no llenen toda la pantalla (un círculo de 88vh queda incómodo). */
-    border-radius: 50%;
-    max-width: min(72vmin, 720px);
-    max-height: min(72vmin, 720px);
-    aspect-ratio: 1;
   }
 
   .close {

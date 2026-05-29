@@ -68,6 +68,11 @@
   function handleClick() {
     if (coverEl) {
       coverEl.style.viewTransitionName = `album-${id}`;
+      // Marca para que el layout limpie el nombre tras navegar. Sin limpieza,
+      // un nombre residual en una card que sobrevive (sección persistente,
+      // vuelta atrás) puede duplicar el `view-transition-name` del detalle y
+      // el browser aborta TODA la transición → el zoom "a veces no aparece".
+      coverEl.dataset.vtActive = '';
     }
   }
 

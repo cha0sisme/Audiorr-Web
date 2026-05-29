@@ -279,9 +279,23 @@
     });
   });
 
-  // Fallback para browsers SIN View Transitions (Firefox actual).
   afterNavigate((nav) => {
     if (typeof document === 'undefined') return;
+
+    // Limpia los `view-transition-name` temporales que las cards setean al
+    // click (data-vt-active). Si una card sobrevive a la navegación (sección
+    // persistente, vuelta atrás) y conserva su nombre, en la siguiente
+    // transición coincidiría con el name del detalle → el browser detecta un
+    // duplicado y aborta la transición entera (el zoom "a veces no aparece").
+    // Los snapshots de la transición en curso ya están congelados, así que
+    // limpiar el DOM vivo ahora no la interrumpe.
+    for (const el of document.querySelectorAll<HTMLElement>('[data-vt-active]')) {
+      el.style.viewTransitionName = '';
+      delete el.dataset.vtActive;
+    }
+
+    // Fallback de scroll para browsers SIN View Transitions (Firefox actual);
+    // con soporte, el scroll ya se aplicó dentro del callback de onNavigate.
     if ('startViewTransition' in document) return;
     applyScroll(nav.type, nav.to?.url.pathname);
   });

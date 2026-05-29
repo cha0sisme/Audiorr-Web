@@ -28,7 +28,12 @@
 
   let coverEl: HTMLDivElement | undefined = $state();
   function handleClick() {
-    if (coverEl) coverEl.style.viewTransitionName = `playlist-${id}`;
+    if (coverEl) {
+      coverEl.style.viewTransitionName = `playlist-${id}`;
+      // Ver nota en AlbumCard: el layout limpia este nombre tras navegar para
+      // que un residuo no duplique el name del detalle y aborte la transición.
+      coverEl.dataset.vtActive = '';
+    }
   }
 
   /** Click del Play del cover. stopPropagation para no navegar al detalle. */

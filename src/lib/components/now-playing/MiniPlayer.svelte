@@ -596,6 +596,10 @@
      al contenido pero sigue permitiendo ellipsis cuando overflowa. */
   .artist-link {
     display: inline-block;
+    /* Grid item: sin esto, justify-self:stretch (default) estira el <a> a
+       toda la celda y el hit-area/hover cubre la franja entera. start lo
+       colapsa a su contenido — el link ocupa solo lo que mide el artista. */
+    justify-self: start;
     max-width: 100%;
     color: var(--text-secondary);
     text-decoration: none;

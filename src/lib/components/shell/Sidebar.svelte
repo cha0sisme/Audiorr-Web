@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
+  import { tick } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     House, MagnifyingGlass, VinylRecord, Heart,
@@ -14,6 +15,7 @@
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { credentials } from '$stores/credentials.svelte';
   import { sidebarUI } from '$stores/sidebar-ui.svelte';
+  import { tooltip } from '$lib/actions/tooltip';
 
   const collapsed = $derived(sidebarUI.collapsed);
 
@@ -145,6 +147,19 @@
     searchInputEl?.focus();
   }
 
+  // Search en modo colapsado: el <input> vive solo en el layout expandido, así
+  // que en colapsado no hay dónde escribir. Click → expandimos el sidebar y,
+  // tras el re-render que monta el input, le damos foco. Tras teclear, el
+  // debounce de handleSearchInput navega a /search igual que en expandido.
+  async function expandAndFocusSearch() {
+    if (sidebarUI.collapsed) {
+      sidebarUI.set(false);
+      await tick();
+    }
+    searchInputEl?.focus();
+    searchInputEl?.select();
+  }
+
   // ==========================================================================
   // Pinned Playlists — sincronizadas con backend Audiorr.
   // Lista compacta debajo de las navs. Si no hay pinned, la sección se omite.
@@ -201,15 +216,16 @@
   </div>
 
   {#if collapsed}
-    <a
-      href="/search"
+    <button
+      type="button"
       class="search-collapsed"
       class:active={page.url.pathname === '/search'}
       aria-label="Buscar"
-      title="Buscar"
+      onclick={expandAndFocusSearch}
+      use:tooltip={'Buscar'}
     >
       <MagnifyingGlass size={20} weight="regular" />
-    </a>
+    </button>
   {:else}
     <div class="search" class:active={page.url.pathname === '/search'}>
       <span class="search-icon" aria-hidden="true">
@@ -250,7 +266,7 @@
         class="nav-item"
         class:active={isActive(item)}
         data-sveltekit-preload-data="hover"
-        title={collapsed ? item.label : undefined}
+        use:tooltip={collapsed ? item.label : ''}
       >
         <item.Icon size={20} weight={isActive(item) ? 'fill' : 'regular'} />
         {#if !collapsed}<span>{item.label}</span>{/if}
@@ -286,7 +302,8 @@
             href={`/playlist/${p.id}`}
             class:active={page.url.pathname === `/playlist/${p.id}`}
             data-sveltekit-preload-data="hover"
-            title={p.name}
+            aria-label={collapsed ? p.name : undefined}
+            use:tooltip={collapsed ? p.name : ''}
           >
             <span class="pinned-cover">
               <CoverImage src={getPlaylistCoverUrl(p.id)} alt="">
@@ -378,13 +395,17 @@
     margin-left: 0;
   }
 
-  /* Search colapsado: solo el icono como botón cuadrado, link a /search. */
+  /* Search colapsado: solo el icono como botón cuadrado. Click expande el
+     sidebar y enfoca el input (no hay dónde escribir en modo colapsado). */
   .search-collapsed {
     display: grid;
     place-items: center;
     width: 40px;
     height: 40px;
     margin: 0 auto;
+    border: none;
+    background: transparent;
+    cursor: pointer;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     text-decoration: none;
@@ -451,7 +472,11 @@
     color: var(--text-primary);
     font: inherit;
     font-size: var(--text-sm);
-    line-height: 1.2;
+    /* line-height saludable: el caret (text cursor) toma la altura del
+       line-box (font-size × line-height). Con 1.2 quedaba diminuto; 1.5 le
+       da una altura proporcional al texto, sin descuadrar el min-height 36px
+       del contenedor (14px × 1.5 + 16px padding ≈ 37px). */
+    line-height: 1.5;
     letter-spacing: var(--tracking-body);
     padding: 0;
     -webkit-appearance: none;
