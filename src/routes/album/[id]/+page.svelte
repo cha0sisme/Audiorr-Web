@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
-  import { MusicNote, Shuffle, Pause, DotsThree, Plus, ListPlus, User, ArrowsClockwise, FilmSlate } from 'phosphor-svelte';
+  import { MusicNote, Shuffle, Pause, DotsThree, Plus, ListPlus, User, FilmSlate } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
@@ -12,16 +12,16 @@
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import ImageLightbox from '$components/shared/ImageLightbox.svelte';
+  import ArtworkMatchModal from '$components/shared/ArtworkMatchModal.svelte';
   import Marquee from '$components/shared/Marquee.svelte';
   import * as nav from '$services/NavidromeService';
   import { songToListItem, type SongListItem } from '$utils/navidrome-mappers';
   import { getCoverArtUrl } from '$services/NavidromeService';
-  import { fetchAlbumArtwork, resolveArtworkVideoUrl, triggerArtworkFetch, pollArtworkJob } from '$services/AlbumArtworkService';
+  import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { authToken } from '$stores/auth-token.svelte';
-  import { toasts } from '$stores/toasts.svelte';
   import { theme } from '$stores/theme.svelte';
   import { cleanNotes } from '$utils/clean-notes';
   import {
@@ -238,80 +238,11 @@
   const collapsePlay = $derived(smartMixReady || isSmartMixContext);
 
   // ─── Descarga de animated artwork (ADMIN only) ────────────────────────────
-  // Estado local del job. `artworkJobRunning` activa el spinner en el ⋮ y
-  // deshabilita el ítem del menú mientras el job corre (~2 min en el homelab).
-  let artworkJobId = $state<string | null>(null);
-  let artworkJobRunning = $state(false);
-  let artworkPollTimer: ReturnType<typeof setInterval> | null = null;
-
-  function stopArtworkPoll() {
-    if (artworkPollTimer !== null) {
-      clearInterval(artworkPollTimer);
-      artworkPollTimer = null;
-    }
-  }
-
-  async function startArtworkFetch() {
-    if (!album) return;
-    artworkJobRunning = true;
-    try {
-      const enqueued = await triggerArtworkFetch({
-        albumId,
-        artist: album.artist ?? '',
-        title: album.name
-      });
-      artworkJobId = enqueued.jobId;
-      // Poll cada 3 s hasta done/failed.
-      artworkPollTimer = setInterval(async () => {
-        if (!artworkJobId) {
-          stopArtworkPoll();
-          return;
-        }
-        try {
-          const job = await pollArtworkJob(artworkJobId);
-          if (!job) {
-            stopArtworkPoll();
-            artworkJobRunning = false;
-            return;
-          }
-          if (job.status === 'done') {
-            stopArtworkPoll();
-            artworkJobRunning = false;
-            artworkJobId = null;
-            if (job.matchStatus === 'no-motion' || job.matchStatus === 'not-found') {
-              // El backend confirmó que este álbum no tiene motion artwork en Apple Music.
-              // No es un fallo — simplemente no existe. Informar sin mostrar error.
-              toasts.info('Sin animated artwork', 'Este álbum no tiene motion artwork en Apple Music');
-            } else {
-              // matchStatus es 'auto' o 'manual': descarga real. Refrescar y notificar.
-              toasts.success('Animated artwork descargado', album?.name);
-              await artworkQ.refetch();
-            }
-          } else if (job.status === 'failed') {
-            stopArtworkPoll();
-            artworkJobRunning = false;
-            artworkJobId = null;
-            toasts.error('Error al descargar artwork', job.error ?? 'El job falló sin detalle');
-          }
-        } catch {
-          stopArtworkPoll();
-          artworkJobRunning = false;
-          artworkJobId = null;
-          toasts.error('Error al consultar el estado del job');
-        }
-      }, 3000);
-    } catch (err: unknown) {
-      artworkJobRunning = false;
-      const msg = err instanceof Error ? err.message : 'Error desconocido';
-      toasts.error('No se pudo iniciar la descarga', msg);
-    }
-  }
-
-  // Limpiar el poll si el componente se destruye o cambia el álbum.
-  $effect(() => {
-    void albumId;
-    return () => { stopArtworkPoll(); };
-  });
+  // El auto-match de Apple/iTunes falla a menudo, así que en vez de descargar
+  // a ciegas abrimos ArtworkMatchModal: el admin confirma el candidato correcto
+  // (o pega un collectionId a mano). El modal es self-contained — busca, descarga
+  // y poll-ea el job; aquí solo refrescamos el artwork al confirmar.
+  let artworkModalOpen = $state(false);
 
   // Shorthand: el usuario es admin si tiene sesión Bearer con isAdmin=true.
   const isAdmin = $derived(authToken.current?.isAdmin === true);
@@ -347,10 +278,10 @@
       ? [
           { divider: true } as const,
           {
-            label: artworkJobRunning ? 'Descargando artwork...' : 'Descargar animated artwork',
-            icon: artworkJobRunning ? ArrowsClockwise : FilmSlate,
+            label: 'Descargar animated artwork',
+            icon: FilmSlate,
             action: () => {
-              if (!artworkJobRunning) startArtworkFetch();
+              artworkModalOpen = true;
             }
           } as const
         ]
@@ -513,17 +444,9 @@
               onclick={() => (menuOpen = !menuOpen)}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              aria-label={artworkJobRunning ? 'Descargando animated artwork...' : 'Más opciones'}
+              aria-label="Más opciones"
             >
-              {#if artworkJobRunning}
-                <!-- Spinner estilo SmartMixButton en estado 'analyzing':
-                     mismo icono ArrowsClockwise + animación smartmix-spin. -->
-                <span class="menu-spinner" aria-hidden="true">
-                  <ArrowsClockwise size={18} weight="bold" />
-                </span>
-              {:else}
-                <DotsThree size={20} weight="bold" />
-              {/if}
+              <DotsThree size={20} weight="bold" />
             </HeroCircleButton>
             <ContextMenu
               open={menuOpen}
@@ -577,6 +500,17 @@
     src={coverUrl}
     alt={album?.name ?? ''}
     onClose={() => (lightboxOpen = false)}
+  />
+{/if}
+
+{#if album}
+  <ArtworkMatchModal
+    open={artworkModalOpen}
+    {albumId}
+    artist={album.artist ?? ''}
+    title={album.name}
+    onConfirmed={() => artworkQ.refetch()}
+    onClose={() => (artworkModalOpen = false)}
   />
 {/if}
 
@@ -862,18 +796,6 @@
     padding: 0 var(--space-4);
     font-size: var(--text-sm);
     color: var(--text-tertiary);
-  }
-
-  /* Spinner en el botón ⋮ mientras corre un job de descarga de artwork.
-     Mismo patrón que .spinner en SmartMixButton.svelte: rotación 1s lineal.
-     El icono ArrowsClockwise de Phosphor ya tiene la forma correcta. */
-  .menu-spinner {
-    display: inline-grid;
-    place-items: center;
-    animation: menu-spin 1s linear infinite;
-  }
-  @keyframes menu-spin {
-    to { transform: rotate(360deg); }
   }
 
   .bottom-spacer { height: 120px; }

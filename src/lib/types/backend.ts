@@ -643,6 +643,7 @@ export const AlbumArtworkEntrySchema = z.object({
   country: z.string().nullable().optional(),
   variant: z.string().nullable().optional(),
   localPath: z.string().nullable().optional(),
+  localPathTall: z.string().nullable().optional(),
   matchStatus: AlbumArtworkMatchStatusSchema,
   title: z.string().optional(),
   artist: z.string().optional(),
@@ -678,6 +679,54 @@ export const ArtworkJobSchema = z.object({
   error: z.string().nullable().optional()
 });
 export type ArtworkJob = z.infer<typeof ArtworkJobSchema>;
+
+// ============================================================================
+// Album Artwork — gestión admin (Housekeeping)
+//   GET    /api/album-artwork              → listado (ADMIN)
+//   DELETE /api/album-artwork/:albumId     → borra DB + archivos (ADMIN)
+//   GET    /api/album-artwork/search       → candidatos Apple/iTunes (ADMIN)
+// ============================================================================
+
+/** Respuesta del GET /api/album-artwork — listado para Housekeeping. */
+export const AlbumArtworkListResponseSchema = z.object({
+  total: z.number(),
+  entries: z.array(AlbumArtworkEntrySchema)
+});
+export type AlbumArtworkListResponse = z.infer<typeof AlbumArtworkListResponseSchema>;
+
+/** Respuesta del DELETE /api/album-artwork/:albumId. Idempotente y best-effort:
+    los archivos que ya no existían en disco se reportan en `missingFiles`. */
+export const AlbumArtworkDeleteResponseSchema = z.object({
+  ok: z.literal(true),
+  albumId: z.string(),
+  deletedFromDb: z.boolean(),
+  deletedFiles: z.array(z.string()),
+  missingFiles: z.array(z.string())
+});
+export type AlbumArtworkDeleteResponse = z.infer<typeof AlbumArtworkDeleteResponseSchema>;
+
+/** Candidato de Apple/iTunes para el modal de confirmación del match.
+    `hasMotion` indica si ese collectionId tiene motion artwork descargable.
+    `artworkThumbnailUrl` es la carátula estática (300×300) para previsualizar. */
+export const AppleSearchCandidateSchema = z.object({
+  collectionId: z.union([z.string(), z.number()]),
+  name: z.string(),
+  artist: z.string(),
+  hasMotion: z.boolean(),
+  artworkThumbnailUrl: z.string().nullable().optional()
+});
+export type AppleSearchCandidate = z.infer<typeof AppleSearchCandidateSchema>;
+
+/** Respuesta del GET /api/album-artwork/search — candidatos sin descargar nada.
+    `best` es el collectionId sugerido por el auto-match (o null si ninguno
+    supera el umbral de similitud). */
+export const AlbumArtworkSearchResponseSchema = z.object({
+  ok: z.boolean(),
+  best: z.union([z.string(), z.number()]).nullable().optional(),
+  bestHasMotion: z.boolean().optional(),
+  candidates: z.array(AppleSearchCandidateSchema)
+});
+export type AlbumArtworkSearchResponse = z.infer<typeof AlbumArtworkSearchResponseSchema>;
 
 // ============================================================================
 // Last Playback — /api/user/:username/last-playback
