@@ -278,8 +278,15 @@
             stopArtworkPoll();
             artworkJobRunning = false;
             artworkJobId = null;
-            // Refrescar la query del artwork para que el vídeo aparezca sin recargar.
-            await artworkQ.refetch();
+            if (job.matchStatus === 'no-motion' || job.matchStatus === 'not-found') {
+              // El backend confirmó que este álbum no tiene motion artwork en Apple Music.
+              // No es un fallo — simplemente no existe. Informar sin mostrar error.
+              toasts.info('Sin animated artwork', 'Este álbum no tiene motion artwork en Apple Music');
+            } else {
+              // matchStatus es 'auto' o 'manual': descarga real. Refrescar y notificar.
+              toasts.success('Animated artwork descargado', album?.name);
+              await artworkQ.refetch();
+            }
           } else if (job.status === 'failed') {
             stopArtworkPoll();
             artworkJobRunning = false;
