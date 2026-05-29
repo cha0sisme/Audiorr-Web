@@ -109,6 +109,23 @@
 
   const showMotionArtwork = $derived(!!artworkVideoUrl && !videoLoadError);
 
+  // Referencia imperativa al elemento <video> del motion artwork.
+  // Necesaria porque el atributo `muted` declarativo de Svelte NO garantiza
+  // fijar la PROPIEDAD .muted del HTMLVideoElement — sin la propiedad true,
+  // el navegador bloquea el autoplay y el vídeo queda en pausa → opacidad 0
+  // → solo se ve el cover estático. Patrón idéntico a CanvasPanel.svelte.
+  let motionVideoEl: HTMLVideoElement | undefined = $state();
+
+  $effect(() => {
+    const el = motionVideoEl;
+    const url = artworkVideoUrl;
+    if (!el || !url) return;
+    // Fijar la propiedad (no solo el atributo) antes de llamar play().
+    // Esto es lo que garantiza que el navegador permita el autoplay.
+    el.muted = true;
+    el.play().catch(() => {});
+  });
+
   // GIF detection: covers GIF (raros pero posibles si un usuario sube uno
   // animado) hacen del hero un escenario visual ruidoso si combinamos
   // gradiente diagonal + animación. Con GIF → flat fill, el GIF protagonista.
@@ -301,6 +318,7 @@
              con animation-delay para dejar que la View Transition termine primero.
              El cover estático sigue siendo el target del lightbox y de la VT. -->
         <video
+          bind:this={motionVideoEl}
           class="hero-motion-video"
           src={artworkVideoUrl}
           autoplay
