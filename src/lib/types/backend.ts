@@ -613,6 +613,43 @@ export const UserPreferencesSchema = z
 export type UserPreferences = z.infer<typeof UserPreferencesSchema>;
 
 // ============================================================================
+// Album Artwork (Apple Music animated artwork) — /api/album-artwork/:albumId
+// ============================================================================
+
+/**
+ * Entrada de animated artwork (Apple Music motion artwork) para un álbum.
+ *
+ * `fileUrl` es la ruta del .mp4 ya transcodificado a H.264 yuv420p 1:1, o
+ * `null` si no hay vídeo descargado. Solo hay vídeo cuando `fileUrl != null`
+ * (estados `auto` o `manual`).
+ *
+ * 404 = no hay entrada para el álbum (normal hasta que se haga fetch).
+ * Tratar como "sin artwork", no como error.
+ */
+export const AlbumArtworkMatchStatusSchema = z.enum([
+  'auto',
+  'manual',
+  'no-motion',
+  'not-found',
+  'error'
+]);
+export type AlbumArtworkMatchStatus = z.infer<typeof AlbumArtworkMatchStatusSchema>;
+
+export const AlbumArtworkEntrySchema = z.object({
+  albumId: z.string(),
+  appleCollectionId: z.number().nullable().optional(),
+  country: z.string().nullable().optional(),
+  variant: z.string().nullable().optional(),
+  localPath: z.string().nullable().optional(),
+  matchStatus: AlbumArtworkMatchStatusSchema,
+  title: z.string().optional(),
+  artist: z.string().optional(),
+  cachedAt: z.string().optional(),
+  fileUrl: z.string().nullable()
+});
+export type AlbumArtworkEntry = z.infer<typeof AlbumArtworkEntrySchema>;
+
+// ============================================================================
 // Last Playback — /api/user/:username/last-playback
 // ============================================================================
 

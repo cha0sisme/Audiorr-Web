@@ -16,6 +16,7 @@
   import * as nav from '$services/NavidromeService';
   import { songToListItem, type SongListItem } from '$utils/navidrome-mappers';
   import { getCoverArtUrl } from '$services/NavidromeService';
+  import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
@@ -72,6 +73,32 @@
   // → hero gris/neutro acorde con la UI. Cuando llegue la paleta real, el
   // chroma se anima del placeholder al accent extraído.
   const palette = $derived<CoverPalette>(paletteQ.data ?? HERO_PLACEHOLDER_PALETTE);
+
+  // Animated artwork (Apple Music motion artwork) — decorativo en el hero.
+  // 404 del backend = sin entrada (caso normal) → null silencioso → fallback al cover estático.
+  // NO toca el lightbox ni la extracción de paleta (ambos siguen sobre coverUrl).
+  const artworkQ = createQuery(() => ({
+    queryKey: ['albumArtwork', albumId],
+    queryFn: () => fetchAlbumArtwork(albumId),
+    enabled: !!albumId,
+    staleTime: 1000 * 60 * 10,
+    retry: false
+  }));
+
+  const artworkVideoUrl = $derived(resolveArtworkVideoUrl(artworkQ.data ?? null));
+
+  // Fallback al cover estático si el <video> falla al cargar (evento error).
+  // Solo se activa si realmente hubo un intento de cargar un vídeo.
+  let videoLoadError = $state(false);
+
+  // Resetear el error cuando cambia el álbum o la URL del vídeo.
+  $effect(() => {
+    void albumId;
+    void artworkVideoUrl;
+    videoLoadError = false;
+  });
+
+  const showMotionArtwork = $derived(!!artworkVideoUrl && !videoLoadError);
 
   // GIF detection: covers GIF (raros pero posibles si un usuario sube uno
   // animado) hacen del hero un escenario visual ruidoso si combinamos
@@ -231,22 +258,53 @@
         onclick={() => (lightboxOpen = true)}
         aria-label={album ? `Ampliar portada de ${album.name}` : 'Ampliar portada'}
       >
-        <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
-          {#snippet fallback()}
-            <MusicNote size="100%" weight="regular" />
-          {/snippet}
-        </CoverImage>
+        {#if showMotionArtwork}
+          <!-- Animated artwork (Apple Music motion artwork). Decorativo: no cambia
+               el lightbox ni la paleta, que siguen usando coverUrl estático.
+               Fallback al CoverImage si el vídeo no carga (onerror). -->
+          <video
+            class="hero-motion-video"
+            src={artworkVideoUrl}
+            autoplay
+            loop
+            muted
+            playsinline
+            preload="auto"
+            aria-hidden="true"
+            onerror={() => (videoLoadError = true)}
+          ></video>
+        {:else}
+          <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
+            {#snippet fallback()}
+              <MusicNote size="100%" weight="regular" />
+            {/snippet}
+          </CoverImage>
+        {/if}
       </button>
     {:else}
       <div
         class="hero-cover"
         style:view-transition-name={albumId ? `album-${albumId}` : undefined}
       >
-        <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
-          {#snippet fallback()}
-            <MusicNote size="100%" weight="regular" />
-          {/snippet}
-        </CoverImage>
+        {#if showMotionArtwork}
+          <video
+            class="hero-motion-video"
+            src={artworkVideoUrl}
+            autoplay
+            loop
+            muted
+            playsinline
+            preload="auto"
+            aria-hidden="true"
+            onerror={() => (videoLoadError = true)}
+          ></video>
+        {:else}
+          <CoverImage src={coverUrl} alt="" lazy={false} priority="high">
+            {#snippet fallback()}
+              <MusicNote size="100%" weight="regular" />
+            {/snippet}
+          </CoverImage>
+        {/if}
       </div>
     {/if}
 
@@ -450,6 +508,18 @@
       var(--shadow-2xl),
       0 0 0 3px rgb(255 255 255 / 0.6);
   }
+
+  /* Animated artwork: ocupa exactamente el mismo espacio que el CoverImage.
+     object-fit:cover + width/height 100% encuadra el vídeo 1:1 sin recortes
+     visibles (el backend ya sirve la variante cuadrada). */
+  .hero-motion-video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+  }
+
   .hero-meta {
     min-width: 0;
     display: grid;
