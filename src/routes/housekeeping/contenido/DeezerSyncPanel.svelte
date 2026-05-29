@@ -1,10 +1,9 @@
 <script lang="ts">
   /**
-   * /housekeeping/deezer-sync — Panel de administración de Deezer Sync.
+   * Panel de administración de Deezer Sync.
    *
    * Permite importar playlists de Deezer hacia Navidrome con matching
-   * fuzzy contra la biblioteca local. Mirror del panel Spotify Sync
-   * (deshabilitado por directriz del director).
+   * fuzzy contra la biblioteca local.
    *
    * Flujo:
    *   1. Input URL/ID Deezer → Preview (tabla de tracks con % matching).
@@ -243,10 +242,6 @@
     }
   }
 </script>
-
-<svelte:head>
-  <title>Deezer Sync · Housekeeping</title>
-</svelte:head>
 
 <!-- ════════════════════════════════════════════════════════════════════
      Panel principal — usa HKInfoCard (patrón visual Housekeeping)
@@ -650,7 +645,7 @@
     background: color-mix(in srgb, var(--status-danger) 14%, transparent);
   }
 
-  /* Spin para iconos de carga (espejo del :global(.spin) del HKActionCard) */
+  /* Spin para iconos de carga */
   :global(.ds-btn .spin) {
     animation: ds-spin 1s linear infinite;
   }
