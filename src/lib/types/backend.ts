@@ -637,7 +637,9 @@ export type AlbumArtworkMatchStatus = z.infer<typeof AlbumArtworkMatchStatusSche
 
 export const AlbumArtworkEntrySchema = z.object({
   albumId: z.string(),
-  appleCollectionId: z.number().nullable().optional(),
+  // El backend lo guarda como TEXT y lo devuelve como string (p.ej. "1603164027").
+  // Aceptamos number por robustez, pero la realidad del API es string.
+  appleCollectionId: z.union([z.string(), z.number()]).nullable().optional(),
   country: z.string().nullable().optional(),
   variant: z.string().nullable().optional(),
   localPath: z.string().nullable().optional(),
