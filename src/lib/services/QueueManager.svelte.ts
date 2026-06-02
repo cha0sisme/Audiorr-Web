@@ -1128,13 +1128,47 @@ class QueueManager {
       // Crossfade no-DJ (equal-power simple) — no avance automático.
       return;
     }
-    const nextIdx = this.peekNextIndex();
-    if (nextIdx !== null) {
-      this.currentIndex = nextIdx;
+    // Anclar el avance a la canción que el crossfade REALMENTE metió en el
+    // chain A (`preparedCrossfade.nextSongId`), no a una aritmética
+    // `currentIndex + 1`. Si entre el disparo del fade y este callback otro
+    // path movió el índice (p.ej. un `next()` del engine por un 'ended'
+    // espurio post-swap), `peekNextIndex()` apuntaría un slot de más y el
+    // MiniPlayer (`player.currentSong`) mostraría la canción equivocada
+    // mientras el audio y el scrobble siguen en la entrante.
+    //
+    // Estrategia: preferir el slot esperado (`peekNextIndex`) y caer a una
+    // búsqueda por id SOLO si hay drift. Así el caso normal y `repeat='all'`
+    // (wrap a 0) quedan idénticos, y los tracks duplicados no rompen el caso
+    // feliz (solo se buscan en el path de error, ya degradado).
+    const prepared = this.preparedCrossfade;
+    const expectedIdx = this.peekNextIndex();
+    let targetIdx = expectedIdx;
+    if (
+      prepared !== undefined &&
+      expectedIdx !== null &&
+      this.queue[expectedIdx]?.id !== prepared.nextSongId
+    ) {
+      const found = this.queue.findIndex((s) => s.id === prepared.nextSongId);
+      if (found >= 0) {
+        // Diagnóstico: confirma el doble-avance en la próxima reproducción.
+        // Si esto nunca aparece, el desajuste MiniPlayer↔audio tiene otra
+        // causa. Quitar cuando se cierre el bug.
+        console.warn(
+          '[DJ] onCrossfadeCompleted drift — slot esperado=%d (%s) pero el audio es %s en idx=%d; anclando por id',
+          expectedIdx,
+          this.queue[expectedIdx]?.id,
+          prepared.nextSongId,
+          found
+        );
+        targetIdx = found;
+      }
+    }
+    if (targetIdx !== null) {
+      this.currentIndex = targetIdx;
       this.persistState();
       // Sincroniza el player store con la canción nueva (= chain A
       // post-swap). Optimismo UI: el MiniPlayer cambia al instante.
-      const newSong = this.queue[nextIdx];
+      const newSong = this.queue[targetIdx];
       if (newSong !== undefined) {
         player.currentSong = persistableToPlayerSong(newSong);
       }
