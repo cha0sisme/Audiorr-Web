@@ -2,6 +2,7 @@
   import { theme } from '$stores/theme.svelte';
   import { audioSettings } from '$stores/audio-settings.svelte';
   import Toggle from '$components/shared/Toggle.svelte';
+  import SessionsSelfPanel from '$components/sessions/SessionsSelfPanel.svelte';
 
   let isDark = $derived(theme.current === 'dark');
   let useReplayGain = $derived(audioSettings.useReplayGain);
@@ -38,6 +39,9 @@
       />
     </div>
   </section>
+
+  <!-- ============================================ Seguridad / sesiones -->
+  <SessionsSelfPanel />
 
   <!-- ============================================ Recursos -->
   <section class="card">

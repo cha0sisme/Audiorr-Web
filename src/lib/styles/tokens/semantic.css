@@ -224,6 +224,18 @@
   --status-danger-border: var(--red-7);
   --status-danger-contrast: var(--red-contrast);
 
+  /* DEVICE TONES — color por tipo de dispositivo en el gestor de sesiones
+     activas (icono de cada sesión). Mapeados a primitivos de la paleta para
+     que un componente nunca referencie `--gray-N`/`--green-N` directo:
+       web      → acento de marca (azul).
+       ios      → gris-pizarra frío (plata/grafito Apple).
+       android  → verde Android.
+       unknown  → texto terciario (sin color). */
+  --device-web: var(--accent);
+  --device-ios: var(--gray-9);
+  --device-android: var(--green-9);
+  --device-unknown: var(--text-tertiary);
+
 
   /* ==========================================================================
      COMPONENT-SPECIFIC SEMANTICS

@@ -2,15 +2,15 @@
   /**
    * /housekeeping/usuarios
    *
-   * Sección de gestión de cuenta/usuarios. De momento alberga el gestor de
-   * sesiones activas; queda como contenedor para futuras herramientas de
-   * usuario (preferencias, roles, etc).
+   * Sección de gestión de cuenta/usuarios. Alberga el panel admin de sesiones
+   * activas (todas las sesiones del servidor agrupadas por usuario); queda
+   * como contenedor para futuras herramientas de usuario.
    */
-  import SessionsPanel from './SessionsPanel.svelte';
+  import SessionsAdminPanel from './SessionsAdminPanel.svelte';
 </script>
 
 <svelte:head>
   <title>Usuarios · Housekeeping</title>
 </svelte:head>
 
-<SessionsPanel />
+<SessionsAdminPanel />

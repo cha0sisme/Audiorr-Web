@@ -20,6 +20,7 @@ import {
   AlbumResponseSchema,
   SongResponseSchema,
   UserResponseSchema,
+  GetUsersResponseSchema,
   PlaylistResponseSchema,
   ArtistResponseSchema,
   AlbumInfoResponseSchema,
@@ -526,6 +527,15 @@ export async function getUser(username: string) {
   const creds = requireCreds();
   const data = await call(creds, 'getUser', { username }, UserResponseSchema);
   return data.user;
+}
+
+/** GET /rest/getUsers — todos los usuarios del servidor. Solo admin (Subsonic
+    devuelve 50 "not authorized" si el caller no lo es). Lo usa el panel de
+    Sesiones del Housekeeping para agrupar las sesiones activas por usuario. */
+export async function getUsers() {
+  const creds = requireCreds();
+  const data = await call(creds, 'getUsers', {}, GetUsersResponseSchema);
+  return data.users?.user ?? [];
 }
 
 /**
