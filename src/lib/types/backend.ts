@@ -800,3 +800,44 @@ export const LastPlaybackResponseSchema = z.object({
   lastPlayback: LastPlaybackStateSchema.nullable()
 });
 export type LastPlaybackResponse = z.infer<typeof LastPlaybackResponseSchema>;
+
+// ============================================================================
+// Sesiones activas — /api/auth/sessions (backend eebf559)
+// ============================================================================
+
+/**
+ * Una sesión viva del usuario, estilo "Tus dispositivos" de Google.
+ *
+ * `id` es un hash público estable e irreversible (NO el token) — sirve de
+ * key de lista y de path param para el DELETE; sobrevive a las rotaciones de
+ * token porque deriva del `familyId`. `current` lo resuelve el backend leyendo
+ * el Bearer de la propia request. `country` viene solo de `cf-ipcountry`
+ * (Cloudflare) → null en LAN. Todos los timestamps son epoch ms.
+ *
+ * `platform` usa `.catch(null)` a propósito: si el backend introdujese una
+ * plataforma nueva fuera del whitelist, la fila cae a "Desconocido" en vez de
+ * reventar el parse de toda la lista.
+ */
+export const SessionViewSchema = z.object({
+  id: z.string(),
+  current: z.boolean(),
+  platform: z.enum(['web', 'ios', 'android']).nullable().catch(null),
+  country: z.string().nullable(),
+  ip: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  createdAt: z.number(),
+  lastSeen: z.number(),
+  expiresAt: z.number()
+});
+export type SessionView = z.infer<typeof SessionViewSchema>;
+
+export const SessionsResponseSchema = z.object({
+  sessions: z.array(SessionViewSchema)
+});
+export type SessionsResponse = z.infer<typeof SessionsResponseSchema>;
+
+/** Resultado de "cerrar el resto de dispositivos" (DELETE colectivo). */
+export const CloseSessionsResultSchema = z.object({
+  closed: z.number()
+});
+export type CloseSessionsResult = z.infer<typeof CloseSessionsResultSchema>;

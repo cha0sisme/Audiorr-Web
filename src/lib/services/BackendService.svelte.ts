@@ -223,12 +223,15 @@ class BackendServiceImpl {
     return retry;
   }
 
-  /** Clona el init añadiendo `Authorization: Bearer` (si hay sesión) y
-      forzando `credentials: 'omit'` — la sesión va por header, no por cookie. */
+  /** Clona el init añadiendo `Authorization: Bearer` (si hay sesión),
+      `X-Client-Platform: web` (para que el backend clasifique las sesiones de
+      la web como `'web'` limpio en vez de inferirlas por parse-UA) y forzando
+      `credentials: 'omit'` — la sesión va por header, no por cookie. */
   private withAuth(init: RequestInit): RequestInit {
     const token = authToken.current?.sessionToken;
     const headers = new Headers(init.headers);
     if (token) headers.set('Authorization', `Bearer ${token}`);
+    headers.set('X-Client-Platform', 'web');
     return { ...init, credentials: 'omit', headers };
   }
 
