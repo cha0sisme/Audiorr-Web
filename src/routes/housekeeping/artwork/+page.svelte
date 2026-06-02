@@ -65,6 +65,18 @@
     });
   }
 
+  // Preview bajo demanda: reproduce el vídeo de la fila al entrar el ratón o
+  // el foco, lo pausa al salir. Evita tener cientos de <video> en autoplay.
+  function hoverPlay(ev: Event & { currentTarget: HTMLElement }): void {
+    const video = ev.currentTarget.querySelector('video');
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+  }
+  function hoverPause(ev: Event & { currentTarget: HTMLElement }): void {
+    ev.currentTarget.querySelector('video')?.pause();
+  }
+
   function refLine(e: AlbumArtworkEntry): string {
     const parts: string[] = [];
     if (e.country) parts.push(e.country.toUpperCase());
@@ -111,10 +123,22 @@
       {#each entries as e (e.albumId)}
         {@const videoUrl = resolveArtworkVideoUrl(e)}
         <li class="hk-art-row">
-          <a class="hk-art-preview" href={`/album/${e.albumId}`} aria-label={`Ver ${e.title ?? 'álbum'}`}>
+          <a
+            class="hk-art-preview"
+            href={`/album/${e.albumId}`}
+            aria-label={`Ver ${e.title ?? 'álbum'}`}
+            onmouseenter={hoverPlay}
+            onmouseleave={hoverPause}
+            onfocusin={hoverPlay}
+            onfocusout={hoverPause}
+          >
             {#if videoUrl}
+              <!-- Sin autoplay: con cientos de filas, reproducir todos a la vez
+                   satura red/CPU. Solo se reproduce el que está bajo el ratón
+                   (o con foco de teclado). `preload="metadata"` muestra el
+                   primer frame como póster sin descargar el vídeo entero. -->
               <!-- svelte-ignore a11y_media_has_caption -->
-              <video src={videoUrl} muted loop autoplay playsinline preload="metadata"></video>
+              <video src={videoUrl} muted loop playsinline preload="metadata"></video>
             {:else}
               <span class="hk-art-preview-fallback"><FilmSlate size={20} weight="regular" /></span>
             {/if}
