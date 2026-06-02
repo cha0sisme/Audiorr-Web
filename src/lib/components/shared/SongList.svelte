@@ -13,6 +13,12 @@
         debe traer `coverUrl` poblado. Cuando true escondemos el header de
         columnas (no calza visualmente con thumbs grandes). */
     showCover?: boolean;
+    /** Si se pasa, activa el modo "solo featurings" de Apple Music en cada
+        row: el artista solo se pinta cuando la pista trae invitados distintos
+        del titular del álbum. Lo usa AlbumDetail; las playlists lo dejan
+        undefined (muestran el artista normal). Mirror del `albumArtist` de
+        SongListView (iOS). */
+    albumArtist?: string | undefined;
     /** Llamado al click en una row. El parent decide qué hacer (load song,
         set context, etc). Recibe el track y su índice 0-based. */
     onPlay: (track: SongListItem, index: number) => void;
@@ -23,7 +29,7 @@
   // pero hoy no lo desestructuramos: iOS / Apple Music highlightean la
   // canción actual en CUALQUIER lista donde aparezca, no solo donde se
   // inició el playback.
-  let { tracks, contextType, showCover = false, onPlay }: Props = $props();
+  let { tracks, contextType, showCover = false, albumArtist, onPlay }: Props = $props();
 
   function isCurrent(trackId: string): boolean {
     return player.currentSong?.id === trackId;
@@ -46,6 +52,7 @@
         index={i + 1}
         isCurrent={isCurrent(track.id)}
         artist={track.artist}
+        {albumArtist}
         coverUrl={showCover ? track.coverUrl : undefined}
         {contextType}
         onPlay={() => onPlay(track, i)}

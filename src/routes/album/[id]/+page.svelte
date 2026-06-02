@@ -142,7 +142,10 @@
   // Lightbox state — cover clickeable abre el visor fullscreen.
   let lightboxOpen = $state(false);
 
-  const tracks = $derived(songs.map((s, i) => songToListItem(s, i, false)));
+  // includeArtist=true para que cada track lleve su artista crudo: el modo
+  // "solo featurings" de SongList (vía `albumArtist`) lo usa de fallback y
+  // oculta las pistas que son solo del titular del álbum.
+  const tracks = $derived(songs.map((s, i) => songToListItem(s, i, true)));
 
   const notes = $derived(cleanNotes(albumInfoQ.data?.notes));
 
@@ -471,6 +474,7 @@
         {tracks}
         contextType="album"
         contextId={albumId}
+        albumArtist={album?.artist ?? ''}
         onPlay={loadTrack}
       />
     {:else if album}

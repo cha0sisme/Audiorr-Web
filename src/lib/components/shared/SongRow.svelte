@@ -27,6 +27,7 @@
   import { songInfoUI } from '$stores/song-info-ui.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
   import { formatTime } from '$utils/format';
+  import { displayArtistName, featuringText } from '$utils/artist-format';
   import type { SongListItem } from '$utils/navidrome-mappers';
 
   type Props = {
@@ -35,9 +36,15 @@
     index: number;
     /** True = es la canción actualmente sonando desde este contexto. */
     isCurrent: boolean;
-    /** Mostrar artist debajo del título (modo playlist, donde tracks son
-        de varios artistas). En albums el artist es global, no se repite. */
+    /** Artist crudo de la pista (titular principal). Se usa para el menú
+        contextual y como fallback de formato. El texto que se PINTA bajo el
+        título lo deriva `displayArtist` (formato Apple Music). */
     artist?: string | undefined;
+    /** Si se pasa, activa el modo "solo featurings" estilo Apple Music: el
+        artista solo se pinta cuando la pista trae invitados distintos del
+        titular del álbum ("Drake feat. Snoop Dogg"); si es solo del titular,
+        no se muestra nada. Mirror del `albumArtist` de SongRowView (iOS). */
+    albumArtist?: string | undefined;
     /** URL del cover thumbnail. Cuando viene, se renderiza un thumb 40x40
         a la izquierda (modo "Popular" en ArtistDetail). El indicador de
         número/play queda escondido para evitar duplicar info visual. */
@@ -48,10 +55,26 @@
     onPlay: () => void;
   };
 
-  let { track, index, isCurrent, artist, coverUrl, contextType, onPlay }: Props = $props();
+  let { track, index, isCurrent, artist, albumArtist, coverUrl, contextType, onPlay }: Props =
+    $props();
 
   const explicit = $derived(track.explicit ?? false);
   const showCover = $derived(coverUrl !== undefined);
+
+  /** Texto del artista a pintar bajo el título. `null` = no mostrar nada.
+      - Con `albumArtist` (página de álbum): solo featurings, formato
+        "Drake feat. Snoop Dogg" (oculta las pistas que son solo del titular).
+      - Sin `albumArtist` (playlist/popular): el artista crudo formateado al
+        estilo Apple Music cuando hay varios ("A & B"). Mirror del `artistText`
+        de SongRowView (iOS). */
+  const displayArtist = $derived.by<string | null>(() => {
+    const list = track.artists ?? [];
+    if (albumArtist !== undefined) {
+      return featuringText(list, artist ?? '', albumArtist);
+    }
+    if (artist === undefined) return null;
+    return displayArtistName(list, artist);
+  });
 
   let hovered = $state(false);
   let menuOpen = $state(false);
@@ -243,8 +266,8 @@
         <ExplicitBadge size="14px" />
       {/if}
     </span>
-    {#if artist}
-      <span class="artist">{artist}</span>
+    {#if displayArtist}
+      <span class="artist">{displayArtist}</span>
     {/if}
   </span>
 
