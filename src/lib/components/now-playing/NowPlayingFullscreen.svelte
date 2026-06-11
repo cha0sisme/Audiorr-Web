@@ -42,7 +42,7 @@
   import { goto } from '$app/navigation';
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import {
-    CaretDown, DotsThree, MusicNote, Heart, SkipForward, SkipBack,
+    CaretDown, DotsThree, MusicNote, Star, SkipForward, SkipBack,
     Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast,
     Queue as QueueIcon, FilmStrip, ListPlus
   } from 'phosphor-svelte';
@@ -53,6 +53,7 @@
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { lyricsService, EMPTY_LYRICS, type LyricsResult } from '$services/LyricsService.svelte';
   import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
+  import { favorites } from '$stores/favorites.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
@@ -89,6 +90,7 @@
   });
 
   const hasCanvas = $derived(canvas.videoUrl !== null);
+  const isFav = $derived(song !== null && favorites.isSong(song.id));
 
   // ─── Lyrics fetch ──────────────────────────────────────────────────────
   // Cadena getLyricsBySongId (embedded ID3/.lrc) → LRCLib → getLyrics legacy.
@@ -630,10 +632,15 @@
             type="button"
             class="np-icon-btn np-heart np-heart-btn"
             class:just-clicked={just.heart}
-            aria-label="Añadir a favoritos"
-            onclick={() => flash('heart')}
+            class:is-fav={isFav}
+            aria-label={isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+            aria-pressed={isFav}
+            onclick={() => {
+              flash('heart');
+              if (song) void favorites.toggleSong(song.id);
+            }}
           >
-            <Heart size={22} weight="regular" />
+            <Star size={22} weight={isFav ? 'fill' : 'regular'} />
           </button>
         </div>
       </section>
@@ -1202,6 +1209,9 @@
     flex-shrink: 0;
     color: rgba(255, 255, 255, 0.7);
   }
+  .np-heart.is-fav {
+    color: #fff;
+  }
 
   /* ============================================================================
      LYRICS MODE — Mirror iOS NowPlayingViewerView.lyricsHeader (líneas 392-437):
@@ -1729,7 +1739,7 @@
      Apple/Disney "12 principles": anticipation (squash) → action (overshoot)
      → settling. Multi-stage keyframes con filter brightness/saturate en peak,
      halos con blur sutil. Diferenciación por botón:
-       Heart        → pop + halo coral cálido (no accent)
+       Star (fav)   → pop + halo coral cálido (no accent)
        Play/Pause   → box-shadow tactile (vive dentro, no ring exterior)
        Skip prev/fw → bounce direccional (translateX hacia la dirección)
        Lyrics       → pulse del micro con drop-shadow (encendido)

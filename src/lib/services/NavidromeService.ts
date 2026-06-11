@@ -20,6 +20,7 @@ import {
   AlbumResponseSchema,
   SongResponseSchema,
   UserResponseSchema,
+  GetStarred2ResponseSchema,
   PlaylistResponseSchema,
   ArtistResponseSchema,
   AlbumInfoResponseSchema,
@@ -532,6 +533,47 @@ export async function getUser(username: string) {
 // devolviendo SOLO el usuario autenticado (incluso para admin), así que no sirve
 // para enumerar usuarios — el panel de Sesiones usa GET /api/auth/sessions/all
 // del backend, que ya conoce todas las sesiones con su username.
+
+// ============================================================================
+// Favoritos (star / unstar / getStarred2)
+// ============================================================================
+
+/** Target de star/unstar: una canción (`id`), un álbum (`albumId`) o un
+    artista (`artistId`). Subsonic acepta varios a la vez; nosotros pasamos
+    los que vengan informados. */
+export type StarTarget = { id?: string; albumId?: string; artistId?: string };
+
+function starParams(target: StarTarget): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (target.id) params.id = target.id;
+  if (target.albumId) params.albumId = target.albumId;
+  if (target.artistId) params.artistId = target.artistId;
+  return params;
+}
+
+/** GET /rest/star — marca como favorito. Respuesta = envelope vacío. */
+export async function star(target: StarTarget): Promise<void> {
+  const creds = requireCreds();
+  await call(creds, 'star', starParams(target));
+}
+
+/** GET /rest/unstar — quita de favoritos. Idempotente server-side. */
+export async function unstar(target: StarTarget): Promise<void> {
+  const creds = requireCreds();
+  await call(creds, 'unstar', starParams(target));
+}
+
+/** GET /rest/getStarred2 — favoritos del usuario (songs/albums/artists),
+    organizados por ID3 tags como el resto de endpoints *2 que usamos. */
+export async function getStarred2() {
+  const creds = requireCreds();
+  const data = await call(creds, 'getStarred2', {}, GetStarred2ResponseSchema);
+  return {
+    songs: data.starred2?.song ?? [],
+    albums: data.starred2?.album ?? [],
+    artists: data.starred2?.artist ?? []
+  };
+}
 
 /**
  * Subsonic `updatePlaylist` — cambios de metadata (name/comment/public)

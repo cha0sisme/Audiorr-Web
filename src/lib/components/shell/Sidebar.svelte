@@ -4,7 +4,7 @@
   import { tick } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import {
-    House, MagnifyingGlass, VinylRecord, Heart,
+    House, MagnifyingGlass, VinylRecord, Star,
     ListPlus, UsersThree, X, SidebarSimple
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
@@ -39,7 +39,7 @@
   const mainNav: NavItem[] = [
     { href: '/', label: 'Inicio', Icon: House, category: 'home' },
     { href: '/library', label: 'Tu librería', Icon: VinylRecord, category: 'library' },
-    { href: '/favorites', label: 'Favoritos', Icon: Heart, category: 'favorites' }
+    { href: '/favorites', label: 'Favoritos', Icon: Star, category: 'favorites' }
   ];
 
   const libraryNav: NavItem[] = [

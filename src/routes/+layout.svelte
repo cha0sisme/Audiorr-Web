@@ -27,6 +27,7 @@
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
+  import { favorites } from '$stores/favorites.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
@@ -70,6 +71,15 @@
   $effect(() => {
     if (credentials.isConfigured) {
       void authInfo.refresh();
+    }
+  });
+
+  /** Siembra el set de favoritos (Subsonic getStarred2) cuando hay creds.
+      Idempotente dentro del store. Lo consumen el context menu de SongRow y
+      el corazón del Now Playing sin pagar un fetch por componente. */
+  $effect(() => {
+    if (credentials.isConfigured) {
+      void favorites.ensureLoaded();
     }
   });
 

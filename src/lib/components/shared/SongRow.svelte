@@ -6,6 +6,7 @@
     DotsThree,
     Plus,
     ListPlus,
+    Star,
     User,
     Disc,
     Wrench,
@@ -26,6 +27,7 @@
   import { viewArtistsUI } from '$stores/view-artists-ui.svelte';
   import { songInfoUI } from '$stores/song-info-ui.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
+  import { favorites } from '$stores/favorites.svelte';
   import { formatTime } from '$utils/format';
   import { displayArtistName, featuringText } from '$utils/artist-format';
   import type { SongListItem } from '$utils/navidrome-mappers';
@@ -110,6 +112,13 @@
         icon: ListPlus,
         action: () => {
           addToPlaylistUI.open([track.id]);
+        }
+      },
+      {
+        label: favorites.isSong(track.id) ? 'Quitar de favoritos' : 'Añadir a favoritos',
+        icon: Star,
+        action: () => {
+          void favorites.toggleSong(track.id);
         }
       }
     ];

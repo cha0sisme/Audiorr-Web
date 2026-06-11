@@ -241,6 +241,18 @@ export const UserResponseSchema = z.object({
   user: NavidromeUserSchema
 });
 
+/** GET /rest/getStarred2 — favoritos del usuario (song/album/artist). Los
+    arrays faltan cuando no hay nada marcado de ese tipo. */
+export const GetStarred2ResponseSchema = z.object({
+  starred2: z
+    .object({
+      artist: z.array(NavidromeArtistSchema).optional(),
+      album: z.array(NavidromeAlbumSchema).optional(),
+      song: z.array(NavidromeSongSchema).optional()
+    })
+    .optional()
+});
+
 /** GET /rest/getPlaylist → playlist with embedded entries (songs) */
 export const PlaylistResponseSchema = z.object({
   playlist: NavidromePlaylistSchema.extend({
