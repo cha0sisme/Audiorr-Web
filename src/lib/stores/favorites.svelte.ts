@@ -74,6 +74,37 @@ class FavoritesStore {
     }
   }
 
+  /**
+   * Resuelve el id Navidrome de la playlist "Favoritos" materializada por el
+   * backend para el usuario actual (name + comment 'Starred Synced' + owner).
+   * Si aún no existe, dispara un sync síncrono y reintenta una vez. Devuelve
+   * null si no se pudo materializar (p.ej. backend desplegado sin la feature).
+   */
+  async resolvePlaylistId(): Promise<string | null> {
+    const found = await this.findMaterializedPlaylist();
+    if (found) return found;
+    try {
+      await backendService.post('/api/starred/sync', undefined, z.unknown());
+    } catch {
+      return null;
+    }
+    return this.findMaterializedPlaylist();
+  }
+
+  private async findMaterializedPlaylist(): Promise<string | null> {
+    const user = (credentials.current?.username ?? '').toLowerCase();
+    if (!user) return null;
+    const playlists = await nav.getPlaylists();
+    return (
+      playlists.find(
+        (p) =>
+          p.name === 'Favoritos' &&
+          (p.comment ?? '').includes('Starred Synced') &&
+          (p.owner ?? '').toLowerCase() === user
+      )?.id ?? null
+    );
+  }
+
   private apply(id: string, fav: boolean): ReadonlySet<string> {
     const next = new Set(this.songIds);
     if (fav) {

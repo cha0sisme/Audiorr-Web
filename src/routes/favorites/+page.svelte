@@ -1,133 +1,100 @@
 <script lang="ts">
   /**
-   * /favorites — canciones marcadas como favoritas (Subsonic getStarred2).
+   * /favorites — puerta a la playlist Navidrome "Favoritos" del usuario.
    *
-   * La query trae el snapshot del server; la lista visible se cruza con el
-   * store `favorites` para que quitar una canción desde el context menu la
-   * saque de la vista al instante, sin esperar refetch. Favoritos añadidos
-   * desde otras vistas aparecen al volver a montar la página (staleTime 0).
-   *
-   * Reproducción ad-hoc (sin PlaybackContext): favoritos no es un álbum ni
-   * una playlist — mismo criterio que la reproducción desde /search.
+   * El backend materializa los /star como una playlist real por usuario
+   * (source='starred'), así que la experiencia canónica de favoritos ES la
+   * página de playlist normal (cover de estrella, DJ mode, SmartMix, todo).
+   * Esta ruta solo la resuelve y redirige a /playlist/<id>; si todavía no
+   * existe (primer uso), dispara un sync y reintenta. El estado de fallo
+   * cubre un backend desplegado sin la feature.
    */
-  import { createQuery } from '@tanstack/svelte-query';
-  import { Star, Play, Shuffle } from 'phosphor-svelte';
-  import SongList from '$components/shared/SongList.svelte';
-  import * as nav from '$services/NavidromeService';
-  import { songToListItem, type SongListItem } from '$utils/navidrome-mappers';
+  import { untrack } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { Star, ArrowsClockwise } from 'phosphor-svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { favorites } from '$stores/favorites.svelte';
-  import { player } from '$stores/player.svelte';
-  import { queueManager } from '$services/QueueManager.svelte';
 
-  const starredQ = createQuery(() => ({
-    queryKey: ['starred2'],
-    queryFn: () => nav.getStarred2(),
-    enabled: credentials.isConfigured
-  }));
+  let failed = $state(false);
+  let resolving = $state(false);
 
-  const allSongs = $derived(starredQ.data?.songs ?? []);
-  const songs = $derived(
-    favorites.loaded ? allSongs.filter((s) => favorites.isSong(s.id)) : allSongs
-  );
-  const tracks = $derived<SongListItem[]>(songs.map((s, i) => songToListItem(s, i, true, true)));
-
-  function loadTrack(_track: SongListItem, index: number) {
-    if (songs.length === 0) return;
-    player.context = null;
-    queueManager.play(songs, index);
+  async function resolve() {
+    if (resolving) return;
+    resolving = true;
+    failed = false;
+    try {
+      const id = await favorites.resolvePlaylistId();
+      if (id) {
+        await goto(`/playlist/${id}`, { replaceState: true });
+        return;
+      }
+      failed = true;
+    } catch {
+      failed = true;
+    } finally {
+      resolving = false;
+    }
   }
 
-  function playAll() {
-    if (songs.length === 0) return;
-    if (queueManager.shuffleMode) queueManager.toggleShuffle();
-    player.context = null;
-    queueManager.play(songs, 0);
-  }
-
-  function shuffleAll() {
-    if (songs.length === 0) return;
-    if (!queueManager.shuffleMode) queueManager.toggleShuffle();
-    player.context = null;
-    queueManager.play(songs, 0);
-  }
+  // untrack: resolve() lee/escribe $state síncronamente; sin él, el effect
+  // se suscribiría a `resolving`/`failed` y re-dispararía en bucle.
+  $effect(() => {
+    if (credentials.isConfigured) untrack(() => void resolve());
+  });
 </script>
 
 <svelte:head>
   <title>Favoritos · Audiorr</title>
 </svelte:head>
 
-<div class="fav-page">
-  <header class="header">
-    <h1 class="title">Favoritos</h1>
-    {#if tracks.length > 0}
-      <p class="lead">
-        {tracks.length}
-        {tracks.length === 1 ? 'canción' : 'canciones'}
-      </p>
-      <div class="actions">
-        <button type="button" class="action-btn primary" onclick={playAll}>
-          <Play size={16} weight="fill" />
-          Reproducir
-        </button>
-        <button type="button" class="action-btn" onclick={shuffleAll}>
-          <Shuffle size={16} weight="bold" />
-          Aleatorio
-        </button>
-      </div>
-    {/if}
-  </header>
-
-  {#if starredQ.isPending}
-    <div class="skel-list">
-      {#each Array(8) as _}
-        <div class="skel-row"></div>
-      {/each}
-    </div>
-  {:else if starredQ.isError}
-    <p class="empty">No se han podido cargar tus favoritos. Reintenta.</p>
-  {:else if tracks.length === 0}
-    <div class="empty-state">
+<div class="fav-gate">
+  {#if failed}
+    <div class="state">
       <Star size={36} weight="regular" />
-      <p class="empty-title">Aún no tienes favoritos</p>
-      <p class="empty-sub">
-        Marca canciones con la estrella desde el reproductor o desde el menú de cualquier lista.
+      <p class="state-title">Tu playlist de favoritos no está lista</p>
+      <p class="state-sub">
+        Marca alguna canción con la estrella y vuelve a intentarlo. Si el problema persiste,
+        puede que el servidor necesite actualizarse.
       </p>
+      <button type="button" class="retry-btn" disabled={resolving} onclick={() => void resolve()}>
+        <ArrowsClockwise size={16} weight="bold" />
+        Reintentar
+      </button>
     </div>
   {:else}
-    <SongList {tracks} contextType="queue" contextId="favorites" showCover onPlay={loadTrack} />
+    <div class="state" aria-busy="true">
+      <span class="spinner" aria-hidden="true"></span>
+      <p class="state-title">Abriendo tus favoritos…</p>
+    </div>
   {/if}
 </div>
 
 <style>
-  .fav-page {
+  .fav-gate {
     display: grid;
-    gap: var(--space-6);
+    place-items: center;
+    min-height: 50vh;
   }
-
-  .header {
+  .state {
     display: grid;
-    gap: var(--space-2);
+    justify-items: center;
+    gap: var(--space-3);
+    color: var(--text-tertiary);
+    text-align: center;
+    max-width: 44ch;
   }
-  .title {
+  .state-title {
     margin: 0;
-    font-size: var(--text-3xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display);
-    color: var(--text-primary);
-    line-height: 1.15;
-  }
-  .lead {
-    margin: 0;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
+    font-weight: 600;
     color: var(--text-secondary);
   }
-  .actions {
-    margin-top: var(--space-2);
-    display: flex;
-    gap: var(--space-3);
+  .state-sub {
+    margin: 0;
+    font-size: var(--text-sm);
   }
-  .action-btn {
+  .retry-btn {
+    margin-top: var(--space-2);
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
@@ -142,64 +109,28 @@
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-ios-default);
   }
-  .action-btn:hover {
+  .retry-btn:hover:not(:disabled) {
     background: var(--bg-surface-hover);
   }
-  .action-btn.primary {
-    background: var(--accent);
-    border-color: transparent;
-    color: var(--text-on-accent);
+  .retry-btn:disabled {
+    opacity: 0.5;
+    cursor: progress;
   }
-  .action-btn.primary:hover {
-    background: var(--accent-hover);
-  }
-  .action-btn:focus-visible {
+  .retry-btn:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
-
-  /* ── Skeleton / vacíos ── */
-  .skel-list {
-    display: grid;
-    gap: var(--space-2);
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 3px solid var(--border-subtle);
+    border-top-color: var(--accent);
+    animation: fav-spin 0.8s linear infinite;
   }
-  .skel-row {
-    height: 56px;
-    border-radius: var(--radius-md);
-    background: var(--bg-surface);
-    animation: fav-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes fav-pulse {
-    0%,
-    100% {
-      opacity: 1;
+  @keyframes fav-spin {
+    to {
+      transform: rotate(360deg);
     }
-    50% {
-      opacity: 0.5;
-    }
-  }
-  .empty {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-  }
-  .empty-state {
-    display: grid;
-    justify-items: center;
-    gap: var(--space-2);
-    padding: var(--space-10) var(--space-4);
-    color: var(--text-tertiary);
-    text-align: center;
-  }
-  .empty-title {
-    margin: 0;
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--text-secondary);
-  }
-  .empty-sub {
-    margin: 0;
-    font-size: var(--text-sm);
-    max-width: 40ch;
   }
 </style>

@@ -228,6 +228,13 @@
     e.stopPropagation();
     menuOpen = !menuOpen;
   }
+
+  const isFav = $derived(favorites.isSong(track.id));
+
+  function handleFavClick(e: MouseEvent) {
+    e.stopPropagation();
+    void favorites.toggleSong(track.id);
+  }
 </script>
 
 <div
@@ -280,6 +287,17 @@
     {/if}
   </span>
 
+  <button
+    type="button"
+    class="fav-btn"
+    class:is-fav={isFav}
+    onclick={handleFavClick}
+    aria-label={isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+    aria-pressed={isFav}
+  >
+    <Star size={16} weight={isFav ? 'fill' : 'regular'} />
+  </button>
+
   <span class="duration">{formatTime(track.durationSec)}</span>
 
   <span class="menu-anchor">
@@ -313,7 +331,7 @@
 
     width: 100%;
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) auto 36px;
+    grid-template-columns: 32px minmax(0, 1fr) 28px auto 36px;
     align-items: center;
     column-gap: var(--space-4);
     padding: var(--space-2) var(--space-4);
@@ -326,7 +344,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .row.with-cover {
-    grid-template-columns: 40px minmax(0, 1fr) auto 36px;
+    grid-template-columns: 40px minmax(0, 1fr) 28px auto 36px;
   }
   .row:hover,
   .row.menu-open {
@@ -463,6 +481,49 @@
     outline: none;
     opacity: 1;
     color: var(--text-primary);
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Botón favorito: invisible hasta hover/focus de la fila (la estrella
+     vacía en cada fila sería ruido visual); cuando la canción ES favorita,
+     siempre visible con relleno accent. En touch el toggle vive también en
+     el context menu, así que la discoverability no depende del hover. */
+  .fav-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition:
+      opacity var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .row:hover .fav-btn,
+  .row:focus-within .fav-btn {
+    opacity: 0.7;
+  }
+  .fav-btn.is-fav {
+    opacity: 1;
+    color: var(--accent);
+  }
+  .fav-btn:hover {
+    opacity: 1;
+    color: var(--text-primary);
+    background: var(--bg-surface-hover);
+  }
+  .fav-btn.is-fav:hover {
+    color: var(--accent);
+  }
+  .fav-btn:focus-visible {
+    outline: none;
+    opacity: 1;
     box-shadow: var(--focus-ring);
   }
 

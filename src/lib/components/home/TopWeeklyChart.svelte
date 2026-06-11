@@ -20,6 +20,7 @@
     Play,
     Plus,
     Queue,
+    Star,
     User
   } from 'phosphor-svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
@@ -30,6 +31,7 @@
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { queueManager } from '$services/QueueManager.svelte';
   import { player } from '$stores/player.svelte';
+  import { favorites } from '$stores/favorites.svelte';
   import type { TopWeeklySong } from '$types/backend';
   import type { NavidromeSong } from '$types/navidrome';
 
@@ -126,6 +128,13 @@
         action: () => {
           // TODO: abrir picker de playlists.
         }
+      },
+      {
+        label: favorites.isSong(song.song_id) ? 'Quitar de favoritos' : 'Añadir a favoritos',
+        icon: Star,
+        action: () => {
+          void favorites.toggleSong(song.song_id);
+        }
       }
     ];
     const navItems: ContextMenuItem[] = [];
@@ -154,6 +163,11 @@
     return items;
   }
 
+  function handleFavClick(songId: string, e: MouseEvent) {
+    e.stopPropagation();
+    void favorites.toggleSong(songId);
+  }
+
   function toggleMenu(idx: number, e: MouseEvent) {
     e.stopPropagation();
     openMenuIdx = openMenuIdx === idx ? null : idx;
@@ -176,6 +190,7 @@
 {#snippet row(song: TopWeeklySong, idx: number)}
   {@const isCurrent = player.currentSong?.id === song.song_id}
   {@const explicit = isExplicit(song.song_id)}
+  {@const isFav = favorites.isSong(song.song_id)}
   <li>
     <div
       class="row"
@@ -224,6 +239,17 @@
           <span class="dash">—</span>
         {/if}
       </span>
+
+      <button
+        type="button"
+        class="fav-btn"
+        class:is-fav={isFav}
+        onclick={(e) => handleFavClick(song.song_id, e)}
+        aria-label={isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+        aria-pressed={isFav}
+      >
+        <Star size={16} weight={isFav ? 'fill' : 'regular'} />
+      </button>
 
       <span class="menu-anchor">
         <button
@@ -289,7 +315,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: 32px 56px minmax(0, 1fr) auto auto;
+    grid-template-columns: 32px 56px minmax(0, 1fr) auto auto auto;
     align-items: center;
     gap: var(--space-3);
     width: 100%;
@@ -431,6 +457,46 @@
   .dots-btn:focus-visible {
     outline: none;
     background: var(--bg-surface-active);
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Botón favorito — mismo patrón que SongRow: invisible hasta hover/focus
+     de la fila; siempre visible con relleno accent cuando es favorita. */
+  .fav-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-full);
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition:
+      opacity var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .row:hover .fav-btn,
+  .row:focus-within .fav-btn {
+    opacity: 0.7;
+  }
+  .fav-btn.is-fav {
+    opacity: 1;
+    color: var(--accent);
+  }
+  .fav-btn:hover {
+    opacity: 1;
+    background: var(--bg-surface-active);
+    color: var(--text-primary);
+  }
+  .fav-btn.is-fav:hover {
+    color: var(--accent);
+  }
+  .fav-btn:focus-visible {
+    outline: none;
+    opacity: 1;
     box-shadow: var(--focus-ring);
   }
 </style>
