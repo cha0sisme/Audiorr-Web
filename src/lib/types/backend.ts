@@ -836,6 +836,19 @@ export const SessionsResponseSchema = z.object({
 });
 export type SessionsResponse = z.infer<typeof SessionsResponseSchema>;
 
+/** GET /api/auth/sessions/all (admin) — todas las sesiones del servidor
+    agrupadas por usuario. `isAdmin` = OR de los flags de las sesiones vivas
+    del usuario. */
+export const UserSessionsViewSchema = z.object({
+  username: z.string(),
+  isAdmin: z.boolean(),
+  sessions: z.array(SessionViewSchema)
+});
+export type UserSessionsView = z.infer<typeof UserSessionsViewSchema>;
+export const SessionsAllResponseSchema = z.object({
+  users: z.array(UserSessionsViewSchema)
+});
+
 /** Resultado de "cerrar el resto de dispositivos" (DELETE colectivo). */
 export const CloseSessionsResultSchema = z.object({
   closed: z.number()

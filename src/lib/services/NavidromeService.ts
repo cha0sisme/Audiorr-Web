@@ -20,7 +20,6 @@ import {
   AlbumResponseSchema,
   SongResponseSchema,
   UserResponseSchema,
-  GetUsersResponseSchema,
   PlaylistResponseSchema,
   ArtistResponseSchema,
   AlbumInfoResponseSchema,
@@ -529,14 +528,10 @@ export async function getUser(username: string) {
   return data.user;
 }
 
-/** GET /rest/getUsers — todos los usuarios del servidor. Solo admin (Subsonic
-    devuelve 50 "not authorized" si el caller no lo es). Lo usa el panel de
-    Sesiones del Housekeeping para agrupar las sesiones activas por usuario. */
-export async function getUsers() {
-  const creds = requireCreds();
-  const data = await call(creds, 'getUsers', {}, GetUsersResponseSchema);
-  return data.users?.user ?? [];
-}
+// NOTA: no hay wrapper de /rest/getUsers a propósito. Navidrome lo implementa
+// devolviendo SOLO el usuario autenticado (incluso para admin), así que no sirve
+// para enumerar usuarios — el panel de Sesiones usa GET /api/auth/sessions/all
+// del backend, que ya conoce todas las sesiones con su username.
 
 /**
  * Subsonic `updatePlaylist` — cambios de metadata (name/comment/public)

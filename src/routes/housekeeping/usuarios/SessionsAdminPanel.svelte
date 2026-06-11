@@ -2,11 +2,11 @@
   /**
    * Panel admin de sesiones activas (Housekeeping → Usuarios).
    *
-   * Muestra TODAS las sesiones abiertas del servidor, agrupadas por usuario.
-   * Fan-out: lista los usuarios (Subsonic `getUsers`, admin) y pide las
-   * sesiones de cada uno (`/api/auth/sessions?user=<u>`). El backend no expone
-   * un endpoint agregado ni el username en el payload, así que el agrupado se
-   * arma en cliente.
+   * Muestra TODAS las sesiones abiertas del servidor, agrupadas por usuario,
+   * vía el agregado admin `GET /api/auth/sessions/all`. (El fan-out original
+   * sobre Subsonic `getUsers` no funcionaba: Navidrome lo implementa
+   * devolviendo solo al usuario autenticado, así que el panel solo veía las
+   * sesiones del propio admin.)
    *
    * Acciones: cerrar una sesión concreta, o cerrar todas las de un usuario
    * ("el resto" para el propio admin, conservando la actual; "todas" para
@@ -22,8 +22,7 @@
   import SessionRow from '$components/sessions/SessionRow.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import { credentials } from '$stores/credentials.svelte';
-  import * as nav from '$services/NavidromeService';
-  import { listSessions, closeSession, closeOtherSessions } from '$services/sessions';
+  import { listAllSessions, closeSession, closeOtherSessions } from '$services/sessions';
   import { sortSessions } from '$utils/session-format';
   import type { SessionView } from '$types/backend';
 
@@ -35,35 +34,25 @@
   };
 
   const queryClient = useQueryClient();
-  const selfName = $derived(credentials.current?.username ?? '');
 
   const groupsQ = createQuery(() => ({
     queryKey: ['authSessions', 'all'],
     queryFn: async (): Promise<Group[]> => {
-      const users = await nav.getUsers();
-      const self = credentials.current?.username ?? '';
-      const built = await Promise.all(
-        users.map(async (u) => {
-          // Tolerante: si la lista de un usuario falla (permisos, red), su
-          // grupo sale vacío en vez de tumbar todo el panel.
-          let sessions: SessionView[] = [];
-          try {
-            sessions = await listSessions(u.username);
-          } catch {
-            sessions = [];
-          }
-          return {
-            username: u.username,
-            isAdmin: u.adminRole === true,
-            isSelf: u.username === self,
-            sessions: sortSessions(sessions)
-          } satisfies Group;
-        })
-      );
-      // Solo usuarios con sesiones abiertas. Orden: yo primero, luego por
-      // nº de sesiones desc, luego alfabético.
-      return built
-        .filter((g) => g.sessions.length > 0)
+      const users = await listAllSessions();
+      // El backend canonicaliza usernames a lowercase; las credenciales locales
+      // pueden conservar el casing que tecleó el usuario.
+      const self = (credentials.current?.username ?? '').toLowerCase();
+      // Orden: yo primero, luego por nº de sesiones desc, luego alfabético.
+      return users
+        .map(
+          (u) =>
+            ({
+              username: u.username,
+              isAdmin: u.isAdmin,
+              isSelf: u.username === self,
+              sessions: sortSessions(u.sessions)
+            }) satisfies Group
+        )
         .sort((a, b) => {
           if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
           if (a.sessions.length !== b.sessions.length) return b.sessions.length - a.sessions.length;

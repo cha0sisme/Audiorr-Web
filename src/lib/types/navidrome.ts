@@ -241,16 +241,6 @@ export const UserResponseSchema = z.object({
   user: NavidromeUserSchema
 });
 
-/** GET /rest/getUsers — lista de todos los usuarios (solo admin). El nodo
-    `user` puede faltar si el servidor no devuelve ninguno. */
-export const GetUsersResponseSchema = z.object({
-  users: z
-    .object({
-      user: z.array(NavidromeUserSchema).optional()
-    })
-    .optional()
-});
-
 /** GET /rest/getPlaylist → playlist with embedded entries (songs) */
 export const PlaylistResponseSchema = z.object({
   playlist: NavidromePlaylistSchema.extend({
