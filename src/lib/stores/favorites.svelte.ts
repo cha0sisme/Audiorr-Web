@@ -10,9 +10,21 @@
  * El Set se REASIGNA (inmutable) en cada mutación para que la reactividad de
  * runes propague sin depender de deep-tracking de colecciones.
  */
+import { z } from 'zod';
 import * as nav from '$services/NavidromeService';
+import { backendService } from '$services/BackendService.svelte';
 import { credentials } from './credentials.svelte';
 import { toasts } from './toasts.svelte';
+
+/**
+ * Aviso fire-and-forget al backend tras un toggle: materializa/actualiza la
+ * playlist Navidrome "Favoritos" del usuario al instante (POST coalesced
+ * server-side; 202 si ya hay un sync en vuelo). Si falla, el cron de
+ * reconciliación del backend (15 min) lo cubre — nunca afecta al toggle.
+ */
+function notifyStarredSync(): void {
+  void backendService.post('/api/starred/sync', undefined, z.unknown()).catch(() => {});
+}
 
 class FavoritesStore {
   songIds = $state<ReadonlySet<string>>(new Set());
@@ -52,6 +64,7 @@ class FavoritesStore {
       } else {
         await nav.star({ id });
       }
+      notifyStarredSync();
     } catch (err) {
       this.songIds = this.apply(id, wasFav);
       toasts.error(
