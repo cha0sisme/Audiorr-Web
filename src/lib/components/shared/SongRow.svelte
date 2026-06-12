@@ -250,6 +250,17 @@
   onclick={handleRowClick}
   onkeydown={handleRowKeydown}
 >
+  <button
+    type="button"
+    class="fav-btn"
+    class:is-fav={isFav}
+    onclick={handleFavClick}
+    aria-label={isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+    aria-pressed={isFav}
+  >
+    <Star size={16} weight={isFav ? 'fill' : 'regular'} />
+  </button>
+
   {#if showCover}
     <span class="cover-slot" aria-hidden="true">
       <CoverImage src={coverUrl} alt="" priority="low" width={120} height={120}>
@@ -287,17 +298,6 @@
     {/if}
   </span>
 
-  <button
-    type="button"
-    class="fav-btn"
-    class:is-fav={isFav}
-    onclick={handleFavClick}
-    aria-label={isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
-    aria-pressed={isFav}
-  >
-    <Star size={16} weight={isFav ? 'fill' : 'regular'} />
-  </button>
-
   <span class="duration">{formatTime(track.durationSec)}</span>
 
   <span class="menu-anchor">
@@ -331,7 +331,7 @@
 
     width: 100%;
     display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) 28px auto 36px;
+    grid-template-columns: 28px 32px minmax(0, 1fr) auto 36px;
     align-items: center;
     column-gap: var(--space-4);
     padding: var(--space-2) var(--space-4);
@@ -344,7 +344,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .row.with-cover {
-    grid-template-columns: 40px minmax(0, 1fr) 28px auto 36px;
+    grid-template-columns: 28px 40px minmax(0, 1fr) auto 36px;
   }
   .row:hover,
   .row.menu-open {
