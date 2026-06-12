@@ -20,7 +20,7 @@
   import { goto } from '$app/navigation';
   import { onMount, tick } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { House, FilmReel, Layout, Books, Waveform, FilmSlate, Users } from 'phosphor-svelte';
+  import { House, FilmReel, Layout, Books, Waveform, FilmSlate, Users, Palette } from 'phosphor-svelte';
   import { credentials } from '$stores/credentials.svelte';
   import * as nav from '$services/NavidromeService';
 
@@ -54,6 +54,7 @@
     { id: 'dashboard',   label: 'Inicio',      href: '/housekeeping/dashboard',    Icon: House    },
     { id: 'contenido',   label: 'Contenido',   href: '/housekeeping/contenido',    Icon: FilmReel },
     { id: 'portada',     label: 'Portada',     href: '/housekeeping/portada',      Icon: Layout   },
+    { id: 'covers',      label: 'Covers',      href: '/housekeeping/covers',       Icon: Palette  },
     { id: 'artwork',     label: 'Artwork',     href: '/housekeeping/artwork',      Icon: FilmSlate },
     { id: 'editorial',   label: 'Editorial',   href: '/housekeeping/editorial',    Icon: Books    },
     { id: 'usuarios',    label: 'Usuarios',    href: '/housekeeping/usuarios',     Icon: Users    },

@@ -239,6 +239,30 @@ export type GenerateAllSmartPlaylistsResponse = z.infer<
   typeof GenerateAllSmartPlaylistsResponseSchema
 >;
 
+/** Variants válidas para la cover de una SmartPlaylist.
+    Coincide con VALID_COVER_VARIANTS del backend (src/services/coverService.ts). */
+export const SMART_PLAYLIST_COVER_VARIANTS = [
+  'classic',
+  'headline',
+  'graphic',
+  'artist-gradient',
+  'aurora',
+  'prism',
+  'ripple'
+] as const;
+export type SmartPlaylistCoverVariant = (typeof SMART_PLAYLIST_COVER_VARIANTS)[number];
+
+/** Las tres variants nuevas del rediseño 2026 que se muestran como opciones
+    en el panel de covers del Housekeeping. */
+export const COVER_VARIANTS_2026 = ['aurora', 'prism', 'ripple'] as const;
+export type CoverVariant2026 = (typeof COVER_VARIANTS_2026)[number];
+
+/** Respuesta de PATCH /api/smart-playlists/:key — lista de usernames actualizados. */
+export const PatchSmartPlaylistResponseSchema = z.object({
+  updatedUsers: z.array(z.string())
+});
+export type PatchSmartPlaylistResponse = z.infer<typeof PatchSmartPlaylistResponseSchema>;
+
 // ============================================================================
 // Spotify Sync — /api/sync/*  (legacy, retrocompat)
 // ============================================================================
