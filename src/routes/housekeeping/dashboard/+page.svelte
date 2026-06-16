@@ -32,6 +32,9 @@
   import AdminStatusPill from '$components/housekeeping/AdminStatusPill.svelte';
   import PulseBars from '$components/housekeeping/PulseBars.svelte';
   import RangeSelect from '$components/housekeeping/RangeSelect.svelte';
+  import DetailDrawer from '$components/housekeeping/DetailDrawer.svelte';
+  import AccesosDetail from '$components/housekeeping/AccesosDetail.svelte';
+  import FailIpsDetail from '$components/housekeeping/FailIpsDetail.svelte';
   import {
     getSecuritySummary,
     getSystemInfo,
@@ -84,6 +87,10 @@
     staleTime: 5 * 60 * 1000
   }));
   const pulseSeries = $derived(scrobblesQ.data?.series ?? []);
+
+  // Drill-down: drawer lateral de detalle (solo Accesos e IPs tienen registro
+  // detrás; el resto de cards no drillan). Una card abierta a la vez.
+  let openDrawer = $state<'accesos' | 'ips' | null>(null);
 
   // ─── Cards de observabilidad (Zona A) ─────────────────────────────────────
   const authDailyQ = createQuery(() => ({
@@ -311,7 +318,14 @@
 <!-- ─── Sala de control: 3 cards de estado ────────────────────────────────── -->
 <div class="sec-grid">
   <!-- Card 1 · Accesos · balance de intentos -->
-  <SecCard state={accessState} Icon={ShieldCheck} kicker="Accesos · 7 días" arch="balance">
+  <SecCard
+    state={accessState}
+    Icon={ShieldCheck}
+    kicker="Accesos · 7 días"
+    arch="balance"
+    onExpand={() => (openDrawer = 'accesos')}
+    expandLabel="Ampliar accesos: registro de eventos"
+  >
     {#snippet peek()}
       <span class="sec-peek-text">
         Últimas 24h: {sec ? sec.logins24h.ok : '·'} ok · {sec ? sec.logins24h.fail : '·'} fallidos
@@ -342,7 +356,14 @@
   </SecCard>
 
   <!-- Card 2 · IPs · lista ranked -->
-  <SecCard state={ipState} Icon={GlobeHemisphereWest} kicker="IPs con fallos · 7 días" arch="ranked">
+  <SecCard
+    state={ipState}
+    Icon={GlobeHemisphereWest}
+    kicker="IPs con fallos · 7 días"
+    arch="ranked"
+    onExpand={() => (openDrawer = 'ips')}
+    expandLabel="Ampliar IPs con fallos: tabla completa"
+  >
     {#if ipsRest.length > 0}
       {#snippet peek()}
         <ul class="iplist">
@@ -578,6 +599,25 @@
     </button>
   </div>
 </AdminPanel>
+
+<!-- ─── Drill-down: drawers laterales de detalle ──────────────────────────── -->
+<DetailDrawer
+  open={openDrawer === 'accesos'}
+  title="Accesos · detalle"
+  Icon={ShieldCheck}
+  onClose={() => (openDrawer = null)}
+>
+  <AccesosDetail />
+</DetailDrawer>
+
+<DetailDrawer
+  open={openDrawer === 'ips'}
+  title="IPs con fallos · detalle"
+  Icon={GlobeHemisphereWest}
+  onClose={() => (openDrawer = null)}
+>
+  <FailIpsDetail />
+</DetailDrawer>
 
 <style>
   .sec-grid {

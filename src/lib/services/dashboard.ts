@@ -18,11 +18,15 @@ import {
   SecuritySummarySchema,
   AuthDailySeriesSchema,
   RateLimitStatsSchema,
+  AuthRecentEventsSchema,
+  FailIpsListSchema,
   type SystemInfo,
   type ScrobblesDaily,
   type SecuritySummary,
   type AuthDailySeries,
-  type RateLimitStats
+  type RateLimitStats,
+  type AuthRecentEvents,
+  type FailIpsList
 } from '$types/dashboard';
 
 function userHeader(): Record<string, string> {
@@ -53,4 +57,22 @@ export function getAuthDailySeries(days = 30): Promise<AuthDailySeries | null> {
 /** Contadores de rate-limit por limiter (detección de abuso). */
 export function getRateLimitStats(): Promise<RateLimitStats | null> {
   return backendService.get('/api/admin/rate-limit-stats', RateLimitStatsSchema, userHeader());
+}
+
+/** Drill-down de Accesos: eventos individuales recientes del auth-audit-log. */
+export function getAuthRecentEvents(days = 7, limit = 100): Promise<AuthRecentEvents | null> {
+  return backendService.get(
+    `/api/admin/auth-recent-events?days=${days}&limit=${limit}`,
+    AuthRecentEventsSchema,
+    userHeader()
+  );
+}
+
+/** Drill-down de IPs: lista ranked completa de IPs con fallos. */
+export function getFailIps(days = 7, limit = 50): Promise<FailIpsList | null> {
+  return backendService.get(
+    `/api/admin/fail-ips?days=${days}&limit=${limit}`,
+    FailIpsListSchema,
+    userHeader()
+  );
 }

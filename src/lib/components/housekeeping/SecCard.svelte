@@ -12,7 +12,7 @@
    * (barra de balance, lista ranked, trío de tiles). Consume solo tokens --sec-*.
    */
   import type { Component, Snippet } from 'svelte';
-  import type { IconWeight } from 'phosphor-svelte';
+  import { CaretRight, type IconWeight } from 'phosphor-svelte';
 
   type Props = {
     /** Estado real del dato → color del rail. */
@@ -24,13 +24,41 @@
     peek?: Snippet;
     /** Arquetipo → rota el origen del fade del dot grid (sub-perceptible). */
     arch?: 'balance' | 'ranked' | 'tiles';
+    /** Si está presente, la card entera es interactiva (abre un drawer de
+        detalle): el chasis pasa a <button> con caret de afluencia. */
+    onExpand?: () => void;
+    /** aria-label del trigger cuando es ampliable (ej. "Ampliar accesos 7d"). */
+    expandLabel?: string;
   };
 
-  let { state, Icon, kicker, children, peek, arch = 'balance' }: Props = $props();
+  let {
+    state,
+    Icon,
+    kicker,
+    children,
+    peek,
+    arch = 'balance',
+    onExpand,
+    expandLabel
+  }: Props = $props();
 </script>
 
-<article class="sec-card" data-state={state} data-arch={arch}>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<svelte:element
+  this={onExpand ? 'button' : 'article'}
+  class="sec-card"
+  data-state={state}
+  data-arch={arch}
+  data-expandable={onExpand ? 'true' : undefined}
+  type={onExpand ? 'button' : undefined}
+  aria-haspopup={onExpand ? 'dialog' : undefined}
+  aria-label={onExpand ? expandLabel : undefined}
+  onclick={onExpand}
+>
   <span class="sec-rail" aria-hidden="true"></span>
+  {#if onExpand}
+    <span class="sec-expand-caret" aria-hidden="true"><CaretRight size={12} weight="bold" /></span>
+  {/if}
   <div class="sec-inner">
     <header class="sec-head">
       <span class="sec-icon" aria-hidden="true"><Icon size={15} weight="fill" /></span>
@@ -45,7 +73,7 @@
       <div class="sec-peek">{@render peek()}</div>
     {/if}
   </div>
-</article>
+</svelte:element>
 
 <style>
   .sec-card {
@@ -65,6 +93,47 @@
   .sec-card:hover,
   .sec-card:focus-within {
     border-color: var(--sec-border-strong);
+  }
+
+  /* ── Card ampliable (es <button>): reset de UA + affordance de lift ───── */
+  .sec-card[data-expandable] {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    transition:
+      border-color 240ms var(--ease-ios-default),
+      transform 200ms var(--ease-ios-default);
+  }
+  .sec-card[data-expandable]:hover { transform: translateY(-1px); }
+  .sec-card[data-expandable]:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .sec-expand-caret {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    color: var(--sec-fg-secondary);
+    opacity: 0.55;
+    transition: opacity 200ms var(--ease-ios-default), color 200ms var(--ease-ios-default);
+  }
+  .sec-card[data-expandable]:hover .sec-expand-caret,
+  .sec-card[data-expandable]:focus-visible .sec-expand-caret {
+    opacity: 1;
+    color: var(--sec-fg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sec-card[data-expandable] { transition: none; }
+    .sec-card[data-expandable]:hover { transform: none; }
   }
 
   /* ── Capa MATERIA: grano feTurbulence (data-URI estático, cero red) que da

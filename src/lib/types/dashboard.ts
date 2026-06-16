@@ -116,3 +116,30 @@ export const RateLimitStatsSchema = z.object({
   )
 });
 export type RateLimitStats = z.infer<typeof RateLimitStatsSchema>;
+
+// ── GET /api/admin/auth-recent-events?days=N&limit=M ───────────────────────
+// Drill-down de Accesos: eventos individuales del auth-audit-log (desc por ts).
+// `result` ya viene categorizado por el backend (ok/fail/blocked/other).
+export const AuthEventSchema = z.object({
+  at: z.string(),
+  event: z.string(),
+  username: z.string().nullable(),
+  ip: z.string().nullable(),
+  result: z.enum(['ok', 'fail', 'blocked', 'other']).catch('other')
+});
+export const AuthRecentEventsSchema = z.object({
+  days: z.number(),
+  limit: z.number(),
+  events: z.array(AuthEventSchema)
+});
+export type AuthEvent = z.infer<typeof AuthEventSchema>;
+export type AuthRecentEvents = z.infer<typeof AuthRecentEventsSchema>;
+
+// ── GET /api/admin/fail-ips?days=N&limit=M ─────────────────────────────────
+// Lista ranked completa de IPs con fallos (reusa la shape de FailIp).
+export const FailIpsListSchema = z.object({
+  days: z.number(),
+  limit: z.number(),
+  ips: z.array(FailIpSchema)
+});
+export type FailIpsList = z.infer<typeof FailIpsListSchema>;
