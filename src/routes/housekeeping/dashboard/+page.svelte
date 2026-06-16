@@ -29,7 +29,8 @@
   import SecCard from '$components/housekeeping/SecCard.svelte';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import AdminStatusPill from '$components/housekeeping/AdminStatusPill.svelte';
-  import Sparkline from '$components/diagnostics/Sparkline.svelte';
+  import PulseBars from '$components/housekeeping/PulseBars.svelte';
+  import RangeSelect from '$components/housekeeping/RangeSelect.svelte';
   import { getSecuritySummary, getSystemInfo, getScrobblesDaily } from '$services/dashboard';
   import { generateAllDailyMixes, regenerateAllCovers } from '$services/dailyMixes';
   import { generateAllSmartPlaylists } from '$services/smartPlaylists';
@@ -52,12 +53,20 @@
     enabled,
     staleTime: 60 * 1000
   }));
+  // Rango del pulso, seleccionable (mini-desplegable). 7 por defecto.
+  let pulseDays = $state(7);
+  const RANGE_OPTIONS = [
+    { value: 7, label: '7 días' },
+    { value: 14, label: '14 días' },
+    { value: 30, label: '30 días' }
+  ];
   const scrobblesQ = createQuery(() => ({
-    queryKey: ['hk-scrobbles-daily', 7],
-    queryFn: () => getScrobblesDaily(7),
+    queryKey: ['hk-scrobbles-daily', pulseDays],
+    queryFn: () => getScrobblesDaily(pulseDays),
     enabled,
     staleTime: 5 * 60 * 1000
   }));
+  const pulseSeries = $derived(scrobblesQ.data?.series ?? []);
 
   // ─── Formatters ─────────────────────────────────────────────────────────
   const fmt = (n: number) => n.toLocaleString('es-ES');
@@ -127,10 +136,7 @@
     sec && sec.lockedUsernames > 0 ? 'alert' : 'calm'
   );
 
-  // ─── Actividad + salud ──────────────────────────────────────────────────
-  const scrobblesSeries = $derived(scrobblesQ.data?.series.map((s) => s.plays) ?? null);
-  const hasSpark = $derived((scrobblesSeries?.length ?? 0) >= 2);
-
+  // ─── Salud del sistema ────────────────────────────────────────────────────
   const dbValid = $derived(systemQ.data?.databases.filter((d) => d.size != null) ?? []);
   const dbCount = $derived(systemQ.data?.databases.length ?? 0);
   const dbTotalSize = $derived(dbValid.reduce((a, d) => a + (d.size ?? 0), 0));
@@ -233,7 +239,7 @@
 </script>
 
 <svelte:head>
-  <title>Resumen · Housekeeping</title>
+  <title>Dashboard · Housekeeping</title>
 </svelte:head>
 
 <!-- ─── Sala de control: 3 cards de estado ────────────────────────────────── -->
@@ -332,19 +338,28 @@
 <!-- ─── Salud y actividad ─────────────────────────────────────────────────── -->
 <AdminPanel
   title="Salud y actividad"
-  subtitle="Motor Audiorr — pulso, backend, jobs y almacenamiento"
   loading={systemQ.isPending}
   error={systemQ.isError ? 'No se pudo leer el estado del backend.' : null}
   onRetry={() => systemQ.refetch()}
 >
-  <!-- Zona héroe: pulso de reproducciones -->
+  {#snippet info()}
+    Motor Audiorr: pulso de reproducciones, estado del backend, jobs programados
+    y almacenamiento de bases de datos.
+  {/snippet}
+
+  <!-- Zona héroe: pulso de reproducciones (rango seleccionable) -->
   <div class="pulse">
-    <div class="pulse-meta">
-      <span class="pulse-num">{scrobblesQ.data ? fmt(scrobblesQ.data.total) : '—'}</span>
-      <span class="pulse-label"><ChartLineUp size={12} weight="bold" /> reproducciones · 7 días</span>
+    <div class="pulse-head">
+      <div class="pulse-meta">
+        <span class="pulse-num">{scrobblesQ.data ? fmt(scrobblesQ.data.total) : '—'}</span>
+        <span class="pulse-label">
+          <ChartLineUp size={12} weight="bold" /> reproducciones · {pulseDays} días
+        </span>
+      </div>
+      <RangeSelect value={pulseDays} options={RANGE_OPTIONS} onChange={(v) => (pulseDays = v)} />
     </div>
-    {#if hasSpark && scrobblesSeries}
-      <span class="pulse-spark"><Sparkline points={scrobblesSeries} smooth lineless baseline /></span>
+    {#if pulseSeries.length >= 2}
+      <PulseBars series={pulseSeries} showDayLabels={pulseDays <= 14} />
     {/if}
   </div>
 
@@ -358,7 +373,8 @@
       <span class="strip-sub">
         {#if systemQ.data}
           activo {fmtUptime(systemQ.data.uptimeSec)} · heap
-          {fmtBytes(systemQ.data.memory.heapUsed)}/{fmtBytes(systemQ.data.memory.heapTotal)}
+          {fmtBytes(systemQ.data.memory.heapUsed)}/{fmtBytes(systemQ.data.memory.heapTotal)}{#if systemQ.data.commit}
+            · <span class="commit">{systemQ.data.commit}</span>{/if}
         {/if}
       </span>
     </div>
@@ -373,9 +389,9 @@
     </div>
   </div>
 
-  <!-- Jobs: chips expandibles (acción de regeneración) + mantenimiento global -->
+  <!-- Jobs: chips expandibles (crons con su acción de regeneración) -->
   <div class="jobs">
-    <span class="jobs-label">Jobs</span>
+    <span class="block-label">Jobs</span>
     <div class="jobs-chips">
       {#each CRON_ORDER as key (key)}
         {@const c = systemQ.data?.crons?.[key]}
@@ -423,23 +439,25 @@
       </div>
     </div>
 
-    <div class="jobs-maint">
-      <span class="jobs-label">Mantenimiento</span>
-      <button
-        type="button"
-        class="maint-action"
-        onclick={handleCovers}
-        disabled={coversAction.running || coversAction.cooldown > 0}
-      >
-        {#if coversAction.running}
-          <ArrowsClockwise size={13} weight="bold" class="spin" /> Regenerando…
-        {:else if coversAction.cooldown > 0}
-          <ImageIcon size={13} weight="regular" /> Regenerar portadas ({coversAction.cooldown}s)
-        {:else}
-          <ImageIcon size={13} weight="regular" /> Regenerar portadas
-        {/if}
-      </button>
-    </div>
+  </div>
+
+  <!-- Mantenimiento: acciones globales (bloque hermano de Jobs, no hijo) -->
+  <div class="maint">
+    <span class="block-label">Mantenimiento</span>
+    <button
+      type="button"
+      class="maint-action"
+      onclick={handleCovers}
+      disabled={coversAction.running || coversAction.cooldown > 0}
+    >
+      {#if coversAction.running}
+        <ArrowsClockwise size={13} weight="bold" class="spin" /> Regenerando…
+      {:else if coversAction.cooldown > 0}
+        <ImageIcon size={13} weight="regular" /> Regenerar portadas ({coversAction.cooldown}s)
+      {:else}
+        <ImageIcon size={13} weight="regular" /> Regenerar portadas
+      {/if}
+    </button>
   </div>
 </AdminPanel>
 
@@ -600,21 +618,26 @@
   .tile[data-tone='alert'] .tile-num { color: var(--sec-alert); }
   .tile[data-tone='alert'] { background: var(--sec-alert-soft); }
 
-  /* ─── Panel salud: pulso héroe ───────────────────────────────────────── */
+  /* ─── Panel salud: pulso héroe (mini-bars + rango) ───────────────────── */
   .pulse {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
+    flex-direction: column;
+    gap: var(--space-3);
     padding: var(--space-4);
     border-radius: var(--radius-md);
     background: var(--bg-surface-elevated);
+  }
+  .pulse-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
   }
   .pulse-meta {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex-shrink: 0;
+    min-width: 0;
   }
   .pulse-num {
     font-size: var(--text-3xl);
@@ -631,11 +654,8 @@
     font-size: var(--text-xs);
     color: var(--text-tertiary);
   }
-  .pulse-spark {
-    flex: 1;
-    min-width: 0;
-    height: 48px;
-    color: var(--accent);
+  .commit {
+    font-family: var(--font-mono);
   }
 
   /* ─── Panel salud: stat strip ────────────────────────────────────────── */
@@ -677,7 +697,8 @@
     flex-direction: column;
     gap: var(--space-2);
   }
-  .jobs-label {
+  /* Etiqueta de sección reutilizable dentro de un AdminPanel (Jobs, Mantenimiento…). */
+  .block-label {
     font-size: 10px;
     font-weight: 600;
     letter-spacing: var(--tracking-label);
@@ -781,24 +802,24 @@
   .drawer-action:focus-visible,
   .maint-action:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-  /* Mantenimiento: acción global (portadas), separada de los jobs. */
-  .jobs-maint {
+  /* Mantenimiento: bloque hermano de Jobs (acciones globales). Separado por el
+     gap del AdminPanel como los demás bloques, sin border-top ad-hoc. */
+  .maint {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    margin-top: var(--space-1);
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--separator-subtle);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
   }
   .maint-action { padding: 6px 12px; font-size: var(--text-xs); }
 
-  :global(.jobs .spin) { animation: jobs-spin 1s linear infinite; }
+  :global(.jobs .spin),
+  :global(.maint .spin) { animation: jobs-spin 1s linear infinite; }
   @keyframes jobs-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .jobs-drawer { transition: none; }
     .job-caret { transition: none; }
     .drawer-content { animation: none; }
-    :global(.jobs .spin) { animation: none; }
+    :global(.jobs .spin),
+    :global(.maint .spin) { animation: none; }
   }
 </style>

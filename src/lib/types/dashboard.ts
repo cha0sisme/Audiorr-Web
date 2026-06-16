@@ -31,6 +31,9 @@ export const SystemInfoSchema = z
   .object({
     service: z.string(),
     version: z.string(),
+    /** SHA corto del commit desplegado (backend lo resuelve en arranque);
+        null si la fuente no está disponible. */
+    commit: z.string().nullable().optional(),
     uptimeSec: z.number(),
     bootedAt: z.string().optional(),
     node: z.string().optional(),

@@ -10,10 +10,14 @@
    */
   import type { Snippet } from 'svelte';
   import { ArrowsClockwise, WarningCircle } from 'phosphor-svelte';
+  import InfoPopover from './InfoPopover.svelte';
 
   type Props = {
     title: string;
     subtitle?: string;
+    /** Ayuda contextual en un popover (i) junto al título. Si está presente,
+        el subtítulo NO se pinta como línea (se mueve al popover). */
+    info?: Snippet;
     loading?: boolean;
     error?: string | null;
     empty?: boolean;
@@ -27,6 +31,7 @@
   let {
     title,
     subtitle,
+    info,
     loading = false,
     error = null,
     empty = false,
@@ -40,8 +45,11 @@
 <section class="admin-panel">
   <header class="admin-panel-head">
     <div class="admin-panel-titles">
-      <h2>{title}</h2>
-      {#if subtitle}<p>{subtitle}</p>{/if}
+      <div class="admin-panel-title-row">
+        <h2>{title}</h2>
+        {#if info}<InfoPopover>{@render info()}</InfoPopover>{/if}
+      </div>
+      {#if subtitle && !info}<p>{subtitle}</p>{/if}
     </div>
     {#if action}
       <div class="admin-panel-action">{@render action()}</div>
@@ -95,6 +103,11 @@
     flex-direction: column;
     gap: 3px;
     min-width: 0;
+  }
+  .admin-panel-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .admin-panel-titles h2 {
     margin: 0;

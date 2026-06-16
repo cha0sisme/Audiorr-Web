@@ -62,7 +62,7 @@
     match: string[];
   };
   const SECTIONS: Section[] = [
-    { id: 'resumen',     label: 'Resumen',     href: '/housekeeping/dashboard',   Icon: House,     match: ['dashboard'] },
+    { id: 'dashboard',   label: 'Dashboard',   href: '/housekeeping/dashboard',   Icon: House,     match: ['dashboard'] },
     { id: 'curaduria',   label: 'Curaduría',   href: '/housekeeping/portada',     Icon: Layout,    match: ['portada', 'editorial', 'covers', 'artwork'] },
     { id: 'contenido',   label: 'Contenido',   href: '/housekeeping/contenido',   Icon: FilmReel,  match: ['contenido'] },
     { id: 'personas',    label: 'Personas',    href: '/housekeeping/usuarios',    Icon: Users,     match: ['usuarios'] },
@@ -79,7 +79,7 @@
   ];
 
   const currentSeg = $derived(page.url.pathname.split('/')[2] ?? 'dashboard');
-  const activeSection = $derived(SECTIONS.find((s) => s.match.includes(currentSeg))?.id ?? 'resumen');
+  const activeSection = $derived(SECTIONS.find((s) => s.match.includes(currentSeg))?.id ?? 'dashboard');
   const inCuraduria = $derived(activeSection === 'curaduria');
 
   // ─── Footer: salud de Navidrome (ping one-shot, sin loop) ───────────────
