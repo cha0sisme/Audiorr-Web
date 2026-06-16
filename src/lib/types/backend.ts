@@ -425,6 +425,15 @@ export const AdminUserSchema = z.object({
       playedAt: z.string()
     })
     .nullable()
+    .optional(),
+  // Último login_ok del audit log (backend e0feeae). Aditivo: optional para
+  // tolerar un backend pre-deploy; null si el usuario nunca tiene login_ok.
+  lastLogin: z
+    .object({
+      at: z.string(),
+      ip: z.string().nullable()
+    })
+    .nullable()
     .optional()
 });
 export type AdminUser = z.infer<typeof AdminUserSchema>;
