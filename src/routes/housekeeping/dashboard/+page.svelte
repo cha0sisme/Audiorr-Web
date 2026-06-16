@@ -92,9 +92,17 @@
   let openDrawer = $state<'accesos' | 'ips' | null>(null);
 
   // ─── Cards de observabilidad (Zona A) ─────────────────────────────────────
+  // Accesos: una sola card con rango seleccionable (7/14/30) — fusiona lo que
+  // antes eran dos cards (balance 7d + serie 30d). Comparte cache con el drawer.
+  let accesosDays = $state(7);
+  const ACCESOS_RANGE = [
+    { value: 7, label: '7 días' },
+    { value: 14, label: '14 días' },
+    { value: 30, label: '30 días' }
+  ];
   const authDailyQ = createQuery(() => ({
-    queryKey: ['hk-auth-daily', 30],
-    queryFn: () => getAuthDailySeries(30),
+    queryKey: ['hk-auth-daily', accesosDays],
+    queryFn: () => getAuthDailySeries(accesosDays),
     enabled,
     staleTime: 5 * 60 * 1000
   }));
@@ -174,20 +182,7 @@
   // ─── Security summary ───────────────────────────────────────────────────
   const sec = $derived(securityQ.data ?? null);
 
-  // Card 1 · Accesos — balance de intentos
-  const accTotal = $derived(sec ? sec.logins7d.ok + sec.logins7d.fail + sec.logins7d.blocked : 0);
-  function accPct(n: number): number {
-    return accTotal > 0 ? (n / accTotal) * 100 : 0;
-  }
-  const accessState = $derived.by<'calm' | 'watch' | 'alert'>(() => {
-    if (!sec) return 'calm';
-    const b = sec.logins7d.blocked;
-    if (b >= 5) return 'alert';
-    if (b > 0 || sec.logins7d.fail > 0) return 'watch';
-    return 'calm';
-  });
-
-  // Card 2 · IPs — lista ranked
+  // Card · IPs — lista ranked
   const ipsAll = $derived(sec?.topFailIps ?? []);
   const ipsVisible = $derived(ipsAll.slice(0, 3));
   const ipsRest = $derived(ipsAll.slice(3));
@@ -316,40 +311,46 @@
 
 <!-- ─── Sala de control: 3 cards de estado ────────────────────────────────── -->
 <div class="sec-grid">
-  <!-- Card 1 · Accesos · balance de intentos -->
+  <!-- Card 1 · Accesos · serie diaria con rango seleccionable (fusiona 7d+30d) -->
   <SecCard
-    state={accessState}
+    state={authState}
     Icon={ShieldCheck}
-    kicker="Accesos · 7 días"
+    kicker="Accesos"
     arch="balance"
     onExpand={() => (openDrawer = 'accesos')}
     expandLabel="Ampliar accesos: registro de eventos"
   >
+    {#snippet headerAction()}
+      <RangeSelect value={accesosDays} options={ACCESOS_RANGE} onChange={(v) => (accesosDays = v)} />
+    {/snippet}
     {#snippet peek()}
       <span class="sec-peek-text">
         Últimas 24h: {sec ? sec.logins24h.ok : '·'} ok · {sec ? sec.logins24h.fail : '·'} fallidos
       </span>
     {/snippet}
 
-    {#if securityQ.isError}
-      <span class="sec-num">—</span>
+    {#if authDailyQ.isError}
       <span class="sec-unit">no se pudo leer</span>
+    {:else if authSeries.length === 0}
+      <span class="sec-unit">cargando…</span>
     {:else}
-      <div class="sec-total">
-        <span class="sec-num">{sec ? fmt(accTotal) : '…'}</span>
-        <span class="sec-unit">intentos</span>
-      </div>
-      <div class="bar" role="img" aria-label={sec ? `${sec.logins7d.ok} ok, ${sec.logins7d.fail} fallidos, ${sec.logins7d.blocked} bloqueados` : 'Sin datos'}>
-        {#if accTotal > 0}
-          <span class="bar-seg" data-tone="good" style:width="{accPct(sec!.logins7d.ok)}%"></span>
-          <span class="bar-seg" data-tone="watch" style:width="{accPct(sec!.logins7d.fail)}%"></span>
-          <span class="bar-seg" data-tone="alert" style:width="{accPct(sec!.logins7d.blocked)}%"></span>
-        {/if}
+      <div
+        class="daybars"
+        role="img"
+        aria-label={`Accesos por día: ${authTotals.ok} ok, ${authTotals.fail} fallidos, ${authTotals.blocked} bloqueados en ${authSeries.length} días`}
+      >
+        {#each authSeries as d (d.date)}
+          <div class="daybar" title={`${d.date} · ${d.ok} ok · ${d.fail} fallidos · ${d.blocked} bloqueados`}>
+            <span class="seg" data-tone="good" style:height="{(d.ok / authMaxDay) * 100}%"></span>
+            <span class="seg" data-tone="watch" style:height="{(d.fail / authMaxDay) * 100}%"></span>
+            <span class="seg" data-tone="alert" style:height="{(d.blocked / authMaxDay) * 100}%"></span>
+          </div>
+        {/each}
       </div>
       <div class="legend">
-        <span class="legend-item"><span class="dot" data-tone="good"></span>{sec ? sec.logins7d.ok : '·'} ok</span>
-        <span class="legend-item"><span class="dot" data-tone="watch"></span>{sec ? sec.logins7d.fail : '·'} fallidos</span>
-        <span class="legend-item"><span class="dot" data-tone="alert"></span>{sec ? sec.logins7d.blocked : '·'} bloqueados</span>
+        <span class="legend-item"><span class="dot" data-tone="good"></span>{fmt(authTotals.ok)} ok</span>
+        <span class="legend-item"><span class="dot" data-tone="watch"></span>{fmt(authTotals.fail)} fallidos</span>
+        <span class="legend-item"><span class="dot" data-tone="alert"></span>{fmt(authTotals.blocked)} bloq.</span>
       </div>
     {/if}
   </SecCard>
@@ -420,35 +421,7 @@
     {/if}
   </SecCard>
 
-  <!-- Card 4 · Accesos por día · stacked bars (ok/fallidos/bloqueados) -->
-  <SecCard state={authState} Icon={ChartLineUp} kicker="Accesos · 30 días" arch="balance">
-    {#if authDailyQ.isError}
-      <span class="sec-unit">no se pudo leer</span>
-    {:else if authSeries.length === 0}
-      <span class="sec-unit">cargando…</span>
-    {:else}
-      <div
-        class="daybars"
-        role="img"
-        aria-label={`Accesos por día: ${authTotals.ok} ok, ${authTotals.fail} fallidos, ${authTotals.blocked} bloqueados en ${authSeries.length} días`}
-      >
-        {#each authSeries as d (d.date)}
-          <div class="daybar" title={`${d.date} · ${d.ok} ok · ${d.fail} fallidos · ${d.blocked} bloqueados`}>
-            <span class="seg" data-tone="good" style:height="{(d.ok / authMaxDay) * 100}%"></span>
-            <span class="seg" data-tone="watch" style:height="{(d.fail / authMaxDay) * 100}%"></span>
-            <span class="seg" data-tone="alert" style:height="{(d.blocked / authMaxDay) * 100}%"></span>
-          </div>
-        {/each}
-      </div>
-      <div class="legend">
-        <span class="legend-item"><span class="dot" data-tone="good"></span>{fmt(authTotals.ok)} ok</span>
-        <span class="legend-item"><span class="dot" data-tone="watch"></span>{fmt(authTotals.fail)} fallidos</span>
-        <span class="legend-item"><span class="dot" data-tone="alert"></span>{fmt(authTotals.blocked)} bloq.</span>
-      </div>
-    {/if}
-  </SecCard>
-
-  <!-- Card 5 · Rate-limits · abuso (tiles por limiter) -->
+  <!-- Card · Rate-limits · abuso (tiles por limiter) -->
   <SecCard state={rlState} Icon={Gauge} kicker="Rate-limits">
     {#if rateLimitQ.isError}
       <span class="sec-unit">no se pudo leer</span>
@@ -626,19 +599,6 @@
   }
 
   /* ─── Tipografía común de las cards de estado ────────────────────────── */
-  .sec-total {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-  }
-  .sec-num {
-    font-size: var(--text-3xl);
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: var(--tracking-display-lg);
-    font-variant-numeric: tabular-nums;
-    color: var(--sec-fg);
-  }
   .sec-unit {
     font-size: var(--text-xs);
     font-weight: 500;
@@ -649,19 +609,7 @@
     color: var(--sec-fg-tertiary);
   }
 
-  /* ─── Card 1: stacked bar + leyenda ──────────────────────────────────── */
-  .bar {
-    display: flex;
-    gap: 2px;
-    height: 8px;
-    border-radius: var(--radius-full);
-    overflow: hidden;
-    background: var(--sec-surface-raised);
-  }
-  .bar-seg { height: 100%; }
-  .bar-seg[data-tone='good']  { background: var(--sec-good); }
-  .bar-seg[data-tone='watch'] { background: var(--sec-watch); }
-  .bar-seg[data-tone='alert'] { background: var(--sec-alert); }
+  /* ─── Leyenda (ok/fallidos/bloqueados) ───────────────────────────────── */
   .legend {
     display: flex;
     flex-wrap: wrap;

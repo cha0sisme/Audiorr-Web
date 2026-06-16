@@ -24,11 +24,14 @@
     peek?: Snippet;
     /** Arquetipo → rota el origen del fade del dot grid (sub-perceptible). */
     arch?: 'balance' | 'ranked' | 'tiles';
-    /** Si está presente, la card entera es interactiva (abre un drawer de
-        detalle): el chasis pasa a <button> con caret de afluencia. */
+    /** Si está presente, la card es ampliable (abre un drawer de detalle). */
     onExpand?: () => void;
     /** aria-label del trigger cuando es ampliable (ej. "Ampliar accesos 7d"). */
     expandLabel?: string;
+    /** Control en la cabecera (ej. RangeSelect). Si está presente, la card NO
+        es un <button> entero (un control dentro de un botón sería inválido):
+        el caret se vuelve el disparador del drawer. */
+    headerAction?: Snippet;
   };
 
   let {
@@ -39,30 +42,45 @@
     peek,
     arch = 'balance',
     onExpand,
-    expandLabel
+    expandLabel,
+    headerAction
   }: Props = $props();
+
+  // La card entera es <button> solo si amplía Y no tiene control interno.
+  const wholeCardButton = $derived(!!onExpand && !headerAction);
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <svelte:element
-  this={onExpand ? 'button' : 'article'}
+  this={wholeCardButton ? 'button' : 'article'}
   class="sec-card"
   data-state={state}
   data-arch={arch}
-  data-expandable={onExpand ? 'true' : undefined}
-  type={onExpand ? 'button' : undefined}
-  aria-haspopup={onExpand ? 'dialog' : undefined}
-  aria-label={onExpand ? expandLabel : undefined}
-  onclick={onExpand}
+  data-expandable={wholeCardButton ? 'true' : undefined}
+  type={wholeCardButton ? 'button' : undefined}
+  aria-haspopup={wholeCardButton ? 'dialog' : undefined}
+  aria-label={wholeCardButton ? expandLabel : undefined}
+  onclick={wholeCardButton ? onExpand : undefined}
 >
   <span class="sec-rail" aria-hidden="true"></span>
-  {#if onExpand}
+  {#if wholeCardButton}
     <span class="sec-expand-caret" aria-hidden="true"><CaretRight size={12} weight="bold" /></span>
   {/if}
   <div class="sec-inner">
     <header class="sec-head">
       <span class="sec-icon" aria-hidden="true"><Icon size={15} weight="fill" /></span>
       <span class="sec-kicker">{kicker}</span>
+      {#if headerAction}<span class="sec-head-action">{@render headerAction()}</span>{/if}
+      {#if onExpand && !wholeCardButton}
+        <button
+          type="button"
+          class="sec-caret-btn"
+          class:no-action={!headerAction}
+          aria-haspopup="dialog"
+          aria-label={expandLabel}
+          onclick={onExpand}
+        ><CaretRight size={12} weight="bold" /></button>
+      {/if}
     </header>
 
     <div class="sec-body">
@@ -131,6 +149,33 @@
     opacity: 1;
     color: var(--sec-fg);
   }
+  /* Caret-botón inline (modo article con control en cabecera): el disparador
+     del drawer cuando la card no es un <button> entero. */
+  .sec-caret-btn {
+    flex-shrink: 0;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--sec-surface-raised);
+    color: var(--sec-fg-secondary);
+    cursor: pointer;
+    opacity: 0.7;
+    transition:
+      opacity 200ms var(--ease-ios-default),
+      color 200ms var(--ease-ios-default),
+      background 200ms var(--ease-ios-default);
+  }
+  .sec-caret-btn.no-action { margin-left: auto; }
+  .sec-card:hover .sec-caret-btn { opacity: 1; }
+  .sec-caret-btn:hover { color: var(--sec-fg); background: var(--sec-surface); }
+  .sec-caret-btn:focus-visible { outline: none; opacity: 1; box-shadow: var(--focus-ring); }
+
+  /* Slot de control en la cabecera (RangeSelect, etc.): empujado a la derecha. */
+  .sec-head-action { margin-left: auto; display: inline-flex; align-items: center; }
   @media (prefers-reduced-motion: reduce) {
     .sec-card[data-expandable] { transition: none; }
     .sec-card[data-expandable]:hover { transform: none; }
