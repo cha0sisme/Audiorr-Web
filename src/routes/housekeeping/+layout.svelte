@@ -1,15 +1,21 @@
 <script lang="ts">
   /**
-   * Layout del panel de admin (`/housekeeping`).
+   * Layout del panel de admin (`/housekeeping`) — shell con sidebar.
    *
-   * Estructura mínima:
-   *   1. Tab bar (Contenido / Editorial / Playlists) usando tokens
-   *      `--segment-*` canónicos del proyecto — coherente con todos los
-   *      otros segmented controls.
-   *   2. Outlet del child route.
+   * Navegación primaria en sidebar de 5 secciones (Resumen / Curaduría /
+   * Contenido / Personas / Diagnóstico). La reagrupación es solo VISUAL: las
+   * 8 rutas físicas siguen donde estaban; el sidebar y los sub-tabs de
+   * Curaduría navegan a ellas. Sin mover archivos ni redirects.
    *
-   * Sin título de página ni subtítulo: el contexto lo dan las tabs y la
-   * URL. Filosofía "let's keep it simple".
+   *   - Curaduría agrupa portada (Home) + editorial (Destacadas) +
+   *     covers (Smart covers) + artwork (Animated artwork) vía sub-tabs.
+   *   - Footer del sidebar = salud de NAVIDROME (servidor de música): ping
+   *     one-shot al entrar + botón recomprobar. NO es un loop (el shell está
+   *     siempre montado; un poll aquí sería movimiento ocioso permanente).
+   *     La salud del backend Audiorr vive en la card "Salud del sistema" del
+   *     Resumen — son dos sujetos distintos, etiquetados explícitamente.
+   *   - Desktop-first: ≥1024px sidebar lateral fijo; <1024px degrada a una
+   *     fila horizontal scrollable (sin drawer JS → SSR-safe).
    *
    * Reglas:
    *   - Solo accesible si `getUser.adminRole === true`. Si no, redirect a `/`.
@@ -18,9 +24,9 @@
    */
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { House, FilmReel, Layout, Books, Waveform, FilmSlate, Users, Palette } from 'phosphor-svelte';
+  import { House, FilmReel, Layout, Waveform, Users, ArrowsClockwise } from 'phosphor-svelte';
   import { credentials } from '$stores/credentials.svelte';
   import * as nav from '$services/NavidromeService';
 
@@ -44,66 +50,79 @@
     if (!isAdmin) goto('/', { replaceState: true });
   });
 
-  type Tab = {
+  // ─── Secciones (navegación primaria) ────────────────────────────────────
+  // `match` lista los segmentos de ruta que pertenecen a esta sección. Una
+  // sección puede agrupar varias rutas físicas (Curaduría). `href` es el
+  // destino por defecto al pulsar el ítem.
+  type Section = {
     id: string;
     label: string;
     href: string;
     Icon: typeof House;
+    match: string[];
   };
-  const TABS: Tab[] = [
-    { id: 'dashboard',   label: 'Inicio',      href: '/housekeeping/dashboard',    Icon: House    },
-    { id: 'contenido',   label: 'Contenido',   href: '/housekeeping/contenido',    Icon: FilmReel },
-    { id: 'portada',     label: 'Portada',     href: '/housekeeping/portada',      Icon: Layout   },
-    { id: 'covers',      label: 'Covers',      href: '/housekeeping/covers',       Icon: Palette  },
-    { id: 'artwork',     label: 'Artwork',     href: '/housekeeping/artwork',      Icon: FilmSlate },
-    { id: 'editorial',   label: 'Editorial',   href: '/housekeeping/editorial',    Icon: Books    },
-    { id: 'usuarios',    label: 'Usuarios',    href: '/housekeeping/usuarios',     Icon: Users    },
-    { id: 'diagnostics', label: 'Diagnostics', href: '/housekeeping/diagnostics',  Icon: Waveform }
+  const SECTIONS: Section[] = [
+    { id: 'resumen',     label: 'Resumen',     href: '/housekeeping/dashboard',   Icon: House,     match: ['dashboard'] },
+    { id: 'curaduria',   label: 'Curaduría',   href: '/housekeeping/portada',     Icon: Layout,    match: ['portada', 'editorial', 'covers', 'artwork'] },
+    { id: 'contenido',   label: 'Contenido',   href: '/housekeeping/contenido',   Icon: FilmReel,  match: ['contenido'] },
+    { id: 'personas',    label: 'Personas',    href: '/housekeeping/usuarios',    Icon: Users,     match: ['usuarios'] },
+    { id: 'diagnostico', label: 'Diagnóstico', href: '/housekeeping/diagnostics', Icon: Waveform,  match: ['diagnostics'] }
   ];
 
-  const activeId = $derived.by(() => {
-    const seg = page.url.pathname.split('/')[2];
-    return TABS.find((t) => t.id === seg)?.id ?? 'dashboard';
-  });
+  // Sub-tabs de Curaduría — segundo nivel, solo visible dentro de la sección.
+  type SubTab = { label: string; href: string; seg: string };
+  const CURADURIA_TABS: SubTab[] = [
+    { label: 'Home',             href: '/housekeeping/portada',   seg: 'portada' },
+    { label: 'Destacadas',       href: '/housekeeping/editorial', seg: 'editorial' },
+    { label: 'Smart covers',     href: '/housekeeping/covers',    seg: 'covers' },
+    { label: 'Animated artwork', href: '/housekeeping/artwork',   seg: 'artwork' }
+  ];
 
-  // ─── Indicator deslizante (ports el patrón de SegmentedControl) ──────
-  let segmentEl: HTMLElement | undefined = $state();
-  const refs: Record<string, HTMLAnchorElement | undefined> = $state({});
+  const currentSeg = $derived(page.url.pathname.split('/')[2] ?? 'dashboard');
+  const activeSection = $derived(SECTIONS.find((s) => s.match.includes(currentSeg))?.id ?? 'resumen');
+  const inCuraduria = $derived(activeSection === 'curaduria');
 
-  let indicatorX = $state(0);
-  let indicatorW = $state(0);
-  let measured = $state(false);
+  // ─── Footer: salud de Navidrome (ping one-shot, sin loop) ───────────────
+  let lastLatency = $state<number | null>(null);
+  let serverVersion = $state<string | null>(null);
+  let pingFailed = $state(false);
+  let pinging = $state(false);
 
-  function measure() {
-    const ref = refs[activeId];
-    if (!ref || !segmentEl) return;
-    const itemRect = ref.getBoundingClientRect();
-    const containerRect = segmentEl.getBoundingClientRect();
-    indicatorX = itemRect.left - containerRect.left;
-    indicatorW = itemRect.width;
-    measured = true;
+  async function checkNavidrome() {
+    if (!credentials.isConfigured || pinging) return;
+    pinging = true;
+    const start = performance.now();
+    try {
+      const res = await nav.ping();
+      lastLatency = Math.round(performance.now() - start);
+      serverVersion = res.version;
+      pingFailed = false;
+    } catch {
+      pingFailed = true;
+    } finally {
+      pinging = false;
+    }
   }
 
-  // Re-mide cuando el activeId cambia. El doble rAF garantiza que el ref
-  // del nuevo tab está bind y el layout estable. Sin esto, en navegación
-  // directa (deep link) el indicator nace en (0,0).
-  $effect(() => {
-    void activeId;
-    requestAnimationFrame(() => requestAnimationFrame(measure));
+  const healthBand = $derived.by<'ok' | 'warn' | 'down' | 'unknown'>(() => {
+    if (pingFailed) return 'down';
+    if (lastLatency === null) return 'unknown';
+    if (lastLatency < 100) return 'ok';
+    if (lastLatency < 300) return 'warn';
+    return 'down';
+  });
+
+  const serverHost = $derived.by(() => {
+    const url = credentials.current?.serverUrl ?? '';
+    try {
+      return new URL(url).host;
+    } catch {
+      return url || '—';
+    }
   });
 
   onMount(() => {
-    // tick() espera a que Svelte haya bind-eado todos los refs antes de
-    // intentar el primer measure. Resuelve el bug "indicator desplazado al
-    // entrar directo a /housekeeping/dashboard" porque al primer paint los
-    // anchor refs aún no estaban poblados.
-    void tick().then(() => {
-      requestAnimationFrame(() => requestAnimationFrame(measure));
-    });
-    if (!segmentEl) return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(segmentEl);
-    return () => ro.disconnect();
+    void checkNavidrome();
   });
 </script>
 
@@ -113,109 +132,271 @@
   </div>
 {:else if isAdmin}
   <div class="hk-shell">
-    <nav
-      bind:this={segmentEl}
-      class="hk-segment"
-      aria-label="Secciones de Housekeeping"
-    >
-      <span
-        class="hk-indicator"
-        class:visible={measured}
-        style:transform="translateX({indicatorX}px)"
-        style:width="{indicatorW}px"
-        aria-hidden="true"
-      ></span>
+    <aside class="hk-sidebar" aria-label="Secciones de Housekeeping">
+      <div class="hk-sidebar-brand">Housekeeping</div>
 
-      {#each TABS as tab (tab.id)}
-        <a
-          bind:this={refs[tab.id]}
-          class="hk-tab"
-          class:active={activeId === tab.id}
-          href={tab.href}
-          aria-current={activeId === tab.id ? 'page' : undefined}
-          data-sveltekit-preload-data="hover"
-        >
-          <tab.Icon size={14} weight={activeId === tab.id ? 'fill' : 'regular'} />
-          <span>{tab.label}</span>
-        </a>
-      {/each}
-    </nav>
+      <nav class="hk-sidebar-nav">
+        {#each SECTIONS as section (section.id)}
+          <a
+            class="hk-nav-item"
+            class:active={activeSection === section.id}
+            href={section.href}
+            aria-current={activeSection === section.id ? 'page' : undefined}
+            data-sveltekit-preload-data="hover"
+          >
+            <section.Icon size={17} weight={activeSection === section.id ? 'fill' : 'regular'} />
+            <span>{section.label}</span>
+          </a>
+        {/each}
+      </nav>
 
-    <main class="hk-content">
-      {@render children()}
-    </main>
+      <div class="hk-sidebar-footer">
+        <span class="hk-health-label">Navidrome</span>
+        <div class="hk-health-row">
+          <span class="hk-health-dot" data-band={healthBand} aria-hidden="true"></span>
+          <span class="hk-health-value">
+            {#if pingFailed}
+              Sin respuesta
+            {:else if lastLatency !== null}
+              {lastLatency} ms
+            {:else}
+              Sin comprobar
+            {/if}
+          </span>
+          <button
+            type="button"
+            class="hk-health-recheck"
+            onclick={checkNavidrome}
+            disabled={pinging}
+            aria-label="Recomprobar la salud de Navidrome"
+          >
+            <ArrowsClockwise size={12} weight="bold" class={pinging ? 'spin' : ''} />
+          </button>
+        </div>
+        <span class="hk-health-sub">
+          {serverHost}{#if serverVersion} · v{serverVersion}{/if}
+        </span>
+      </div>
+    </aside>
+
+    <div class="hk-main-col">
+      {#if inCuraduria}
+        <nav class="hk-subtabs" aria-label="Secciones de Curaduría">
+          {#each CURADURIA_TABS as tab (tab.seg)}
+            <a
+              class="hk-subtab"
+              class:active={currentSeg === tab.seg}
+              href={tab.href}
+              aria-current={currentSeg === tab.seg ? 'page' : undefined}
+              data-sveltekit-preload-data="hover"
+            >
+              {tab.label}
+            </a>
+          {/each}
+        </nav>
+      {/if}
+
+      <main class="hk-content">
+        {@render children()}
+      </main>
+    </div>
   </div>
 {/if}
 
 <style>
+  /* ─── Shell: sidebar + columna de contenido ──────────────────────────── */
   .hk-shell {
-    padding: var(--space-8) var(--space-6) var(--space-12);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-6);
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: var(--space-8);
+    align-items: start;
+    padding: var(--space-8) var(--space-8) var(--space-12);
     min-width: 0;
     width: 100%;
   }
 
-  /* ─── Tab bar — usa los tokens `--segment-*` canónicos del proyecto ──── */
-  .hk-segment {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    padding: 4px;
-    background: var(--segment-bg);
-    border-radius: var(--radius-full);
-    isolation: isolate;
-    width: fit-content;
-    max-width: 100%;
+  /* ─── Sidebar ─────────────────────────────────────────────────────────── */
+  .hk-sidebar {
+    position: sticky;
+    top: var(--space-8);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    padding: var(--space-5) var(--space-4);
+    background: var(--admin-sidebar-bg);
+    border: 1px solid var(--admin-sidebar-border);
+    border-radius: var(--hk-card-radius);
+    min-height: 0;
   }
-  .hk-indicator {
-    position: absolute;
-    top: 4px;
-    bottom: 4px;
-    left: 0;
-    background: var(--segment-indicator-bg);
-    border-radius: var(--radius-full);
-    box-shadow: var(--segment-indicator-shadow);
-    z-index: 0;
-    opacity: 0;
-    transition:
-      transform 380ms var(--ease-ios-default),
-      width 380ms var(--ease-ios-default);
+  .hk-sidebar-brand {
+    padding: 0 var(--space-2);
+    font-size: var(--text-base);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    color: var(--text-primary);
   }
-  .hk-indicator.visible { opacity: 1; }
-  .hk-tab {
+
+  .hk-sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hk-nav-item {
     position: relative;
-    z-index: 1;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: var(--space-2) var(--space-4);
-    color: var(--segment-text);
+    gap: 10px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    color: var(--admin-sidebar-item-fg);
     font-size: var(--text-sm);
     font-weight: 500;
     line-height: 1.2;
     text-decoration: none;
-    border-radius: var(--radius-full);
-    transition: color var(--duration-fast) var(--ease-ios-default);
-    white-space: nowrap;
+    transition:
+      color var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default);
   }
-  .hk-tab:hover:not(.active) {
-    color: var(--text-primary);
+  .hk-nav-item:hover:not(.active) {
+    color: var(--admin-sidebar-item-fg-hover);
+    background: var(--admin-sidebar-item-bg-hover);
   }
-  .hk-tab.active {
-    color: var(--segment-text-active);
+  .hk-nav-item.active {
+    color: var(--admin-sidebar-item-fg-active);
+    background: var(--admin-sidebar-item-bg-active);
   }
-  .hk-tab:focus-visible {
+  .hk-nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    border-radius: 0 999px 999px 0;
+    background: var(--admin-sidebar-item-bar-active);
+  }
+  .hk-nav-item:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
 
+  /* ─── Footer del sidebar — salud Navidrome ───────────────────────────── */
+  .hk-sidebar-footer {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: var(--space-3) var(--space-2) 0;
+    border-top: 1px solid var(--separator-subtle);
+  }
+  .hk-health-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: var(--tracking-label);
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+  .hk-health-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .hk-health-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: var(--admin-health-unknown);
+  }
+  .hk-health-dot[data-band='ok']   { background: var(--admin-health-ok); }
+  .hk-health-dot[data-band='warn'] { background: var(--admin-health-warn); }
+  .hk-health-dot[data-band='down'] { background: var(--admin-health-down); }
+  .hk-health-value {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .hk-health-recheck {
+    margin-left: auto;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: color 160ms var(--ease-ios-default), background 160ms var(--ease-ios-default);
+  }
+  .hk-health-recheck:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-surface-hover); }
+  .hk-health-recheck:disabled { opacity: 0.5; cursor: progress; }
+  .hk-health-recheck:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .hk-health-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  :global(.hk-health-recheck .spin) { animation: hk-spin 1s linear infinite; }
+  @keyframes hk-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.hk-health-recheck .spin) { animation: none; }
+  }
+
+  /* ─── Columna de contenido ───────────────────────────────────────────── */
+  .hk-main-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    min-width: 0;
+  }
   .hk-content {
     display: flex;
     flex-direction: column;
     gap: var(--space-6);
     min-width: 0;
+  }
+
+  /* ─── Sub-tabs de Curaduría (segundo nivel) ──────────────────────────── */
+  .hk-subtabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background: var(--segment-bg);
+    border-radius: var(--radius-full);
+    width: fit-content;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .hk-subtabs::-webkit-scrollbar { display: none; }
+  .hk-subtab {
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-full);
+    color: var(--segment-text);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      color var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default);
+  }
+  .hk-subtab:hover:not(.active) { color: var(--text-primary); }
+  .hk-subtab.active {
+    color: var(--segment-text-active);
+    background: var(--segment-indicator-bg);
+    box-shadow: var(--segment-indicator-shadow);
+  }
+  .hk-subtab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   /* ─── Loading mientras chequeamos adminRole ──────────────────────────── */
@@ -235,11 +416,51 @@
     0%, 100% { opacity: 1; }
     50%      { opacity: 0.5; }
   }
+  @media (prefers-reduced-motion: reduce) {
+    .hk-loading-card { animation: none; }
+  }
+
+  /* ─── Responsive: <1024px el sidebar pasa a fila horizontal arriba ────── */
+  @media (max-width: 1024px) {
+    .hk-shell {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-5);
+      padding: var(--space-6) var(--space-4) var(--space-12);
+    }
+    .hk-sidebar {
+      position: static;
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-3);
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .hk-sidebar::-webkit-scrollbar { display: none; }
+    .hk-sidebar-brand { display: none; }
+    .hk-sidebar-nav {
+      flex-direction: row;
+      gap: 2px;
+      flex: 1;
+    }
+    .hk-nav-item { white-space: nowrap; }
+    .hk-nav-item.active::before { display: none; }
+    .hk-sidebar-footer {
+      margin-top: 0;
+      flex-direction: row;
+      align-items: center;
+      gap: 7px;
+      padding: 0 0 0 var(--space-3);
+      border-top: 0;
+      border-left: 1px solid var(--separator-subtle);
+      flex-shrink: 0;
+    }
+    .hk-health-label,
+    .hk-health-sub { display: none; }
+  }
 
   @media (max-width: 640px) {
-    .hk-shell {
-      padding: var(--space-6) var(--space-4) var(--space-12);
-      gap: var(--space-5);
-    }
+    .hk-nav-item span { display: none; }
+    .hk-nav-item { padding: var(--space-2); }
   }
 </style>

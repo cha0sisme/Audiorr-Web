@@ -422,6 +422,25 @@
   --hk-drop-line-color: var(--accent);
   --hk-drop-line-thickness: 3px;
 
+  /* ── Admin sidebar (shell del panel) ────────────────────────────────────
+     Navegación primaria del panel. Superficie SÓLIDA (no glass): lleva
+     texto/iconos de navegación, y glass tras texto va contra la regla del
+     proyecto. El ítem activo se marca con una barra de acento a la izquierda
+     + fondo sutil, no con gradiente. */
+  --admin-sidebar-bg: var(--bg-surface);
+  --admin-sidebar-border: var(--border-subtle);
+  --admin-sidebar-item-fg: var(--text-secondary);
+  --admin-sidebar-item-fg-hover: var(--text-primary);
+  --admin-sidebar-item-fg-active: var(--text-primary);
+  --admin-sidebar-item-bg-hover: var(--bg-surface-hover);
+  --admin-sidebar-item-bg-active: color-mix(in srgb, var(--accent) 12%, transparent);
+  --admin-sidebar-item-bar-active: var(--accent);
+  /* Dot de salud del footer — reusa los status semánticos por estado. */
+  --admin-health-ok: var(--status-success);
+  --admin-health-warn: var(--status-warning);
+  --admin-health-down: var(--status-danger);
+  --admin-health-unknown: var(--text-tertiary);
+
   /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
      curva ease-out aproximada por stops. La técnica: aplicar como
      `mask-image` al pseudo-element `::before` del hero, cuyo fondo es la
