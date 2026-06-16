@@ -441,6 +441,24 @@
   --admin-health-down: var(--status-danger);
   --admin-health-unknown: var(--text-tertiary);
 
+  /* ── Geometrías del dashboard admin (fondos de card 2026) ───────────────
+     Paleta viva, theme-agnostic: las cards llevan su propio "mundo" de color
+     con texto claro encima (mismo principio que las cover variants generadas
+     por el backend: aurora / prism / ripple). Derivada en OKLCH del azul de
+     marca + análogos controlados — armónica, no arcoíris. Un componente
+     consume estos tokens, nunca define el color inline. */
+  --geo-ink:     oklch(0.20 0.045 265);  /* base oscura para contraste */
+  --geo-blue:    oklch(0.62 0.19 255);
+  --geo-violet:  oklch(0.56 0.20 295);
+  --geo-cyan:    oklch(0.72 0.14 205);
+  --geo-magenta: oklch(0.60 0.23 350);
+  --geo-amber:   oklch(0.76 0.15 70);
+  --geo-teal:    oklch(0.66 0.13 185);
+  /* Texto sobre las geometrías — claro siempre (el fondo es oscuro-vivo). */
+  --geo-fg:           oklch(0.98 0 0);
+  --geo-fg-secondary: oklch(0.98 0 0 / 0.72);
+  --geo-fg-tertiary:  oklch(0.98 0 0 / 0.55);
+
   /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
      curva ease-out aproximada por stops. La técnica: aplicar como
      `mask-image` al pseudo-element `::before` del hero, cuyo fondo es la

@@ -2,34 +2,30 @@ import { z } from 'zod';
 
 /**
  * Tipos del dashboard de Housekeeping (Resumen). Cada schema corresponde a un
- * endpoint del Audiorr Backend ya verificado en producción con Bearer.
- * Derivamos los tipos TS del schema (fuente de verdad) — patrón del proyecto.
+ * endpoint del Audiorr Backend verificado en producción con Bearer. Derivamos
+ * los tipos TS del schema (fuente de verdad) — patrón del proyecto.
+ *
+ * El Resumen es de observabilidad/seguridad: accesos, IPs con fallos, estado de
+ * seguridad y salud del sistema (crons, uptime, DBs) + pulso de actividad.
  */
-
-// ── GET /api/diagnostics/coverage ──────────────────────────────────────────
-// Cobertura del pipeline de análisis: para cada campo de analysis_cache,
-// cuántas filas lo tienen. `total` = canciones analizadas en cache.
-export const CoverageFieldSchema = z.object({
-  withField: z.number(),
-  withoutField: z.number(),
-  percentage: z.number()
-});
-export const CoverageSchema = z.object({
-  total: z.number(),
-  fields: z.record(z.string(), CoverageFieldSchema)
-});
-export type Coverage = z.infer<typeof CoverageSchema>;
 
 // ── GET /api/diagnostics/system ────────────────────────────────────────────
 // Snapshot de runtime del backend. `passthrough` porque trae más campos
 // (config/python/pid…) que el dashboard no consume; solo tipamos lo que usa.
+// `size`/`rows` son nullable: una DB en estado MISSING llega con size:null.
 export const SystemDatabaseSchema = z.object({
   file: z.string(),
   status: z.string(),
-  size: z.number(),
+  size: z.number().nullable(),
   rows: z.number().nullable(),
   description: z.string().nullable().optional(),
   error: z.string().nullable().optional()
+});
+export const SystemCronSchema = z.object({
+  status: z.enum(['idle', 'running', 'error', 'success']).catch('idle'),
+  lastRun: z.string().nullable().optional(),
+  nextRun: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional()
 });
 export const SystemInfoSchema = z
   .object({
@@ -44,22 +40,13 @@ export const SystemInfoSchema = z
       heapUsed: z.number(),
       heapTotal: z.number()
     }),
-    databases: z.array(SystemDatabaseSchema)
+    databases: z.array(SystemDatabaseSchema),
+    crons: z.record(z.string(), SystemCronSchema).optional()
   })
   .passthrough();
 export type SystemInfo = z.infer<typeof SystemInfoSchema>;
 export type SystemDatabase = z.infer<typeof SystemDatabaseSchema>;
-
-// ── GET /api/diagnostics/summary ───────────────────────────────────────────
-// Resumen del motor DJ en una llamada (evita 3+ a /aggregate y /sessions).
-export const DjSummarySchema = z.object({
-  totalTransitions: z.number(),
-  ratedPct: z.number(),
-  meanRating: z.number().nullable(),
-  lastSessionAt: z.string().nullable(),
-  currentAlgorithmVersion: z.string().nullable()
-});
-export type DjSummary = z.infer<typeof DjSummarySchema>;
+export type SystemCron = z.infer<typeof SystemCronSchema>;
 
 // ── GET /api/stats/scrobbles-daily?days=N ──────────────────────────────────
 // Serie diaria de reproducciones (rellena con 0 los días sin escuchas). Las
@@ -71,17 +58,28 @@ export const ScrobblesDailySchema = z.object({
 });
 export type ScrobblesDaily = z.infer<typeof ScrobblesDailySchema>;
 
-// ── GET /api/auth/hub-status ───────────────────────────────────────────────
-// Estado del hub Connect (Socket.io): sesiones/usuarios/dispositivos vivos.
-export const HubStatusSchema = z
-  .object({
-    ok: z.boolean(),
-    sessions: z.number(),
-    users: z.number(),
-    totalDevices: z.number(),
-    uptimeSeconds: z.number(),
-    persistent: z.boolean().optional(),
-    serverIp: z.string().optional()
-  })
-  .passthrough();
-export type HubStatus = z.infer<typeof HubStatusSchema>;
+// ── GET /api/admin/security-summary ────────────────────────────────────────
+// Resumen de accesos a partir de auth-audit-log.db (logins ok/fail/blocked en
+// 24h y 7d), IPs con más fallos, sesiones vivas y lockouts antifuerza-bruta.
+export const LoginWindowSchema = z.object({
+  ok: z.number(),
+  fail: z.number(),
+  blocked: z.number()
+});
+export const FailIpSchema = z.object({
+  ip: z.string(),
+  count: z.number(),
+  lastAttemptAt: z.string()
+});
+export const SecuritySummarySchema = z.object({
+  logins24h: LoginWindowSchema,
+  logins7d: LoginWindowSchema,
+  topFailIps: z.array(FailIpSchema),
+  activeSessions: z.number(),
+  lockedUsernames: z.number(),
+  trackedUsernames: z.number(),
+  auditTotalRecords: z.number()
+});
+export type SecuritySummary = z.infer<typeof SecuritySummarySchema>;
+export type LoginWindow = z.infer<typeof LoginWindowSchema>;
+export type FailIp = z.infer<typeof FailIpSchema>;
