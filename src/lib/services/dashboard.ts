@@ -16,9 +16,15 @@ import {
   SystemInfoSchema,
   ScrobblesDailySchema,
   SecuritySummarySchema,
+  AuthDailySeriesSchema,
+  RateLimitStatsSchema,
+  CronStatusMapSchema,
   type SystemInfo,
   type ScrobblesDaily,
-  type SecuritySummary
+  type SecuritySummary,
+  type AuthDailySeries,
+  type RateLimitStats,
+  type CronStatusMap
 } from '$types/dashboard';
 
 function userHeader(): Record<string, string> {
@@ -39,4 +45,19 @@ export function getScrobblesDaily(days = 7): Promise<ScrobblesDaily | null> {
 /** Resumen de accesos/seguridad (logins, IPs con fallos, sesiones, lockouts). */
 export function getSecuritySummary(): Promise<SecuritySummary | null> {
   return backendService.get('/api/admin/security-summary', SecuritySummarySchema, userHeader());
+}
+
+/** Serie diaria de accesos (ok/fail/blocked) para la card de actividad. */
+export function getAuthDailySeries(days = 30): Promise<AuthDailySeries | null> {
+  return backendService.get(`/api/admin/auth-daily-series?days=${days}`, AuthDailySeriesSchema, userHeader());
+}
+
+/** Contadores de rate-limit por limiter (detección de abuso). */
+export function getRateLimitStats(): Promise<RateLimitStats | null> {
+  return backendService.get('/api/admin/rate-limit-stats', RateLimitStatsSchema, userHeader());
+}
+
+/** Estado de los crons con lastError real (sin redactar). */
+export function getCronStatus(): Promise<CronStatusMap | null> {
+  return backendService.get('/api/admin/cron-status', CronStatusMapSchema, userHeader());
 }

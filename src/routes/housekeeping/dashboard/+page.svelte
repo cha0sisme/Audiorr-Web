@@ -20,6 +20,8 @@
     UsersThree,
     Database,
     ChartLineUp,
+    Gauge,
+    Gear,
     Cpu,
     CheckCircle,
     CaretRight,
@@ -31,7 +33,14 @@
   import AdminStatusPill from '$components/housekeeping/AdminStatusPill.svelte';
   import PulseBars from '$components/housekeeping/PulseBars.svelte';
   import RangeSelect from '$components/housekeeping/RangeSelect.svelte';
-  import { getSecuritySummary, getSystemInfo, getScrobblesDaily } from '$services/dashboard';
+  import {
+    getSecuritySummary,
+    getSystemInfo,
+    getScrobblesDaily,
+    getAuthDailySeries,
+    getRateLimitStats,
+    getCronStatus
+  } from '$services/dashboard';
   import { generateAllDailyMixes, regenerateAllCovers } from '$services/dailyMixes';
   import { generateAllSmartPlaylists } from '$services/smartPlaylists';
   import { BackendError } from '$services/BackendService.svelte';
@@ -67,6 +76,76 @@
     staleTime: 5 * 60 * 1000
   }));
   const pulseSeries = $derived(scrobblesQ.data?.series ?? []);
+
+  // ─── Cards de observabilidad (Zona A) ─────────────────────────────────────
+  const authDailyQ = createQuery(() => ({
+    queryKey: ['hk-auth-daily', 30],
+    queryFn: () => getAuthDailySeries(30),
+    enabled,
+    staleTime: 5 * 60 * 1000
+  }));
+  const rateLimitQ = createQuery(() => ({
+    queryKey: ['hk-rate-limit'],
+    queryFn: getRateLimitStats,
+    enabled,
+    staleTime: 30 * 1000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false
+  }));
+  const cronStatusQ = createQuery(() => ({
+    queryKey: ['hk-cron-status'],
+    queryFn: getCronStatus,
+    enabled,
+    staleTime: 60 * 1000
+  }));
+
+  // Accesos por día (stacked bars). Altura por total diario; rail por actividad
+  // sospechosa reciente (bloqueos/fallos de los últimos 7 días).
+  const authSeries = $derived(authDailyQ.data?.series ?? []);
+  const authMaxDay = $derived(Math.max(1, ...authSeries.map((d) => d.ok + d.fail + d.blocked)));
+  const authTotals = $derived(
+    authSeries.reduce(
+      (a, d) => ({ ok: a.ok + d.ok, fail: a.fail + d.fail, blocked: a.blocked + d.blocked }),
+      { ok: 0, fail: 0, blocked: 0 }
+    )
+  );
+  const authState = $derived.by<'calm' | 'watch' | 'alert'>(() => {
+    const recent = authSeries.slice(-7);
+    const blocked = recent.reduce((n, d) => n + d.blocked, 0);
+    const fail = recent.reduce((n, d) => n + d.fail, 0);
+    if (blocked >= 5) return 'alert';
+    if (blocked > 0 || fail > 0) return 'watch';
+    return 'calm';
+  });
+
+  // Rate-limits (abuso). Tiles por limiter; rail por total de hits.
+  const rlLimiters = $derived(rateLimitQ.data?.limiters ?? []);
+  const rlTotal = $derived(rlLimiters.reduce((n, l) => n + l.hits, 0));
+  const rlState = $derived.by<'calm' | 'watch' | 'alert'>(() => {
+    if (rlTotal >= 20) return 'alert';
+    if (rlTotal > 0) return 'watch';
+    return 'calm';
+  });
+  const RL_LABELS: Record<string, string> = {
+    analyze: 'Análisis',
+    backfill: 'Backfill',
+    strict: 'General'
+  };
+
+  // Estado de jobs (instrumento; los Jobs operativos siguen en el panel de salud).
+  const cronList = $derived.by(() =>
+    CRON_ORDER.map((k) => {
+      const c = cronStatusQ.data?.crons?.[k];
+      return {
+        key: k,
+        label: CRON_LABELS[k] ?? k,
+        status: c?.status ?? 'idle',
+        lastError: c?.lastError ?? null
+      };
+    })
+  );
+  const cronErrors = $derived(cronList.filter((c) => c.status === 'error'));
+  const cronState = $derived<'calm' | 'alert'>(cronErrors.length > 0 ? 'alert' : 'calm');
 
   // ─── Formatters ─────────────────────────────────────────────────────────
   const fmt = (n: number) => n.toLocaleString('es-ES');
@@ -331,6 +410,76 @@
           <span class="tile-label">eventos</span>
         </div>
       </div>
+    {/if}
+  </SecCard>
+
+  <!-- Card 4 · Accesos por día · stacked bars (ok/fallidos/bloqueados) -->
+  <SecCard state={authState} Icon={ChartLineUp} kicker="Accesos · 30 días" arch="balance">
+    {#if authDailyQ.isError}
+      <span class="sec-unit">no se pudo leer</span>
+    {:else if authSeries.length === 0}
+      <span class="sec-unit">cargando…</span>
+    {:else}
+      <div
+        class="daybars"
+        role="img"
+        aria-label={`Accesos por día: ${authTotals.ok} ok, ${authTotals.fail} fallidos, ${authTotals.blocked} bloqueados en ${authSeries.length} días`}
+      >
+        {#each authSeries as d (d.date)}
+          <div class="daybar" title={`${d.date} · ${d.ok} ok · ${d.fail} fallidos · ${d.blocked} bloqueados`}>
+            <span class="seg" data-tone="good" style:height="{(d.ok / authMaxDay) * 100}%"></span>
+            <span class="seg" data-tone="watch" style:height="{(d.fail / authMaxDay) * 100}%"></span>
+            <span class="seg" data-tone="alert" style:height="{(d.blocked / authMaxDay) * 100}%"></span>
+          </div>
+        {/each}
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="dot" data-tone="good"></span>{fmt(authTotals.ok)} ok</span>
+        <span class="legend-item"><span class="dot" data-tone="watch"></span>{fmt(authTotals.fail)} fallidos</span>
+        <span class="legend-item"><span class="dot" data-tone="alert"></span>{fmt(authTotals.blocked)} bloq.</span>
+      </div>
+    {/if}
+  </SecCard>
+
+  <!-- Card 5 · Rate-limits · abuso (tiles por limiter) -->
+  <SecCard state={rlState} Icon={Gauge} kicker="Rate-limits">
+    {#if rateLimitQ.isError}
+      <span class="sec-unit">no se pudo leer</span>
+    {:else if rlTotal === 0}
+      <div class="empty-good">
+        <CheckCircle size={22} weight="fill" />
+        <span>Sin peticiones bloqueadas.</span>
+      </div>
+    {:else}
+      <div class="tiles">
+        {#each rlLimiters as l (l.key)}
+          <div class="tile" data-tone={l.hits > 0 ? 'alert' : 'good'}>
+            <span class="tile-num">{fmt(l.hits)}</span>
+            <span class="tile-label">{RL_LABELS[l.key] ?? l.key}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </SecCard>
+
+  <!-- Card 6 · Estado de jobs · instrumento de errores (la operación vive en el panel) -->
+  <SecCard state={cronState} Icon={Gear} kicker="Estado de jobs">
+    {#if cronStatusQ.isError}
+      <span class="sec-unit">no se pudo leer</span>
+    {:else if cronErrors.length === 0}
+      <div class="empty-good">
+        <CheckCircle size={22} weight="fill" />
+        <span>Los {cronList.length} jobs operativos.</span>
+      </div>
+    {:else}
+      <ul class="cronlist">
+        {#each cronErrors as c (c.key)}
+          <li class="cronrow">
+            <span class="cron-name">{c.label}</span>
+            <span class="cron-err">{c.lastError ?? 'error'}</span>
+          </li>
+        {/each}
+      </ul>
     {/if}
   </SecCard>
 </div>
@@ -617,6 +766,61 @@
   .tile[data-tone='good'] .tile-num  { color: var(--sec-good); }
   .tile[data-tone='alert'] .tile-num { color: var(--sec-alert); }
   .tile[data-tone='alert'] { background: var(--sec-alert-soft); }
+
+  /* ─── Card Accesos por día: stacked bars (ok/fallidos/bloqueados) ─────── */
+  .daybars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 56px;
+    width: 100%;
+  }
+  .daybar {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-start;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    overflow: hidden;
+    background: var(--sec-surface-raised);
+  }
+  .seg { width: 100%; }
+  .seg[data-tone='good']  { background: var(--sec-good); }
+  .seg[data-tone='watch'] { background: var(--sec-watch); }
+  .seg[data-tone='alert'] { background: var(--sec-alert); }
+
+  /* ─── Card Estado de jobs: lista de errores reales ───────────────────── */
+  .cronlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+  .cronrow {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 9px;
+    border-radius: var(--radius-sm);
+    background: var(--sec-alert-soft);
+  }
+  .cron-name {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--sec-fg);
+  }
+  .cron-err {
+    font-size: 11px;
+    color: var(--sec-fg-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   /* ─── Panel salud: pulso héroe (mini-bars + rango) ───────────────────── */
   .pulse {

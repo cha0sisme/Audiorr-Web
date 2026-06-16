@@ -86,3 +86,40 @@ export const SecuritySummarySchema = z.object({
 export type SecuritySummary = z.infer<typeof SecuritySummarySchema>;
 export type LoginWindow = z.infer<typeof LoginWindowSchema>;
 export type FailIp = z.infer<typeof FailIpSchema>;
+
+// ── GET /api/admin/auth-daily-series?days=N ────────────────────────────────
+// Serie diaria de accesos (ok/fail/blocked) rellena con 0 los días vacíos.
+export const AuthDailySeriesSchema = z.object({
+  days: z.number(),
+  series: z.array(
+    z.object({
+      date: z.string(),
+      ok: z.number(),
+      fail: z.number(),
+      blocked: z.number()
+    })
+  )
+});
+export type AuthDailySeries = z.infer<typeof AuthDailySeriesSchema>;
+export type AuthDayPoint = AuthDailySeries['series'][number];
+
+// ── GET /api/admin/rate-limit-stats ────────────────────────────────────────
+// Contadores en memoria por limiter (analyze/backfill/strict).
+export const RateLimitStatsSchema = z.object({
+  windowMinutes: z.number(),
+  limiters: z.array(
+    z.object({
+      key: z.string(),
+      hits: z.number(),
+      lastHitAt: z.string().nullable()
+    })
+  )
+});
+export type RateLimitStats = z.infer<typeof RateLimitStatsSchema>;
+
+// ── GET /api/admin/cron-status ─────────────────────────────────────────────
+// Estado de los crons con lastError REAL (sin redactar). Reusa SystemCron.
+export const CronStatusMapSchema = z.object({
+  crons: z.record(z.string(), SystemCronSchema)
+});
+export type CronStatusMap = z.infer<typeof CronStatusMapSchema>;
