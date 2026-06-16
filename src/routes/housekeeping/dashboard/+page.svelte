@@ -21,7 +21,6 @@
     Database,
     ChartLineUp,
     Gauge,
-    Gear,
     Cpu,
     CheckCircle,
     CaretRight,
@@ -38,8 +37,7 @@
     getSystemInfo,
     getScrobblesDaily,
     getAuthDailySeries,
-    getRateLimitStats,
-    getCronStatus
+    getRateLimitStats
   } from '$services/dashboard';
   import { generateAllDailyMixes, regenerateAllCovers } from '$services/dailyMixes';
   import { generateAllSmartPlaylists } from '$services/smartPlaylists';
@@ -92,12 +90,6 @@
     refetchInterval: 60_000,
     refetchIntervalInBackground: false
   }));
-  const cronStatusQ = createQuery(() => ({
-    queryKey: ['hk-cron-status'],
-    queryFn: getCronStatus,
-    enabled,
-    staleTime: 60 * 1000
-  }));
 
   // Accesos por día (stacked bars). Altura por total diario; rail por actividad
   // sospechosa reciente (bloqueos/fallos de los últimos 7 días).
@@ -131,21 +123,6 @@
     backfill: 'Backfill',
     strict: 'General'
   };
-
-  // Estado de jobs (instrumento; los Jobs operativos siguen en el panel de salud).
-  const cronList = $derived.by(() =>
-    CRON_ORDER.map((k) => {
-      const c = cronStatusQ.data?.crons?.[k];
-      return {
-        key: k,
-        label: CRON_LABELS[k] ?? k,
-        status: c?.status ?? 'idle',
-        lastError: c?.lastError ?? null
-      };
-    })
-  );
-  const cronErrors = $derived(cronList.filter((c) => c.status === 'error'));
-  const cronState = $derived<'calm' | 'alert'>(cronErrors.length > 0 ? 'alert' : 'calm');
 
   // ─── Formatters ─────────────────────────────────────────────────────────
   const fmt = (n: number) => n.toLocaleString('es-ES');
@@ -462,26 +439,6 @@
     {/if}
   </SecCard>
 
-  <!-- Card 6 · Estado de jobs · instrumento de errores (la operación vive en el panel) -->
-  <SecCard state={cronState} Icon={Gear} kicker="Estado de jobs">
-    {#if cronStatusQ.isError}
-      <span class="sec-unit">no se pudo leer</span>
-    {:else if cronErrors.length === 0}
-      <div class="empty-good">
-        <CheckCircle size={22} weight="fill" />
-        <span>Los {cronList.length} jobs operativos.</span>
-      </div>
-    {:else}
-      <ul class="cronlist">
-        {#each cronErrors as c (c.key)}
-          <li class="cronrow">
-            <span class="cron-name">{c.label}</span>
-            <span class="cron-err">{c.lastError ?? 'error'}</span>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </SecCard>
 </div>
 
 <!-- ─── Salud y actividad ─────────────────────────────────────────────────── -->
@@ -791,36 +748,6 @@
   .seg[data-tone='watch'] { background: var(--sec-watch); }
   .seg[data-tone='alert'] { background: var(--sec-alert); }
 
-  /* ─── Card Estado de jobs: lista de errores reales ───────────────────── */
-  .cronlist {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: 100%;
-  }
-  .cronrow {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: 6px 9px;
-    border-radius: var(--radius-sm);
-    background: var(--sec-alert-soft);
-  }
-  .cron-name {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--sec-fg);
-  }
-  .cron-err {
-    font-size: 11px;
-    color: var(--sec-fg-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
   /* ─── Panel salud: pulso héroe (mini-bars + rango) ───────────────────── */
   .pulse {

@@ -18,13 +18,11 @@ import {
   SecuritySummarySchema,
   AuthDailySeriesSchema,
   RateLimitStatsSchema,
-  CronStatusMapSchema,
   type SystemInfo,
   type ScrobblesDaily,
   type SecuritySummary,
   type AuthDailySeries,
-  type RateLimitStats,
-  type CronStatusMap
+  type RateLimitStats
 } from '$types/dashboard';
 
 function userHeader(): Record<string, string> {
@@ -55,9 +53,4 @@ export function getAuthDailySeries(days = 30): Promise<AuthDailySeries | null> {
 /** Contadores de rate-limit por limiter (detección de abuso). */
 export function getRateLimitStats(): Promise<RateLimitStats | null> {
   return backendService.get('/api/admin/rate-limit-stats', RateLimitStatsSchema, userHeader());
-}
-
-/** Estado de los crons con lastError real (sin redactar). */
-export function getCronStatus(): Promise<CronStatusMap | null> {
-  return backendService.get('/api/admin/cron-status', CronStatusMapSchema, userHeader());
 }

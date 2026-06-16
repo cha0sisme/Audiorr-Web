@@ -116,10 +116,3 @@ export const RateLimitStatsSchema = z.object({
   )
 });
 export type RateLimitStats = z.infer<typeof RateLimitStatsSchema>;
-
-// ── GET /api/admin/cron-status ─────────────────────────────────────────────
-// Estado de los crons con lastError REAL (sin redactar). Reusa SystemCron.
-export const CronStatusMapSchema = z.object({
-  crons: z.record(z.string(), SystemCronSchema)
-});
-export type CronStatusMap = z.infer<typeof CronStatusMapSchema>;
