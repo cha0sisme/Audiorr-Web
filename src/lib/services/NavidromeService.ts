@@ -353,6 +353,34 @@ export async function ping(): Promise<{ ok: boolean; version: string }> {
 }
 
 /**
+ * Subsonic getNowPlaying — qué está reproduciendo cada usuario AHORA mismo.
+ * Endpoint estándar de Navidrome; el `entry` trae `username` + la canción +
+ * `minutesAgo`. Lo usamos en Personas para marcar quién escucha en vivo
+ * (cruzando por username). Schema tolerante (`passthrough`): el entry es un
+ * Child completo, solo tipamos lo que consumimos.
+ */
+const NowPlayingEntrySchema = z
+  .object({
+    username: z.string(),
+    title: z.string().optional(),
+    artist: z.string().optional(),
+    minutesAgo: z.number().optional()
+  })
+  .passthrough();
+const NowPlayingResponseSchema = z.object({
+  nowPlaying: z
+    .object({ entry: z.array(NowPlayingEntrySchema).optional() })
+    .optional()
+});
+export type NowPlayingEntry = z.infer<typeof NowPlayingEntrySchema>;
+
+export async function getNowPlaying(): Promise<NowPlayingEntry[]> {
+  const creds = requireCreds();
+  const data = await call(creds, 'getNowPlaying', {}, NowPlayingResponseSchema);
+  return data.nowPlaying?.entry ?? [];
+}
+
+/**
  * Subsonic scrobble.view. Si `submission=true`, registra el play en
  * Navidrome (cuenta para Last.fm si el server tiene plugin); si false,
  * actúa como "now playing" indicator.

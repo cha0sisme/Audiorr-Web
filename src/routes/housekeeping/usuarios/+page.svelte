@@ -17,6 +17,7 @@
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import PersonCard from '$components/housekeeping/PersonCard.svelte';
   import { getAdminUsers } from '$services/user';
+  import { getNowPlaying } from '$services/NavidromeService';
   import { listAllSessions, closeSession, closeOtherSessions } from '$services/sessions';
   import { sortSessions } from '$utils/session-format';
   import { credentials } from '$stores/credentials.svelte';
@@ -40,6 +41,22 @@
     refetchInterval: 60_000,
     refetchIntervalInBackground: false
   }));
+  // "Reproduciendo ahora" real (Subsonic getNowPlaying), refresco corto.
+  const nowPlayingQ = createQuery(() => ({
+    queryKey: ['nowPlaying'],
+    queryFn: () => getNowPlaying(),
+    enabled,
+    staleTime: 20_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false
+  }));
+  const nowPlayingByUser = $derived.by(() => {
+    const m = new Map<string, { title: string; artist: string }>();
+    for (const e of nowPlayingQ.data ?? []) {
+      if (e.title) m.set(e.username.toLowerCase(), { title: e.title, artist: e.artist ?? '' });
+    }
+    return m;
+  });
 
   type Person = {
     username: string;
@@ -89,7 +106,9 @@
   // ─── Tira de pulso ───────────────────────────────────────────────────────
   const nPersons = $derived(persons.length);
   const nSessions = $derived(persons.reduce((n, p) => n + p.sessions.length, 0));
-  const lastActivity = $derived(persons.reduce((m, p) => Math.max(m, activityTs(p)), 0));
+  const lastActivity = $derived(
+    nowPlayingByUser.size > 0 ? Date.now() : persons.reduce((m, p) => Math.max(m, activityTs(p)), 0)
+  );
   function relMs(ms: number): string {
     if (ms <= 0) return '—';
     const abs = Math.abs(ms - Date.now());
@@ -199,6 +218,7 @@
     {#each persons as p (p.username)}
       <PersonCard
         person={p}
+        nowPlaying={nowPlayingByUser.get(p.username.toLowerCase()) ?? null}
         expanded={openUsers.includes(p.username)}
         onToggle={() => toggle(p.username)}
         closingId={closingId}

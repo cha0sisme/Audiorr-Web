@@ -25,6 +25,9 @@
 
   type Props = {
     person: Person;
+    /** Reproducción en vivo (Subsonic getNowPlaying) si el usuario está
+        sonando ahora; null si no. Dato real, no heurística. */
+    nowPlaying?: { title: string; artist: string } | null;
     expanded: boolean;
     onToggle: () => void;
     closingId: string | null;
@@ -33,8 +36,16 @@
     onCloseRest: () => void;
   };
 
-  let { person, expanded, onToggle, closingId, closingRest, onCloseSession, onCloseRest }: Props =
-    $props();
+  let {
+    person,
+    nowPlaying = null,
+    expanded,
+    onToggle,
+    closingId,
+    closingRest,
+    onCloseSession,
+    onCloseRest
+  }: Props = $props();
 
   const n = $derived(person.sessions.length);
   const expandable = $derived(n > 0);
@@ -46,12 +57,9 @@
   }
   const closeableCount = $derived(person.sessions.filter(isClosable).length);
 
-  // Escuchando AHORA solo si el scrobble es < 5 min y hay sesión activa; si no,
-  // es el "último" (honestidad sobre el dato, no inventar presencia).
-  const isLive = $derived.by(() => {
-    if (!person.lastScrobble || n === 0) return false;
-    return Date.now() - new Date(person.lastScrobble.playedAt).getTime() < 5 * 60 * 1000;
-  });
+  // "Escuchando ahora" = dato REAL de getNowPlaying, no una heurística sobre el
+  // último scrobble.
+  const isLive = $derived(nowPlaying != null);
 
   function rel(iso?: string | null): string {
     if (!iso) return '—';
@@ -92,11 +100,12 @@
     </span>
 
     <span class="now" class:live={isLive}>
-      {#if person.lastScrobble}
+      {#if nowPlaying}
         <MusicNote size={12} weight="fill" />
-        <span class="now-text">
-          {#if isLive}Escuchando: {/if}{person.lastScrobble.title} · {person.lastScrobble.artist}
-        </span>
+        <span class="now-text">Escuchando: {nowPlaying.title}{#if nowPlaying.artist} · {nowPlaying.artist}{/if}</span>
+      {:else if person.lastScrobble}
+        <MusicNote size={12} weight="regular" />
+        <span class="now-text">{person.lastScrobble.title} · {person.lastScrobble.artist}</span>
       {:else}
         <span class="now-empty">Sin reproducciones recientes</span>
       {/if}

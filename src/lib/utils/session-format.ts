@@ -21,7 +21,12 @@ export function platformTone(platform: SessionView['platform']): PlatformTone {
 
 /** Etiqueta legible de la plataforma para mostrar bajo el dispositivo. */
 export function platformLabel(platform: SessionView['platform']): string {
-  switch (platform) {
+  return platformLabelFromTone(platformTone(platform));
+}
+
+/** Etiqueta a partir del tone ya resuelto (incluye la inferencia por UA). */
+export function platformLabelFromTone(tone: PlatformTone): string {
+  switch (tone) {
     case 'web':
       return 'Navegador';
     case 'ios':
@@ -31,6 +36,21 @@ export function platformLabel(platform: SessionView['platform']): string {
     default:
       return 'Dispositivo desconocido';
   }
+}
+
+/**
+ * Tone de la sesión con fallback: si el backend no clasificó `platform`
+ * (null/unknown — p.ej. una sesión Android cuyo header no llegó), se infiere
+ * del `userAgent`. Evita que dispositivos reales caigan a "Desconocido".
+ */
+export function platformToneFromSession(s: SessionView): PlatformTone {
+  const t = platformTone(s.platform);
+  if (t !== 'unknown') return t;
+  const ua = (s.userAgent ?? '').toLowerCase();
+  if (/android/.test(ua)) return 'android';
+  if (/iphone|ipad|ipod|\bios\b|cfnetwork|darwin|audiorr.*ios/.test(ua)) return 'ios';
+  if (/mozilla|applewebkit|chrome|firefox|safari|edg|gecko/.test(ua)) return 'web';
+  return 'unknown';
 }
 
 /** Bandera emoji desde un ISO-3166 alpha-2 (regional indicators). Cadena
