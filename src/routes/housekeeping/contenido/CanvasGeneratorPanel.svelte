@@ -37,6 +37,7 @@
     isLikelyYoutubeUrl,
     CanvasGenerateError
   } from '$services/CanvasGenerationService';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import type { NavidromeSong } from '$types/navidrome';
@@ -269,18 +270,12 @@
   }
 </script>
 
-<section class="hk-card">
-  <header class="hk-section-head">
-    <h2>
-      <YoutubeLogo size={20} weight="fill" class="yt-icon" />
-      Generar Canvas desde YouTube
-    </h2>
-    <p>
-      Cuando Spotify no tiene Canvas oficial, podemos crearlo a partir de un
-      vídeo de YouTube. Modo aleatorio para clips dinámicos; modo loop para
-      visualizadores.
-    </p>
-  </header>
+<AdminPanel title="Generar Canvas desde YouTube">
+  {#snippet info()}
+    Cuando Spotify no tiene Canvas oficial, podemos crearlo a partir de un
+    vídeo de YouTube. Modo aleatorio para clips dinámicos; modo loop para
+    visualizadores.
+  {/snippet}
 
   <!-- Paso 1: canción ────────────────────────────────────────────────── -->
   <div class="hk-step">
@@ -532,7 +527,7 @@
           disabled={!canGenerate || submitting || (!!job && (job.status === 'queued' || job.status === 'running'))}
         >
           {#if submitting}
-            <ArrowsClockwise size={13} weight="bold" class="spin" />
+            <ArrowsClockwise size={13} weight="bold" class="hk-cangen-spin" />
             Encolando…
           {:else}
             <YoutubeLogo size={13} weight="fill" /> Generar canvas
@@ -551,12 +546,12 @@
 
         {#if job.status === 'queued'}
           <div class="hk-job-state">
-            <ArrowsClockwise size={14} weight="bold" class="spin" />
+            <ArrowsClockwise size={14} weight="bold" class="hk-cangen-spin" />
             <span>En cola…</span>
           </div>
         {:else if job.status === 'running'}
           <div class="hk-job-state">
-            <ArrowsClockwise size={14} weight="bold" class="spin" />
+            <ArrowsClockwise size={14} weight="bold" class="hk-cangen-spin" />
             <span>{job.phase ? PHASE_LABEL[job.phase] : 'Procesando'}…</span>
           </div>
           <div class="hk-phase-track" aria-hidden="true">
@@ -621,9 +616,10 @@
       </div>
     </div>
   {/if}
+</AdminPanel>
 
-  <!-- Modal de confirmación cuando ya hay canvas ──────────────────────── -->
-  {#if pendingForceCanvas}
+<!-- Modal de confirmación cuando ya hay canvas (overlay flotante) ──────── -->
+{#if pendingForceCanvas}
     <div
       class="hk-modal-backdrop"
       onclick={cancelOverwrite}
@@ -683,45 +679,10 @@
       </div>
     </div>
   {/if}
-</section>
 
 <style>
-  /* La estética sigue el patrón de los hk-card existentes (Editorial /
-     panel Spotify); el componente está acoplado a esa página por diseño
-     — no se reutiliza fuera. */
-
-  .hk-card {
-    position: relative;
-    padding: var(--hk-card-padding);
-    background: var(--hk-card-bg);
-    backdrop-filter: var(--hk-card-blur);
-    -webkit-backdrop-filter: var(--hk-card-blur);
-    border-radius: var(--hk-card-radius);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .hk-section-head { display: flex; flex-direction: column; gap: 4px; }
-  .hk-section-head h2 {
-    margin: 0;
-    font-size: var(--text-xl);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    line-height: 1.2;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .hk-section-head :global(.yt-icon) { color: #ff0033; }
-  .hk-section-head p {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.55;
-    max-width: 70ch;
-  }
+  /* Operación dentro de AdminPanel (chasis claro); el componente está acoplado
+     a la página Contenido por diseño — no se reutiliza fuera. */
 
   /* Steps */
   .hk-step {
@@ -1272,7 +1233,7 @@
   .hk-btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
   .hk-btn-danger:active:not(:disabled) { transform: scale(0.97); }
 
-  :global(.hk-card .spin) { animation: hk-spin 1s linear infinite; }
+  :global(.hk-cangen-spin) { animation: hk-spin 1s linear infinite; }
   @keyframes hk-spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 640px) {

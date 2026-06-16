@@ -22,17 +22,15 @@
    */
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
-    ListBullets,
     MagnifyingGlass,
     ArrowsClockwise,
     Trash,
-    Link,
     CheckCircle,
     XCircle,
     Wrench,
     Check
   } from 'phosphor-svelte';
-  import HKInfoCard from '../HKInfoCard.svelte';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import {
@@ -244,19 +242,16 @@
 </script>
 
 <!-- ════════════════════════════════════════════════════════════════════
-     Panel principal — usa HKInfoCard (patrón visual Housekeeping)
+     Deezer Sync — operación dentro de AdminPanel (chasis claro)
      ════════════════════════════════════════════════════════════════════ -->
 
-<!-- Card 1: Importar nueva playlist Deezer -->
-<HKInfoCard
-  Icon={Link}
-  kicker="DEEZER SYNC"
-  title="Importar playlist de Deezer"
-  description="Pega la URL de una playlist pública de Deezer o su ID numérico. El backend la mapea contra tu biblioteca Navidrome."
-  pattern="waves"
-  tone="accent"
->
-  {#snippet children()}
+<!-- Panel 1: Importar nueva playlist Deezer -->
+<AdminPanel title="Importar playlist de Deezer">
+  {#snippet info()}
+    Pega la URL de una playlist pública de Deezer o su ID numérico. El backend
+    la mapea contra tu biblioteca Navidrome.
+  {/snippet}
+
     <div class="ds-form">
       <div class="ds-input-row">
         <input
@@ -372,35 +367,21 @@
         </table>
       </div>
     {/if}
-  {/snippet}
-</HKInfoCard>
+</AdminPanel>
 
-<!-- Card 2: Syncs Deezer existentes -->
-<HKInfoCard
-  Icon={ListBullets}
-  kicker="SYNCS ACTIVOS"
+<!-- Panel 2: Syncs Deezer existentes -->
+<AdminPanel
   title="Playlists Deezer sincronizadas"
-  description={syncsQ.isPending
-    ? 'Cargando…'
-    : syncs.length === 0
-      ? 'Aún no hay playlists Deezer sincronizadas.'
-      : `${syncs.length} ${syncs.length === 1 ? 'playlist sincronizada' : 'playlists sincronizadas'}`}
-  pattern="lines"
-  tone="mint"
+  loading={syncsQ.isPending}
+  error={syncsQ.isError ? 'No se pudieron cargar las syncs de Deezer.' : null}
+  onRetry={() => syncsQ.refetch()}
+  empty={!syncsQ.isPending && !syncsQ.isError && syncs.length === 0}
+  emptyText="Importa tu primera playlist de Deezer con el formulario de arriba."
 >
-  {#snippet children()}
-    {#if syncsQ.isPending}
-      <div class="ds-skel-list">
-        {#each Array(3) as _}
-          <div class="ds-skel-row"></div>
-        {/each}
-      </div>
-    {:else if syncs.length === 0}
-      <p class="ds-empty">
-        <ListBullets size={20} weight="regular" />
-        Importa tu primera playlist de Deezer con el formulario de arriba.
-      </p>
-    {:else}
+  {#snippet action()}
+    {#if syncs.length > 0}<span class="ds-count">{syncs.length}</span>{/if}
+  {/snippet}
+
       <ul class="ds-syncs-list">
         {#each syncs as p (p.externalId)}
           {@const rawPct = p.trackCount > 0 ? (p.matchCount / p.trackCount) * 100 : 0}
@@ -443,9 +424,7 @@
           </li>
         {/each}
       </ul>
-    {/if}
-  {/snippet}
-</HKInfoCard>
+</AdminPanel>
 
 <!-- Modal de match manual ─────────────────────────────────────────────── -->
 {#if manualMatch}
@@ -852,37 +831,20 @@
     gap: var(--space-2);
   }
 
-  /* ─── Skeleton ─────────────────────────────────────────────────────────── */
-  .ds-skel-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .ds-skel-row {
-    height: 54px;
-    background: var(--bg-canvas);
-    border-radius: 12px;
-    animation: ds-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes ds-pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.5; }
-  }
-
-  .ds-empty {
-    display: flex;
+  /* Contador en la cabecera del panel (action) */
+  .ds-count {
+    display: inline-flex;
     align-items: center;
-    gap: 10px;
-    margin: 0;
-    padding: var(--space-3) var(--space-4);
-    color: var(--text-tertiary);
-    font-size: var(--text-sm);
-    background: var(--bg-canvas);
-    border-radius: 12px;
-  }
-  .ds-empty :global(svg) {
-    color: var(--text-tertiary);
-    flex-shrink: 0;
+    justify-content: center;
+    min-width: 24px;
+    height: 22px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    font-weight: 600;
   }
 
   /* ─── Modal match manual ──────────────────────────────────────────────── */

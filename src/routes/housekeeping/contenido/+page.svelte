@@ -37,6 +37,7 @@
   } from '$services/canvas-admin';
   import CanvasGeneratorPanel from './CanvasGeneratorPanel.svelte';
   import DeezerSyncPanel from './DeezerSyncPanel.svelte';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import type { NavidromeSong } from '$types/navidrome';
@@ -174,11 +175,11 @@
 <!-- ════════════════════════════════════════════════════════════════════
      1. Asignar Canvas a una canción
      ════════════════════════════════════════════════════════════════════ -->
-<section class="hk-card">
-  <header class="hk-section-head">
-    <h2>Asignar Canvas a una canción</h2>
-    <p>Busca la canción en tu biblioteca, pega el link del track en Spotify y descargamos el video en bucle para asociarlo.</p>
-  </header>
+<AdminPanel title="Asignar Canvas a una canción">
+  {#snippet info()}
+    Busca la canción en tu biblioteca, pega el link del track en Spotify y
+    descargamos el video en bucle para asociarlo.
+  {/snippet}
 
   <!-- Paso 1: buscar / seleccionar canción ─────────────────────────────── -->
   <div class="hk-step">
@@ -324,7 +325,7 @@
           disabled={!canCheck || checking}
         >
           {#if checking}
-            <ArrowsClockwise size={13} weight="bold" class="spin" />
+            <ArrowsClockwise size={13} weight="bold" class="hk-content-spin" />
             Comprobando…
           {:else}
             <SpotifyLogo size={13} weight="fill" /> Comprobar Canvas
@@ -383,7 +384,7 @@
       </div>
     </div>
   {/if}
-</section>
+</AdminPanel>
 
 <!-- ════════════════════════════════════════════════════════════════════
      2. Auto-Generador de Canvas desde YouTube
@@ -396,42 +397,6 @@
 <DeezerSyncPanel />
 
 <style>
-  /* ============================================================================
-     === Glass card primaria — coherente con Editorial / Playlists ===
-     ============================================================================ */
-  .hk-card {
-    position: relative;
-    padding: var(--hk-card-padding);
-    background: var(--hk-card-bg);
-    backdrop-filter: var(--hk-card-blur);
-    -webkit-backdrop-filter: var(--hk-card-blur);
-    border-radius: var(--hk-card-radius);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .hk-section-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .hk-section-head h2 {
-    margin: 0;
-    font-size: var(--text-xl);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .hk-section-head p {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.55;
-    max-width: 70ch;
-  }
-
   /* ============================================================================
      === Pasos numerados — el flujo lineal del usuario ===
      ============================================================================ */
@@ -798,8 +763,9 @@
     box-shadow: var(--focus-ring);
   }
 
-  /* Spin para iconos refresh durante operaciones. */
-  :global(.hk-card .spin) {
+  /* Spin para iconos refresh durante operaciones (clase global: la pone
+     Phosphor en el <svg>, fuera del scope del componente). */
+  :global(.hk-content-spin) {
     animation: hk-spin 1s linear infinite;
   }
   @keyframes hk-spin { to { transform: rotate(360deg); } }
