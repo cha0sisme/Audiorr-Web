@@ -60,16 +60,26 @@
     enabled,
     staleTime: 60 * 1000
   }));
-  // Rango del pulso, seleccionable (mini-desplegable). 7 por defecto.
+  // Rango del pulso, seleccionable (mini-desplegable). 7 rodantes por defecto
+  // (ventana móvil = lectura de tendencia continua). `value: 0` = semana natural
+  // ISO (lunes→hoy): el pulso default sigue siendo rodante para no mostrar una
+  // sola barra los lunes, pero la semana-calendario queda disponible.
   let pulseDays = $state(7);
   const RANGE_OPTIONS = [
     { value: 7, label: '7 días' },
     { value: 14, label: '14 días' },
-    { value: 30, label: '30 días' }
+    { value: 30, label: '30 días' },
+    { value: 0, label: 'Esta semana' }
   ];
+  // Días desde el lunes inclusive (Lun=1 … Dom=7). getDay(): Dom=0 … Sáb=6.
+  function daysSinceMonday(): number {
+    const d = new Date().getDay();
+    return d === 0 ? 7 : d;
+  }
+  const effectivePulseDays = $derived(pulseDays === 0 ? daysSinceMonday() : pulseDays);
   const scrobblesQ = createQuery(() => ({
-    queryKey: ['hk-scrobbles-daily', pulseDays],
-    queryFn: () => getScrobblesDaily(pulseDays),
+    queryKey: ['hk-scrobbles-daily', effectivePulseDays],
+    queryFn: () => getScrobblesDaily(effectivePulseDays),
     enabled,
     staleTime: 5 * 60 * 1000
   }));
@@ -459,13 +469,15 @@
       <div class="pulse-meta">
         <span class="pulse-num">{scrobblesQ.data ? fmt(scrobblesQ.data.total) : '—'}</span>
         <span class="pulse-label">
-          <ChartLineUp size={12} weight="bold" /> reproducciones · {pulseDays} días
+          <ChartLineUp size={12} weight="bold" /> reproducciones · {pulseDays === 0
+            ? 'esta semana'
+            : `${pulseDays} días`}
         </span>
       </div>
       <RangeSelect value={pulseDays} options={RANGE_OPTIONS} onChange={(v) => (pulseDays = v)} />
     </div>
     {#if pulseSeries.length >= 2}
-      <PulseBars series={pulseSeries} showDayLabels={pulseDays <= 14} />
+      <PulseBars series={pulseSeries} showDayLabels={effectivePulseDays <= 14} />
     {/if}
   </div>
 
