@@ -32,6 +32,8 @@
     setThisIsMapping as persistThisIsMapping
   } from '$services/globalSettings';
   import { isDailyMixName, isSmartPlaylistName } from '$utils/playlist-section-mappers';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
+  import { ArrowUpRight } from 'phosphor-svelte';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
@@ -264,16 +266,20 @@
   <title>Editorial · Housekeeping</title>
 </svelte:head>
 
-{#if isLoading}
-  <div class="hk-loading">
-    <div class="hk-sk"></div>
-  </div>
-{:else}
-  <section class="hk-card">
-    <header class="hk-section-head">
-      <h2>Tu biblioteca</h2>
-      <p>Marca lo que merece destacar y elige cómo se ve su portada. Las que destaques aquí podrás añadirlas a las filas dynamic en la pestaña Portada.</p>
-    </header>
+<AdminPanel title="Playlists destacadas" loading={isLoading}>
+  {#snippet info()}
+    Marca lo que merece destacar y elige cómo se ve su portada. Las que
+    destaques aquí podrás añadirlas a las filas dynamic en Home.
+  {/snippet}
+  {#snippet action()}
+    <a
+      class="hk-coupling-link"
+      href="/housekeeping/portada"
+      data-sveltekit-preload-data="hover"
+    >
+      Aparecen en tu portada <ArrowUpRight size={12} weight="bold" />
+    </a>
+  {/snippet}
 
     <!-- Búsqueda + filtros -->
     <div class="hk-tools">
@@ -400,16 +406,16 @@
         {/each}
       {/if}
     </ul>
-  </section>
+</AdminPanel>
 
-  <!-- ════════════════════════════════════════════════════════════════════
-       Páginas «This is …» — mapping playlist → nombre artista
-       ════════════════════════════════════════════════════════════════════ -->
-  <section class="hk-card">
-    <header class="hk-section-head">
-      <h2>Páginas «This Is …»</h2>
-      <p>Asocia una playlist con un artista para que su portada lo represente correctamente, aunque la primera canción sea de otro nombre.</p>
-    </header>
+<!-- ════════════════════════════════════════════════════════════════════
+     Páginas «This is …» — mapping playlist → nombre artista
+     ════════════════════════════════════════════════════════════════════ -->
+<AdminPanel title="Páginas «This Is …»" loading={isLoading}>
+  {#snippet info()}
+    Asocia una playlist con un artista para que su portada lo represente
+    correctamente, aunque la primera canción sea de otro nombre.
+  {/snippet}
 
     <!-- Lista de mappings actuales -->
     {#if thisIsEntries.length > 0}
@@ -579,45 +585,25 @@
         </button>
       </div>
     </div>
-  </section>
-{/if}
+</AdminPanel>
 
 <style>
-  /* ============================================================================
-     === Glass card ===
-     ============================================================================ */
-  .hk-card {
-    position: relative;
-    padding: var(--hk-card-padding);
-    background: var(--hk-card-bg);
-    backdrop-filter: var(--hk-card-blur);
-    -webkit-backdrop-filter: var(--hk-card-blur);
-    border-radius: var(--hk-card-radius);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .hk-section-head {
-    display: flex;
-    flex-direction: column;
+  /* Enlace de acoplamiento Destacadas → Home (cabecera del panel). */
+  .hk-coupling-link {
+    display: inline-flex;
+    align-items: center;
     gap: 4px;
-  }
-  .hk-section-head h2 {
-    margin: 0;
-    font-size: var(--text-xl);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .hk-section-head p {
-    margin: 0;
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
+    font-weight: 600;
     color: var(--text-secondary);
-    line-height: 1.55;
-    max-width: 70ch;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color var(--duration-fast) var(--ease-ios-default);
   }
+  .hk-coupling-link:hover { color: var(--accent); }
+  .hk-coupling-link :global(svg) { color: var(--text-tertiary); }
+  .hk-coupling-link:hover :global(svg) { color: var(--accent); }
+  .hk-coupling-link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
 
   /* ============================================================================
      === Tools: search + filter chips ===
@@ -948,21 +934,6 @@
   }
   .hk-cover-option.active .hk-cover-label {
     color: var(--accent);
-  }
-
-  /* ============================================================================
-     === Loading ===
-     ============================================================================ */
-  .hk-loading { padding: 0; }
-  .hk-sk {
-    height: 480px;
-    background: var(--bg-surface);
-    border-radius: var(--hk-card-radius);
-    animation: hk-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes hk-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
   }
 
   @media (max-width: 640px) {

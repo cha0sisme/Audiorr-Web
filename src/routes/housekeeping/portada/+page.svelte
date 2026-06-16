@@ -32,6 +32,7 @@
     DEFAULT_HOMEPAGE_LAYOUT
   } from '$services/globalSettings';
   import { isDailyMixName, isSmartPlaylistName } from '$utils/playlist-section-mappers';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
@@ -250,18 +251,14 @@
   <title>Portada · Editorial</title>
 </svelte:head>
 
-{#if isLoading}
-  <div class="hk-loading">
-    <div class="hk-sk"></div>
-  </div>
-{:else}
-  <section class="hk-card">
-    <header class="hk-section-head">
-      <h2>Tu portada</h2>
-      <p>Reorganiza las filas, ponles nombre y añade las playlists destacadas que quieras destacar en la home.</p>
-    </header>
+<AdminPanel title="Tu portada" loading={isLoading}>
+  {#snippet info()}
+    Reorganiza las filas, ponles nombre y añade las playlists destacadas que
+    quieras mostrar en la home. Las playlists destacadas se marcan como
+    Editorial en la sub-pestaña <strong>Destacadas</strong>.
+  {/snippet}
 
-    <div class="hk-rows">
+  <div class="hk-rows">
       <div
         class="hk-drop-line"
         class:active={dropBetweenIdx === 0}
@@ -383,7 +380,7 @@
                       {#if opts.length === 0}
                         <p class="hk-add-empty">
                           {#if editorialPlaylists.length === 0}
-                            Aún no destacas ninguna playlist. Marca alguna como Editorial en la pestaña Biblioteca.
+                            Aún no destacas ninguna playlist. Marca alguna como Editorial en la sub-pestaña Destacadas.
                           {:else}
                             Todas tus playlists destacadas ya están en esta fila.
                           {/if}
@@ -447,9 +444,10 @@
         <Plus size={13} weight="bold" /> Añadir fila
       </button>
     </div>
-  </section>
+</AdminPanel>
 
-  <!-- Floating publish bar — solo visible cuando hay diff. -->
+{#if !isLoading}
+  <!-- Floating publish bar — solo visible cuando hay diff. Glass permitido: flota. -->
   <div class="hk-publish-bar" class:visible={hasChanges || isSaving || recentlySaved}>
     <p class="hk-publish-hint">
       {#if recentlySaved}
@@ -465,7 +463,6 @@
     <button
       type="button"
       class="hk-btn-primary"
-      class:pulsing={hasChanges && !isSaving && !recentlySaved}
       disabled={!hasChanges || isSaving}
       onclick={handlePublish}
     >
@@ -481,42 +478,6 @@
 {/if}
 
 <style>
-  /* ============================================================================
-     === Glass card primaria ===
-     ============================================================================ */
-  .hk-card {
-    position: relative;
-    padding: var(--hk-card-padding);
-    background: var(--hk-card-bg);
-    backdrop-filter: var(--hk-card-blur);
-    -webkit-backdrop-filter: var(--hk-card-blur);
-    border-radius: var(--hk-card-radius);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .hk-section-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .hk-section-head h2 {
-    margin: 0;
-    font-size: var(--text-xl);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .hk-section-head p {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.55;
-    max-width: 70ch;
-  }
-
   /* ============================================================================
      === Rows / drop lines / row card ===
      ============================================================================ */
@@ -973,30 +934,6 @@
   .hk-btn-primary:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
-  }
-  .hk-btn-primary.pulsing {
-    animation: hk-breathe 2.4s ease-in-out infinite;
-  }
-  @keyframes hk-breathe {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.78; }
-  }
-
-  /* ============================================================================
-     === Loading ===
-     ============================================================================ */
-  .hk-loading {
-    padding: 0;
-  }
-  .hk-sk {
-    height: 480px;
-    background: var(--bg-surface);
-    border-radius: var(--hk-card-radius);
-    animation: hk-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes hk-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
   }
 
   @media (max-width: 640px) {

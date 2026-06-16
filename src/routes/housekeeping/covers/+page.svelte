@@ -23,6 +23,7 @@
     getCoverPreviewUrl
   } from '$services/smartPlaylists';
   import { backendService, BackendError } from '$services/BackendService.svelte';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import { COVER_VARIANTS_2026, type CoverVariant2026 } from '$types/backend';
@@ -194,29 +195,19 @@
   <title>Covers · Housekeeping</title>
 </svelte:head>
 
-{#if smartQ.isPending}
-  <div class="hk-loading">
-    <div class="hk-sk"></div>
-  </div>
-{:else if smartQ.isError}
-  <section class="hk-card">
-    <div class="hk-empty-state">
-      <Warning size={24} weight="fill" class="hk-empty-icon hk-empty-icon--warn" />
-      <p>No se ha podido cargar la lista de Smart Playlists.</p>
-      <button type="button" class="hk-btn-soft" onclick={() => smartQ.refetch()}>
-        <ArrowsClockwise size={14} /> Reintentar
-      </button>
-    </div>
-  </section>
-{:else}
-  <section class="hk-card">
-    <header class="hk-section-head">
-      <h2>Covers de Smart Playlists</h2>
-      <p>
-        Elige el diseño de portada para cada Smart Playlist. La cover actual se muestra como
-        referencia. Los tres diseños nuevos (Aurora, Prism, Ripple) son del estilo editorial 2026.
-      </p>
-    </header>
+<AdminPanel
+  title="Portadas de playlists inteligentes"
+  loading={smartQ.isPending}
+  error={smartQ.isError ? 'No se ha podido cargar la lista de Smart Playlists.' : null}
+  onRetry={() => smartQ.refetch()}
+  empty={!smartQ.isPending && !smartQ.isError && rows.length === 0}
+  emptyText="No se han encontrado Smart Playlists. Asegúrate de que el cron las ha generado al menos una vez."
+>
+  {#snippet info()}
+    Elige el diseño de portada para cada Smart Playlist. La cover actual se
+    muestra como referencia. Los tres diseños nuevos (Aurora, Prism, Ripple)
+    son del estilo editorial 2026.
+  {/snippet}
 
     {#if backendOutdated}
       <div class="hk-notice hk-notice--warn" role="alert">
@@ -228,12 +219,6 @@
       </div>
     {/if}
 
-    {#if rows.length === 0}
-      <div class="hk-empty-state">
-        <Image size={24} weight="duotone" />
-        <p>No se han encontrado Smart Playlists. Asegúrate de que el cron las ha generado al menos una vez.</p>
-      </div>
-    {:else}
       <div class="hk-covers-table" role="table" aria-label="Selector de covers">
         <!-- Cabecera -->
         <div class="hk-covers-thead" role="row" aria-hidden="true">
@@ -314,10 +299,10 @@
           </div>
         {/each}
       </div>
-    {/if}
-  </section>
+</AdminPanel>
 
-  <!-- Floating apply bar -->
+{#if !smartQ.isPending && !smartQ.isError}
+  <!-- Floating apply bar — glass permitido: flota. -->
   <div class="hk-publish-bar" class:visible={hasChanges || applyState !== 'idle'}>
     <p class="hk-publish-hint">
       {#if applyState === 'done'}
@@ -340,7 +325,6 @@
     <button
       type="button"
       class="hk-btn-primary"
-      class:pulsing={hasChanges && applyState === 'idle'}
       disabled={!hasChanges || applyState === 'patching' || applyState === 'generating' || applyState === 'cooldown'}
       onclick={handleApply}
     >
@@ -358,40 +342,6 @@
 {/if}
 
 <style>
-  /* ─── Card principal ─────────────────────────────────────────────────────── */
-  .hk-card {
-    position: relative;
-    padding: var(--hk-card-padding);
-    background: var(--hk-card-bg);
-    backdrop-filter: var(--hk-card-blur);
-    -webkit-backdrop-filter: var(--hk-card-blur);
-    border-radius: var(--hk-card-radius);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .hk-section-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .hk-section-head h2 {
-    margin: 0;
-    font-size: var(--text-xl);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    color: var(--text-primary);
-    line-height: 1.2;
-  }
-  .hk-section-head p {
-    margin: 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.55;
-    max-width: 70ch;
-  }
-
   /* ─── Aviso backend desactualizado ───────────────────────────────────────── */
   .hk-notice {
     display: flex;
@@ -580,50 +530,6 @@
     margin-top: 2px;
   }
 
-  /* ─── Empty state ────────────────────────────────────────────────────────── */
-  .hk-empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-8) var(--space-4);
-    color: var(--text-secondary);
-    text-align: center;
-  }
-  .hk-empty-state p {
-    margin: 0;
-    font-size: var(--text-sm);
-    line-height: 1.55;
-    max-width: 40ch;
-  }
-  .hk-empty-state :global(svg) {
-    color: var(--text-tertiary);
-  }
-
-  /* ─── Botón soft ─────────────────────────────────────────────────────────── */
-  .hk-btn-soft {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: var(--bg-glass-thin);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 0;
-    border-radius: 999px;
-    color: var(--text-primary);
-    font: inherit;
-    font-size: var(--text-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 200ms var(--ease-ios-default);
-  }
-  .hk-btn-soft:hover { background: var(--bg-glass); }
-  .hk-btn-soft:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
   /* ─── Floating apply bar ─────────────────────────────────────────────────── */
   .hk-publish-bar {
     position: fixed;
@@ -686,13 +592,6 @@
     outline: none;
     box-shadow: var(--focus-ring);
   }
-  .hk-btn-primary.pulsing {
-    animation: hk-breathe 2.4s ease-in-out infinite;
-  }
-  @keyframes hk-breathe {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.78; }
-  }
 
   /* ─── Spinner en animación ───────────────────────────────────────────────── */
   .hk-spin-wrap {
@@ -702,21 +601,6 @@
   @keyframes hk-spin {
     from { transform: rotate(0deg); }
     to   { transform: rotate(360deg); }
-  }
-
-  /* ─── Loading skeleton ───────────────────────────────────────────────────── */
-  .hk-loading {
-    padding: 0;
-  }
-  .hk-sk {
-    height: 380px;
-    background: var(--bg-surface);
-    border-radius: var(--hk-card-radius);
-    animation: hk-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes hk-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
   }
 
   /* ─── Responsive ─────────────────────────────────────────────────────────── */

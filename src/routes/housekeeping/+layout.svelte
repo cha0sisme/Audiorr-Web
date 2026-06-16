@@ -70,12 +70,26 @@
   ];
 
   // Sub-tabs de Curaduría — segundo nivel, solo visible dentro de la sección.
+  // Agrupadas 2+2 para hacer visible la relación: Portada (Home + Destacadas,
+  // acopladas — Destacadas alimenta el builder de Home) vs. Assets visuales
+  // (Smart covers + Animated artwork, familia de imágenes generadas).
   type SubTab = { label: string; href: string; seg: string };
-  const CURADURIA_TABS: SubTab[] = [
-    { label: 'Home',             href: '/housekeeping/portada',   seg: 'portada' },
-    { label: 'Destacadas',       href: '/housekeeping/editorial', seg: 'editorial' },
-    { label: 'Smart covers',     href: '/housekeeping/covers',    seg: 'covers' },
-    { label: 'Animated artwork', href: '/housekeeping/artwork',   seg: 'artwork' }
+  type SubTabGroup = { label: string; tabs: SubTab[] };
+  const CURADURIA_GROUPS: SubTabGroup[] = [
+    {
+      label: 'Portada',
+      tabs: [
+        { label: 'Home',       href: '/housekeeping/portada',   seg: 'portada' },
+        { label: 'Destacadas', href: '/housekeeping/editorial', seg: 'editorial' }
+      ]
+    },
+    {
+      label: 'Assets visuales',
+      tabs: [
+        { label: 'Smart covers',     href: '/housekeeping/covers',  seg: 'covers' },
+        { label: 'Animated artwork', href: '/housekeeping/artwork', seg: 'artwork' }
+      ]
+    }
   ];
 
   const currentSeg = $derived(page.url.pathname.split('/')[2] ?? 'dashboard');
@@ -182,16 +196,23 @@
     <div class="hk-main-col">
       {#if inCuraduria}
         <nav class="hk-subtabs" aria-label="Secciones de Curaduría">
-          {#each CURADURIA_TABS as tab (tab.seg)}
-            <a
-              class="hk-subtab"
-              class:active={currentSeg === tab.seg}
-              href={tab.href}
-              aria-current={currentSeg === tab.seg ? 'page' : undefined}
-              data-sveltekit-preload-data="hover"
-            >
-              {tab.label}
-            </a>
+          {#each CURADURIA_GROUPS as group (group.label)}
+            <div class="hk-subtab-group" role="group" aria-label={group.label}>
+              <span class="hk-subtab-grouplabel">{group.label}</span>
+              <div class="hk-subtab-cluster">
+                {#each group.tabs as tab (tab.seg)}
+                  <a
+                    class="hk-subtab"
+                    class:active={currentSeg === tab.seg}
+                    href={tab.href}
+                    aria-current={currentSeg === tab.seg ? 'page' : undefined}
+                    data-sveltekit-preload-data="hover"
+                  >
+                    {tab.label}
+                  </a>
+                {/each}
+              </div>
+            </div>
           {/each}
         </nav>
       {/if}
@@ -361,8 +382,29 @@
     min-width: 0;
   }
 
-  /* ─── Sub-tabs de Curaduría (segundo nivel) ──────────────────────────── */
+  /* ─── Sub-tabs de Curaduría (segundo nivel, agrupadas 2+2) ───────────── */
   .hk-subtabs {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-5);
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .hk-subtab-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .hk-subtab-grouplabel {
+    padding-left: var(--space-2);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+  .hk-subtab-cluster {
     display: inline-flex;
     align-items: center;
     gap: 2px;
@@ -374,7 +416,7 @@
     overflow-x: auto;
     scrollbar-width: none;
   }
-  .hk-subtabs::-webkit-scrollbar { display: none; }
+  .hk-subtab-cluster::-webkit-scrollbar { display: none; }
   .hk-subtab {
     padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-full);
