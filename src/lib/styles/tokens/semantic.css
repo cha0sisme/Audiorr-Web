@@ -441,23 +441,34 @@
   --admin-health-down: var(--status-danger);
   --admin-health-unknown: var(--text-tertiary);
 
-  /* ── Geometrías del dashboard admin (fondos de card 2026) ───────────────
-     Paleta viva, theme-agnostic: las cards llevan su propio "mundo" de color
-     con texto claro encima (mismo principio que las cover variants generadas
-     por el backend: aurora / prism / ripple). Derivada en OKLCH del azul de
-     marca + análogos controlados — armónica, no arcoíris. Un componente
-     consume estos tokens, nunca define el color inline. */
-  --geo-ink:     oklch(0.20 0.045 265);  /* base oscura para contraste */
-  --geo-blue:    oklch(0.62 0.19 255);
-  --geo-violet:  oklch(0.56 0.20 295);
-  --geo-cyan:    oklch(0.72 0.14 205);
-  --geo-magenta: oklch(0.60 0.23 350);
-  --geo-amber:   oklch(0.76 0.15 70);
-  --geo-teal:    oklch(0.66 0.13 185);
-  /* Texto sobre las geometrías — claro siempre (el fondo es oscuro-vivo). */
-  --geo-fg:           oklch(0.98 0 0);
-  --geo-fg-secondary: oklch(0.98 0 0 / 0.72);
-  --geo-fg-tertiary:  oklch(0.98 0 0 / 0.55);
+  /* ── Resumen del Housekeeping — eje de ESTADO (semáforo de marca) ────────
+     "Sala de control": superficie sólida oscura-fría (identidad propia del
+     panel, distinta del resto de la app y de Diagnostics) + un eje de color
+     con SIGNIFICADO: calma → atención → alerta. El color codifica estado del
+     dato, nunca decora. OKLCH para contraste predecible. La superficie es
+     oscura en ambos temas a propósito (zona "instrumento"). Un componente
+     consume estos tokens; jamás define color inline. */
+  --sec-surface:        oklch(0.24 0.028 255);   /* azul-acero muy desaturado */
+  --sec-surface-raised: oklch(0.27 0.030 255);   /* tile/zona elevada dentro */
+  --sec-border:         oklch(0.42 0.040 255 / 0.45);
+  --sec-border-strong:  oklch(0.55 0.060 255 / 0.65);
+
+  /* Eje de estado — accent rail + acentos de cada card según su dato real */
+  --sec-calm:  oklch(0.66 0.13 245);   /* azul-acero de marca: todo en orden */
+  --sec-watch: oklch(0.78 0.15 75);    /* ámbar: hay algo que mirar */
+  --sec-alert: oklch(0.64 0.21 25);    /* rojo cálido: acción requerida */
+  --sec-good:  oklch(0.70 0.15 165);   /* verde-menta: confirmación positiva */
+
+  /* Texto sobre la superficie oscura del panel */
+  --sec-fg:           oklch(0.97 0 0);
+  --sec-fg-secondary: oklch(0.97 0 0 / 0.70);
+  --sec-fg-tertiary:  oklch(0.97 0 0 / 0.50);
+
+  /* Rellenos suaves derivados (barras, halos, fondos de chip) */
+  --sec-calm-soft:  oklch(0.66 0.13 245 / 0.16);
+  --sec-watch-soft: oklch(0.78 0.15 75  / 0.20);
+  --sec-alert-soft: oklch(0.64 0.21 25  / 0.22);
+  --sec-good-soft:  oklch(0.70 0.15 165 / 0.18);
 
   /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
      curva ease-out aproximada por stops. La técnica: aplicar como
