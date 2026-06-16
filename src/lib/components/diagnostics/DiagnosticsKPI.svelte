@@ -47,6 +47,12 @@
     sparkline?: number[] | null;
     pattern: Pattern;
     tone?: Tone;
+    /** 'glass' (default, lenguaje original del viewer de diagnostics) o
+        'solid' (superficie sobria sin pattern/gradiente, para el Resumen). */
+    variant?: 'glass' | 'solid';
+    /** Oculta el badge de delta cuando la métrica no tiene comparación
+        temporal (KPIs de estado puntual). Default true. */
+    showDelta?: boolean;
   };
 
   let {
@@ -60,7 +66,9 @@
     deltaSuffix,
     sparkline = null,
     pattern,
-    tone = 'accent'
+    tone = 'accent',
+    variant = 'glass',
+    showDelta = true
   }: Props = $props();
 
   const deltaTone = $derived.by<'up' | 'down' | 'neutral'>(() => {
@@ -81,6 +89,7 @@
   class="kpi"
   data-pattern={pattern}
   data-tone={tone}
+  data-variant={variant}
   class:has-sparkline={hasSparkline}
 >
   <header class="kpi-head">
@@ -96,19 +105,21 @@
     <div class="kpi-number">{value}</div>
     <div class="kpi-meta">
       <span class="kpi-label">{label}</span>
-      <span class="kpi-delta" data-tone={deltaTone}>
-        {#if deltaTone === 'up'}
-          <TrendUp size={12} weight="bold" />
-        {:else if deltaTone === 'down'}
-          <TrendDown size={12} weight="bold" />
-        {:else}
-          <Minus size={12} weight="bold" />
-        {/if}
-        <span>{deltaText}</span>
-        {#if deltaSuffix}
-          <span class="kpi-delta-suffix">{deltaSuffix}</span>
-        {/if}
-      </span>
+      {#if showDelta}
+        <span class="kpi-delta" data-tone={deltaTone}>
+          {#if deltaTone === 'up'}
+            <TrendUp size={12} weight="bold" />
+          {:else if deltaTone === 'down'}
+            <TrendDown size={12} weight="bold" />
+          {:else}
+            <Minus size={12} weight="bold" />
+          {/if}
+          <span>{deltaText}</span>
+          {#if deltaSuffix}
+            <span class="kpi-delta-suffix">{deltaSuffix}</span>
+          {/if}
+        </span>
+      {/if}
     </div>
   </div>
 
@@ -147,6 +158,25 @@
   .kpi[data-tone='pink']  { --card-accent: oklch(0.7 0.18 12);  }
   .kpi[data-tone='mint']  { --card-accent: oklch(0.72 0.16 165); }
   .kpi[data-tone='amber'] { --card-accent: oklch(0.78 0.15 75);  }
+
+  /* ─── Variante sólida (Resumen): superficie sobria, sin decoración ─────
+     Sin gradiente accent, sin blur, sin pattern. El color se reserva: el
+     icono va neutro y solo el sparkline conserva un toque de acento (es
+     dato, no adorno). */
+  .kpi[data-variant='solid'] {
+    background: var(--bg-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--border-subtle);
+  }
+  .kpi[data-variant='solid']:hover { transform: none; }
+  .kpi[data-variant='solid']::before { display: none; }
+  .kpi[data-variant='solid'] .kpi-icon {
+    background: var(--bg-surface-active);
+    color: var(--text-secondary);
+  }
+  .kpi[data-variant='solid'] .kpi-kicker { color: var(--text-tertiary); }
+  .kpi[data-variant='solid'] .kpi-spark { color: var(--accent); }
 
   /* Patrón decorativo en esquina top-right (mismo helper que HKInfoCard). */
   .kpi::before {
