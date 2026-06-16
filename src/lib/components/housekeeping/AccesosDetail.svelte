@@ -47,6 +47,7 @@
     return EVENT_LABEL[e.event] ?? e.event;
   }
 
+  // Hora en horario peninsular (los `ts` del audit-log están en UTC).
   function fmtWhen(iso: string): string {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '—';
@@ -54,7 +55,8 @@
       day: '2-digit',
       month: 'short',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'Europe/Madrid'
     });
   }
 </script>
@@ -93,7 +95,9 @@
   </div>
 {/if}
 
-<!-- Tabla de eventos -->
+<!-- Lista de eventos. Fila flex (NO tabla): el punto de resultado va a la
+     IZQUIERDA, siempre visible; la IP (IPv6 larga) trunca con ellipsis en vez
+     de forzar scroll horizontal que escondía el resultado. -->
 {#if eventsQ.isPending}
   <div class="ac-skel">
     {#each Array(8) as _, i (i)}<div class="ac-skel-row"></div>{/each}
@@ -103,29 +107,23 @@
 {:else if events.length === 0}
   <p class="ac-state">Sin eventos de acceso en esta ventana.</p>
 {:else}
-  <table class="ac-table">
-    <thead>
-      <tr>
-        <th scope="col">Hora</th>
-        <th scope="col">Usuario</th>
-        <th scope="col">IP</th>
-        <th scope="col">Resultado</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each events as e, i (i)}
-        <tr>
-          <td class="ac-when">{fmtWhen(e.at)}</td>
-          <td class="ac-user">{e.username ?? '—'}</td>
-          <td class="ac-ip">{e.ip ?? '—'}</td>
-          <td class="ac-res">
-            <span class="ac-res-dot" data-result={e.result} aria-hidden="true"></span>
-            {eventLabel(e)}
-          </td>
-        </tr>
-      {/each}
-    </tbody>
-  </table>
+  <ul class="ac-events">
+    {#each events as e, i (i)}
+      <li class="ac-ev">
+        <span class="ac-ev-dot" data-result={e.result} aria-hidden="true"></span>
+        <div class="ac-ev-main">
+          <div class="ac-ev-top">
+            <span class="ac-ev-label" data-result={e.result}>{eventLabel(e)}</span>
+            <span class="ac-ev-when">{fmtWhen(e.at)}</span>
+          </div>
+          <div class="ac-ev-sub">
+            <span class="ac-ev-user">{e.username ?? '—'}</span>
+            {#if e.ip}<span class="ac-ev-ip">{e.ip}</span>{/if}
+          </div>
+        </div>
+      </li>
+    {/each}
+  </ul>
 {/if}
 
 <style>
@@ -220,60 +218,88 @@
     color: var(--text-tertiary);
     font-size: var(--text-sm);
   }
-  .ac-table {
-    width: 100%;
-    border-collapse: collapse;
+  /* Lista de eventos — fila flex, sin scroll horizontal. */
+  .ac-events {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .ac-ev {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .ac-ev:last-child { border-bottom: 0; }
+  /* Punto de resultado: SIEMPRE a la izquierda y visible. */
+  .ac-ev-dot {
+    width: 9px;
+    height: 9px;
+    margin-top: 5px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+  }
+  .ac-ev-dot[data-result='ok'] { background: var(--status-success); }
+  .ac-ev-dot[data-result='fail'] { background: var(--status-warning); }
+  .ac-ev-dot[data-result='blocked'] { background: var(--status-danger); }
+  .ac-ev-dot[data-result='other'] { background: var(--text-tertiary); }
+
+  .ac-ev-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ac-ev-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .ac-ev-label {
     font-size: var(--text-sm);
-  }
-  .ac-table th {
-    padding: 6px 8px;
-    text-align: left;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: var(--tracking-label);
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .ac-table td {
-    padding: 7px 8px;
-    border-bottom: 1px solid var(--border-subtle);
-    vertical-align: middle;
-  }
-  .ac-table tr:last-child td { border-bottom: 0; }
-  .ac-when { color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap; }
-  .ac-user {
-    color: var(--text-primary);
     font-weight: 600;
-    max-width: 120px;
+    color: var(--text-primary);
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ac-ip {
-    font-family: var(--font-mono);
+  /* fallido/bloqueado destacan en color de estado. */
+  .ac-ev-label[data-result='fail'] { color: var(--status-warning-text); }
+  .ac-ev-label[data-result='blocked'] { color: var(--status-danger-text); }
+  .ac-ev-when {
+    flex-shrink: 0;
     font-size: var(--text-xs);
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
-  .ac-res {
+  .ac-ev-sub {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-secondary);
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+  .ac-ev-user {
     font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ac-res-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-full);
-    flex-shrink: 0;
+  .ac-ev-ip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .ac-res-dot[data-result='ok'] { background: var(--status-success); }
-  .ac-res-dot[data-result='fail'] { background: var(--status-warning); }
-  .ac-res-dot[data-result='blocked'] { background: var(--status-danger); }
-  .ac-res-dot[data-result='other'] { background: var(--text-tertiary); }
 
   .ac-skel { display: flex; flex-direction: column; gap: 6px; }
   .ac-skel-row {

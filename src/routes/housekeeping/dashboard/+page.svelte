@@ -63,11 +63,10 @@
     enabled,
     staleTime: 60 * 1000
   }));
-  // Rango del pulso, seleccionable (mini-desplegable). 7 rodantes por defecto
-  // (ventana móvil = lectura de tendencia continua). `value: 0` = semana natural
-  // ISO (lunes→hoy): el pulso default sigue siendo rodante para no mostrar una
-  // sola barra los lunes, pero la semana-calendario queda disponible.
-  let pulseDays = $state(7);
+  // Rango del pulso, seleccionable (mini-desplegable). `value: 0` = semana
+  // natural ISO (lunes→hoy) y es el DEFAULT (la semana empieza en lunes).
+  // 7/14/30 rodantes quedan como opciones para lectura de tendencia continua.
+  let pulseDays = $state(0);
   const RANGE_OPTIONS = [
     { value: 7, label: '7 días' },
     { value: 14, label: '14 días' },

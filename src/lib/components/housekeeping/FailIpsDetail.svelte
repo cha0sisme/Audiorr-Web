@@ -22,6 +22,7 @@
   const ips = $derived(failIpsQ.data?.ips ?? []);
   const maxCount = $derived(ips.reduce((m, r) => Math.max(m, r.count), 0));
 
+  // Hora en horario peninsular (los `ts` del audit-log están en UTC).
   function fmtWhen(iso: string): string {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '—';
@@ -29,7 +30,8 @@
       day: '2-digit',
       month: 'short',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      timeZone: 'Europe/Madrid'
     });
   }
 </script>
