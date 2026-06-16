@@ -5,11 +5,14 @@
    * admin revisa qué se descargó (con su referencia iTunes) y borra los mal
    * etiquetados — el borrado limpia la fila de la DB y los .mp4 del disco.
    *
-   * El preview es el propio vídeo (muted/loop): ver el motion es justo lo que
-   * permite detectar un match incorrecto de un vistazo.
+   * Grid de pósters 3:4 (aspect nativo del motion artwork de Apple, fileUrlTall
+   * 2048×2732): ver el motion a buen tamaño es lo que permite detectar un match
+   * incorrecto de un vistazo. En reposo cada celda muestra el cover estático
+   * (barato); el <video> solo se monta en la celda con hover/foco — máximo un
+   * decoder vivo en GPU.
    */
   import { createQuery } from '@tanstack/svelte-query';
-  import { FilmSlate, Trash, Warning, ArrowSquareOut } from 'phosphor-svelte';
+  import { FilmSlate, Trash, ArrowSquareOut } from 'phosphor-svelte';
   import {
     listArtworks,
     deleteArtwork,
@@ -17,6 +20,7 @@
     type AlbumArtworkEntry
   } from '$services/AlbumArtworkService';
   import { getCoverArtUrl } from '$services/NavidromeService';
+  import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
 
@@ -29,8 +33,8 @@
 
   const entries = $derived(artworksQ.data ?? []);
 
-  // Borrado en dos pasos: click → confirmación inline → confirmar. Evita un
-  // window.confirm feo y un modal extra para una acción de baja frecuencia.
+  // Borrado en dos pasos: click → confirmación anclada → confirmar. El popover
+  // se ancla al botón sin tapar el póster (ves lo que vas a borrar).
   let confirmingId = $state<string | null>(null);
   let deletingId = $state<string | null>(null);
 
@@ -53,22 +57,9 @@
     }
   }
 
-  function fmtDate(iso?: string): string {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('es-ES', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  }
-
-  // Preview bajo demanda: por defecto cada fila muestra el cover ESTÁTICO del
+  // Preview bajo demanda: por defecto cada celda muestra el cover ESTÁTICO del
   // álbum (`<img>`, barato y gestionado por el cache de imágenes del browser).
-  // El `<video>` solo se MONTA en la fila bajo el ratón/foco — así nunca hay
+  // El `<video>` solo se MONTA en la celda bajo el ratón/foco — así nunca hay
   // más de un decoder de vídeo vivo. Tener cientos de `<video>` montados (aun
   // con preload="metadata") retiene un frame decodificado por elemento en GPU
   // (~4.6 MB cada uno a 1080² → cientos de MB). El montaje on-demand lo evita.
@@ -80,8 +71,10 @@
     if (hoveredId === id) hoveredId = null;
   }
 
-  function refLine(e: AlbumArtworkEntry): string {
+  // Línea de metadatos bajo el póster: iTunes #id · país · variant.
+  function metaLine(e: AlbumArtworkEntry): string {
     const parts: string[] = [];
+    if (e.appleCollectionId) parts.push(`iTunes #${e.appleCollectionId}`);
     if (e.country) parts.push(e.country.toUpperCase());
     if (e.variant) parts.push(e.variant);
     return parts.join(' · ');
@@ -92,44 +85,42 @@
   <title>Artwork · Housekeeping · Audiorr</title>
 </svelte:head>
 
-<section class="hk-art">
-  <header class="hk-art-head">
-    <h1 class="hk-art-title">Animated artwork</h1>
-    {#if entries.length > 0}
-      <span class="hk-art-count">{entries.length}</span>
-    {/if}
-  </header>
-  <p class="hk-art-intro">
+<AdminPanel
+  title="Animated artwork"
+  error={artworksQ.isError ? 'No se pudo cargar el listado de artworks. ¿Backend desplegado?' : null}
+  onRetry={() => artworksQ.refetch()}
+  empty={!artworksQ.isPending && !artworksQ.isError && entries.length === 0}
+  emptyText="Aún no hay animated artwork descargado."
+>
+  {#snippet info()}
     Motion artwork descargado de Apple Music. Revisa la referencia de iTunes y
     elimina los álbumes mal etiquetados — se borran de la base de datos y del
     disco.
-  </p>
+  {/snippet}
+  {#snippet action()}
+    {#if entries.length > 0}
+      <span class="hk-art-count">{entries.length}</span>
+    {/if}
+  {/snippet}
 
   {#if artworksQ.isPending}
     <div class="hk-art-grid" aria-busy="true">
-      {#each Array(6) as _}
-        <div class="hk-art-sk"></div>
+      {#each Array(10) as _, i (i)}
+        <div class="hk-art-cell">
+          <div class="hk-art-sk-poster"></div>
+          <div class="hk-art-sk-line"></div>
+          <div class="hk-art-sk-line short"></div>
+        </div>
       {/each}
     </div>
-  {:else if artworksQ.isError}
-    <div class="hk-art-state hk-art-state-error">
-      <Warning size={20} weight="fill" />
-      <p>No se pudo cargar el listado de artworks. ¿Backend desplegado?</p>
-    </div>
-  {:else if entries.length === 0}
-    <div class="hk-art-state">
-      <FilmSlate size={28} weight="regular" />
-      <p>Aún no hay animated artwork descargado.</p>
-    </div>
   {:else}
-    <ul class="hk-art-list">
+    <div class="hk-art-grid">
       {#each entries as e (e.albumId)}
         {@const videoUrl = resolveArtworkVideoUrl(e)}
-        <li class="hk-art-row">
-          <a
-            class="hk-art-preview"
-            href={`/album/${e.albumId}`}
-            aria-label={`Ver ${e.title ?? 'álbum'}`}
+        <article class="hk-art-cell">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="hk-art-poster-wrap"
             onmouseenter={() => hoverEnter(e.albumId)}
             onmouseleave={() => hoverLeave(e.albumId)}
             onfocusin={() => hoverEnter(e.albumId)}
@@ -137,16 +128,15 @@
           >
             {#if videoUrl}
               <!-- Póster estático: cover del álbum (Navidrome). Lazy + barato.
-                   Es lo único que se ve en reposo — sin <video> = sin decoder
-                   ni frame en GPU. -->
+                   Es lo único que se ve en reposo — sin <video> = sin decoder. -->
               <img
                 class="hk-art-poster"
-                src={getCoverArtUrl(e.albumId, 112)}
+                src={getCoverArtUrl(e.albumId, 300)}
                 alt=""
                 loading="lazy"
                 decoding="async"
               />
-              <!-- El <video> solo se monta cuando esta fila tiene hover/foco.
+              <!-- El <video> solo se monta cuando esta celda tiene hover/foco.
                    autoplay+muted arranca al montar; al salir, se desmonta y el
                    decoder se libera. Máximo un vídeo vivo en toda la página. -->
               {#if hoveredId === e.albumId}
@@ -162,84 +152,68 @@
                 ></video>
               {/if}
             {:else}
-              <span class="hk-art-preview-fallback"><FilmSlate size={20} weight="regular" /></span>
+              <span class="hk-art-fallback"><FilmSlate size={28} weight="regular" /></span>
             {/if}
-          </a>
 
-          <div class="hk-art-info">
+            <!-- Badge de match (arriba-izquierda) -->
+            <span
+              class="hk-art-badge"
+              class:manual={e.matchStatus === 'manual'}
+              class:auto={e.matchStatus === 'auto'}
+            >{e.matchStatus}</span>
+
+            <!-- Borrado: icono reveal-on-hover (siempre visible en touch) -->
+            <button
+              type="button"
+              class="hk-art-trash"
+              aria-label={`Eliminar artwork de ${e.title ?? e.albumId}`}
+              onclick={() => (confirmingId = confirmingId === e.albumId ? null : e.albumId)}
+            >
+              <Trash size={15} weight="bold" />
+            </button>
+          </div>
+
+          <!-- Confirmación anclada al cell (no tapa el póster, no la clipa el wrap) -->
+          {#if confirmingId === e.albumId}
+            <div class="hk-art-confirm" role="dialog" aria-label="Confirmar eliminación">
+              <span class="hk-art-confirm-q">¿Eliminar?</span>
+              <div class="hk-art-confirm-btns">
+                <button
+                  type="button"
+                  class="hk-art-cbtn hk-art-cbtn-danger"
+                  onclick={() => doDelete(e)}
+                  disabled={deletingId === e.albumId}
+                >
+                  {deletingId === e.albumId ? '…' : 'Eliminar'}
+                </button>
+                <button
+                  type="button"
+                  class="hk-art-cbtn hk-art-cbtn-ghost"
+                  onclick={() => (confirmingId = null)}
+                  disabled={deletingId === e.albumId}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          {/if}
+
+          <!-- Metadatos BAJO el póster (nunca sobre el vídeo) -->
+          <div class="hk-art-meta">
             <a class="hk-art-name" href={`/album/${e.albumId}`}>
-              {e.title ?? e.albumId}
-              <ArrowSquareOut size={12} weight="bold" />
+              <span class="hk-art-name-text">{e.title ?? e.albumId}</span>
+              <ArrowSquareOut size={11} weight="bold" />
             </a>
             {#if e.artist}<p class="hk-art-artist">{e.artist}</p>{/if}
-            <div class="hk-art-meta">
-              <span
-                class="hk-art-badge"
-                class:manual={e.matchStatus === 'manual'}
-                class:auto={e.matchStatus === 'auto'}
-              >{e.matchStatus}</span>
-              {#if e.appleCollectionId}
-                <span class="hk-art-itunes">iTunes #{e.appleCollectionId}</span>
-              {/if}
-              {#if refLine(e)}<span class="hk-art-ref">{refLine(e)}</span>{/if}
-              {#if e.cachedAt}<span class="hk-art-date">{fmtDate(e.cachedAt)}</span>{/if}
-            </div>
+            {#if metaLine(e)}<p class="hk-art-sub">{metaLine(e)}</p>{/if}
           </div>
-
-          <div class="hk-art-actions">
-            {#if confirmingId === e.albumId}
-              <button
-                type="button"
-                class="hk-art-btn hk-art-btn-danger"
-                onclick={() => doDelete(e)}
-                disabled={deletingId === e.albumId}
-              >
-                {deletingId === e.albumId ? 'Eliminando…' : 'Confirmar'}
-              </button>
-              <button
-                type="button"
-                class="hk-art-btn hk-art-btn-ghost"
-                onclick={() => (confirmingId = null)}
-                disabled={deletingId === e.albumId}
-              >
-                Cancelar
-              </button>
-            {:else}
-              <button
-                type="button"
-                class="hk-art-btn hk-art-btn-icon"
-                aria-label={`Eliminar artwork de ${e.title ?? e.albumId}`}
-                onclick={() => (confirmingId = e.albumId)}
-              >
-                <Trash size={16} weight="regular" />
-              </button>
-            {/if}
-          </div>
-        </li>
+        </article>
       {/each}
-    </ul>
+    </div>
   {/if}
-</section>
+</AdminPanel>
 
 <style>
-  .hk-art {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-  .hk-art-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-  }
-  .hk-art-title {
-    margin: 0;
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    letter-spacing: var(--tracking-display);
-    color: var(--text-primary);
-  }
   .hk-art-count {
     display: inline-flex;
     align-items: center;
@@ -254,83 +228,32 @@
     font-size: var(--text-xs);
     font-weight: 600;
   }
-  .hk-art-intro {
-    margin: 0;
-    max-width: 60ch;
-    font-size: var(--text-sm);
-    color: var(--text-tertiary);
-    line-height: 1.5;
-  }
 
-  /* === Estados === */
-  .hk-art-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-12) var(--space-6);
-    text-align: center;
-    color: var(--text-tertiary);
-    background: var(--bg-surface);
-    border-radius: var(--hk-card-radius, var(--radius-lg));
-  }
-  .hk-art-state p {
-    margin: 0;
-    font-size: var(--text-sm);
-  }
-  .hk-art-state-error {
-    color: var(--status-error, var(--text-secondary));
-  }
-
-  /* === Skeleton === */
+  /* === Grid 3:4 === */
   .hk-art-grid {
     display: grid;
-    gap: var(--space-2);
+    grid-template-columns: repeat(auto-fill, minmax(clamp(150px, 18vw, 200px), 1fr));
+    gap: var(--space-3);
   }
-  .hk-art-sk {
-    height: 72px;
-    background: var(--bg-surface);
-    border-radius: var(--radius-md);
-    animation: hk-art-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes hk-art-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.5; }
-  }
-
-  /* === Lista === */
-  .hk-art-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  .hk-art-cell {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-  }
-  .hk-art-row {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
+    gap: 6px;
+    min-width: 0;
     /* Virtualización nativa: el navegador no renderiza ni hace layout de las
-       filas fuera de pantalla (el listado puede tener cientos). contain-
+       celdas fuera de pantalla (el listado puede tener cientos). contain-
        intrinsic-size reserva el alto para que el scroll no salte. */
     content-visibility: auto;
-    contain-intrinsic-size: auto 74px;
+    contain-intrinsic-size: auto 280px;
   }
-  .hk-art-preview {
+
+  .hk-art-poster-wrap {
     position: relative;
-    width: 56px;
-    height: 56px;
-    border-radius: var(--radius-sm);
+    aspect-ratio: 3 / 4;
+    border-radius: var(--radius-md);
     overflow: hidden;
     background: var(--artwork-placeholder-bg);
-    flex-shrink: 0;
-    display: block;
   }
   .hk-art-poster,
   .hk-art-video {
@@ -342,45 +265,158 @@
     display: block;
   }
   /* El vídeo se monta encima del póster al hacer hover. */
-  .hk-art-video {
-    z-index: 1;
-  }
-  .hk-art-preview-fallback {
-    width: 100%;
-    height: 100%;
+  .hk-art-video { z-index: 1; }
+  .hk-art-fallback {
+    position: absolute;
+    inset: 0;
     display: grid;
     place-items: center;
     color: var(--artwork-placeholder-fg);
   }
 
-  .hk-art-info {
-    min-width: 0;
+  /* Badge de match (arriba-izquierda) */
+  .hk-art-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 2;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--bg-surface) 80%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: capitalize;
+  }
+  .hk-art-badge.manual {
+    background: color-mix(in srgb, var(--status-success) 22%, transparent);
+    border-color: transparent;
+    color: var(--status-success);
+  }
+  .hk-art-badge.auto {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    border-color: transparent;
+    color: var(--accent);
+  }
+
+  /* Trash: reveal-on-hover en desktop, siempre visible en touch */
+  .hk-art-trash {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--bg-surface) 78%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--text-secondary);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .hk-art-poster-wrap:hover .hk-art-trash,
+  .hk-art-poster-wrap:focus-within .hk-art-trash {
+    opacity: 1;
+  }
+  .hk-art-trash:hover {
+    background: var(--status-danger);
+    color: var(--status-danger-contrast);
+  }
+  .hk-art-trash:focus-visible {
+    outline: none;
+    opacity: 1;
+    box-shadow: var(--focus-ring);
+  }
+  @media (hover: none) {
+    .hk-art-trash { opacity: 1; }
+  }
+
+  /* Confirmación anclada (esquina superior derecha, bajo el trash) */
+  .hk-art-confirm {
+    position: absolute;
+    top: 40px;
+    right: 6px;
+    z-index: 3;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
+    padding: 8px;
+    border-radius: var(--radius-md);
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-lg);
+  }
+  .hk-art-confirm-q {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .hk-art-confirm-btns {
+    display: flex;
+    gap: 4px;
+  }
+  .hk-art-cbtn {
+    padding: 4px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter var(--duration-fast) var(--ease-ios-default),
+      background var(--duration-fast) var(--ease-ios-default);
+  }
+  .hk-art-cbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hk-art-cbtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .hk-art-cbtn-danger {
+    background: var(--status-danger);
+    color: var(--status-danger-contrast);
+  }
+  .hk-art-cbtn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+  .hk-art-cbtn-ghost {
+    background: transparent;
+    border-color: var(--border-subtle);
+    color: var(--text-secondary);
+  }
+  .hk-art-cbtn-ghost:hover:not(:disabled) { background: var(--bg-surface-hover); }
+
+  /* === Metadatos === */
+  .hk-art-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
   }
   .hk-art-name {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    max-width: 100%;
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text-primary);
     text-decoration: none;
-    width: fit-content;
-    max-width: 100%;
+    transition: color var(--duration-fast) var(--ease-ios-default);
+  }
+  .hk-art-name:hover { color: var(--accent); }
+  .hk-art-name-text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: color var(--duration-fast) var(--ease-ios-default);
   }
-  .hk-art-name:hover {
-    color: var(--accent);
-  }
-  .hk-art-name :global(svg) {
-    flex-shrink: 0;
-    opacity: 0.6;
-  }
+  .hk-art-name :global(svg) { flex-shrink: 0; opacity: 0.55; }
   .hk-art-artist {
     margin: 0;
     font-size: var(--text-xs);
@@ -389,102 +425,36 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .hk-art-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
-    margin-top: 2px;
+  .hk-art-sub {
+    margin: 1px 0 0;
     font-size: var(--text-xs);
     color: var(--text-tertiary);
-  }
-  .hk-art-badge {
-    padding: 1px 7px;
-    border-radius: var(--radius-full);
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    font-weight: 600;
-    text-transform: capitalize;
-  }
-  .hk-art-badge.manual {
-    background: color-mix(in srgb, var(--status-success, #22c55e) 16%, transparent);
-    border-color: transparent;
-    color: var(--status-success, #22c55e);
-  }
-  .hk-art-badge.auto {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    border-color: transparent;
-    color: var(--accent);
-  }
-  .hk-art-itunes {
     font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* === Acciones === */
-  .hk-art-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-shrink: 0;
+  /* === Skeleton de celda 3:4 === */
+  .hk-art-sk-poster {
+    aspect-ratio: 3 / 4;
+    border-radius: var(--radius-md);
+    background: var(--skeleton-bg);
+    animation: hk-art-pulse 1.6s ease-in-out infinite;
   }
-  .hk-art-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-full);
-    font-family: inherit;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition:
-      background var(--duration-fast) var(--ease-ios-default),
-      color var(--duration-fast) var(--ease-ios-default);
+  .hk-art-sk-line {
+    height: 12px;
+    border-radius: var(--radius-sm);
+    background: var(--skeleton-bg);
+    animation: hk-art-pulse 1.6s ease-in-out infinite;
   }
-  .hk-art-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .hk-art-sk-line.short { width: 60%; }
+  @keyframes hk-art-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.5; }
   }
-  .hk-art-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-  .hk-art-btn-icon {
-    padding: var(--space-2);
-    background: transparent;
-    color: var(--text-tertiary);
-  }
-  .hk-art-btn-icon:hover {
-    background: color-mix(in srgb, var(--status-error, #ef4444) 14%, transparent);
-    color: var(--status-error, #ef4444);
-  }
-  .hk-art-btn-danger {
-    background: var(--status-error, #ef4444);
-    color: #fff;
-  }
-  .hk-art-btn-danger:hover:not(:disabled) {
-    filter: brightness(1.08);
-  }
-  .hk-art-btn-ghost {
-    background: transparent;
-    border-color: var(--border-subtle);
-    color: var(--text-primary);
-  }
-  .hk-art-btn-ghost:hover:not(:disabled) {
-    background: var(--bg-surface-hover);
-  }
-
-  @media (max-width: 640px) {
-    .hk-art-row {
-      grid-template-columns: auto minmax(0, 1fr);
-      grid-template-areas:
-        'preview info'
-        'actions actions';
-    }
-    .hk-art-actions {
-      grid-area: actions;
-      justify-content: flex-end;
-    }
+  @media (prefers-reduced-motion: reduce) {
+    .hk-art-sk-poster,
+    .hk-art-sk-line { animation: none; }
   }
 </style>
