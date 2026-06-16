@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * /housekeeping/editorial/portada — canvas builder de la portada.
+   * /housekeeping/portada — canvas builder de la portada.
    *
    * Diseña el `homepage_layout`: qué filas se muestran, en qué orden, qué
    * playlists destacadas incluye cada fila dynamic.
@@ -13,7 +13,7 @@
    *   - Publicar cambios via floating bar (sentient: pulsa cuando hay diff).
    *
    * Las playlists destacadas (Editorial=true) se gestionan en
-   * `/housekeeping/editorial/biblioteca`. Aquí solo las consumimos.
+   * `/housekeeping/editorial`. Aquí solo las consumimos.
    */
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {

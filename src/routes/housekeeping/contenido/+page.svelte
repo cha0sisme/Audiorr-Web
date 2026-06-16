@@ -6,8 +6,8 @@
    *   1. Asignar Canvas a una canción (modo individual). Buscas la canción
    *      en tu Navidrome, pegas la URL de Spotify del track, y descargamos
    *      el Canvas para asociarlo.
-   *   2. Importar de Spotify (ofuscada — temporalmente desactivada).
-   *   3. Tus sincronizaciones (ofuscada — temporalmente desactivada).
+   *   2. Auto-generador de Canvas desde YouTube (CanvasGeneratorPanel).
+   *   3. Deezer Sync (DeezerSyncPanel).
    *
    * Flujo Canvas individual:
    *   a) Search Navidrome → resultados con cover (selecciona uno).
@@ -20,9 +20,7 @@
     MagnifyingGlass,
     SpotifyLogo,
     LinkSimple,
-    Trash,
     ArrowsClockwise,
-    Lock,
     Check,
     X,
     Play,
@@ -396,60 +394,6 @@
      3. Deezer Sync
      ════════════════════════════════════════════════════════════════════ -->
 <DeezerSyncPanel />
-
-<!-- ════════════════════════════════════════════════════════════════════
-     4. Spotify Sync — ofuscado, temporalmente desactivado
-     ════════════════════════════════════════════════════════════════════ -->
-<div class="hk-disabled-zone">
-  <div class="hk-disabled-banner">
-    <Lock size={14} weight="bold" />
-    <div>
-      <p class="hk-disabled-title">Importar de Spotify, en mantenimiento</p>
-      <p class="hk-disabled-sub">
-        Estamos rehaciendo el flujo para que sea más fiable. Volverá pronto, sin perder lo que ya tienes sincronizado.
-      </p>
-    </div>
-  </div>
-
-  <section class="hk-card hk-disabled" inert>
-    <header class="hk-section-head">
-      <h2>Importar de Spotify</h2>
-      <p>Pega el link de una playlist de Spotify y la replicamos en Navidrome con sus canciones equivalentes.</p>
-    </header>
-
-    <div class="hk-form-stub">
-      <span class="hk-input">
-        <LinkSimple size={14} weight="bold" />
-        <input type="text" placeholder="https://open.spotify.com/playlist/..." readonly />
-      </span>
-      <button type="button" class="hk-btn-soft">
-        <SpotifyLogo size={14} weight="fill" /> Comprobar
-      </button>
-    </div>
-  </section>
-
-  <section class="hk-card hk-disabled" inert>
-    <header class="hk-section-head">
-      <h2>Tus sincronizaciones</h2>
-      <p>Las playlists que actualizamos automáticamente cada noche.</p>
-    </header>
-
-    <ul class="hk-stub-list">
-      {#each Array(3) as _}
-        <li class="hk-stub-row">
-          <div class="hk-stub-meta">
-            <span class="hk-stub-title"></span>
-            <span class="hk-stub-sub"></span>
-          </div>
-          <span class="hk-stub-actions">
-            <span class="hk-stub-icon"><ArrowsClockwise size={14} weight="bold" /></span>
-            <span class="hk-stub-icon"><Trash size={14} weight="bold" /></span>
-          </span>
-        </li>
-      {/each}
-    </ul>
-  </section>
-</div>
 
 <style>
   /* ============================================================================
@@ -859,102 +803,6 @@
     animation: hk-spin 1s linear infinite;
   }
   @keyframes hk-spin { to { transform: rotate(360deg); } }
-
-  /* ============================================================================
-     === Disabled zone — Spotify Sync ofuscado ===
-     ============================================================================ */
-  .hk-disabled-zone {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-  }
-  .hk-disabled-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 16px;
-    background: var(--bg-surface);
-    border-radius: 12px;
-    color: var(--text-secondary);
-  }
-  .hk-disabled-banner > :global(svg) {
-    flex-shrink: 0;
-    margin-top: 2px;
-    color: var(--text-tertiary);
-  }
-  .hk-disabled-title {
-    margin: 0 0 2px;
-    font-size: var(--text-sm);
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-  .hk-disabled-sub {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--text-tertiary);
-    line-height: 1.5;
-    max-width: 70ch;
-  }
-  .hk-disabled {
-    opacity: 0.45;
-    filter: saturate(0.6);
-    transition: opacity 200ms var(--hk-spring-soft);
-  }
-  .hk-disabled:hover { opacity: 0.6; }
-
-  .hk-form-stub {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex-wrap: wrap;
-  }
-  .hk-form-stub .hk-input { flex: 1; min-width: 240px; }
-
-  .hk-stub-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .hk-stub-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    background: var(--hk-tile-bg);
-    border-radius: 12px;
-  }
-  .hk-stub-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .hk-stub-title {
-    width: 60%;
-    height: 11px;
-    background: var(--bg-surface-active);
-    border-radius: 4px;
-  }
-  .hk-stub-sub {
-    width: 40%;
-    height: 9px;
-    background: var(--bg-surface-active);
-    border-radius: 4px;
-  }
-  .hk-stub-actions { display: flex; gap: 4px; }
-  .hk-stub-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    background: var(--hk-handle-bg);
-    color: var(--text-tertiary);
-    display: grid;
-    place-items: center;
-  }
 
   @media (max-width: 640px) {
     .hk-selected { grid-template-columns: 56px minmax(0, 1fr); }

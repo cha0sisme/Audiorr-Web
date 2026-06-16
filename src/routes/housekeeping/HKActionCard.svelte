@@ -8,7 +8,7 @@
    *   - cabecera con icono + kicker + título + sub.
    *   - métrica grande mono (opcional).
    *   - status pill (opcional).
-   *   - botón primary que se "respira" cuando idle.
+   *   - botón primary del DS (sin movimiento ocioso en idle).
    *
    * Patrones soportados (`pattern` prop):
    *   - 'mesh'   → grid de dots dispersos (ideal para "regenerar").
@@ -118,7 +118,6 @@
     <button
       type="button"
       class="hk-action-btn"
-      class:pulsing={!disabled}
       class:saved={isJustSaved}
       {disabled}
       onclick={onAction}
@@ -378,11 +377,6 @@
     outline: none;
     box-shadow: var(--focus-ring);
   }
-  .hk-action-btn.pulsing { animation: hk-breathe 2.6s ease-in-out infinite; }
-  @keyframes hk-breathe {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.8; }
-  }
   .hk-action-btn.saved {
     background: oklch(0.72 0.18 145);
   }
@@ -392,4 +386,12 @@
     animation: hk-spin 1s linear infinite;
   }
   @keyframes hk-spin { to { transform: rotate(360deg); } }
+
+  /* El único movimiento que queda (pulso del dot en running, spin del
+     refresh) es feedback de acción real — aun así lo desactivamos si el
+     usuario pide reduced-motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .hk-action-status[data-tone='running'] .hk-action-dot { animation: none; }
+    :global(.hk-action-btn .spin) { animation: none; }
+  }
 </style>

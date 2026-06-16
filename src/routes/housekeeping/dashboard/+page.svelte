@@ -19,7 +19,8 @@
     Cpu,
     Hash,
     UsersThree,
-    Headphones
+    Headphones,
+    ArrowsClockwise
   } from 'phosphor-svelte';
   import HKActionCard from '../HKActionCard.svelte';
   import HKInfoCard from '../HKInfoCard.svelte';
@@ -33,68 +34,32 @@
   import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
   import type { CronStatus } from '$types/backend';
 
-  // ─── Latencia EN VIVO ──────────────────────────────────────────────────
-  // Ping cada 2s con un buffer circular de 30 muestras (1 min de historia).
-  // El sparkline se calcula desde el buffer; el número grande del hero es
-  // la última muestra. Sin side effects en queryFn — todo deriva de los
-  // datos retornados, evitando race conditions del refetch.
-  type Sample = { ms: number; ts: number };
-  const SPARKLINE_LEN = 30;
-  let samples = $state<Sample[]>([]);
+  // ─── Salud del servidor — check puntual on-demand ───────────────────────
+  // Un ping al entrar + botón "comprobar". Sin loop perpetuo ni sparkline:
+  // este panel es de sesión corta, no un stack de observabilidad en vivo.
+  let lastLatency = $state<number | null>(null);
   let serverVersion = $state<string | null>(null);
   let pingFailed = $state(false);
+  let checking = $state(false);
 
-  function pushSample(ms: number) {
-    samples = [...samples, { ms, ts: Date.now() }].slice(-SPARKLINE_LEN);
-  }
-
-  /** Loop independiente de TanStack — más simple, controla la cadencia. */
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-  async function pollPing() {
-    if (!credentials.isConfigured) return;
+  async function checkHealth() {
+    if (!credentials.isConfigured || checking) return;
+    checking = true;
     const start = performance.now();
     try {
       const res = await ping();
-      const ms = Math.round(performance.now() - start);
-      pushSample(ms);
+      lastLatency = Math.round(performance.now() - start);
       serverVersion = res.version;
       pingFailed = false;
     } catch {
       pingFailed = true;
     } finally {
-      pollTimer = setTimeout(pollPing, 2000);
+      checking = false;
     }
   }
 
   onMount(() => {
-    void pollPing();
-    return () => {
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-  });
-
-  const lastLatency = $derived(samples.length > 0 ? samples[samples.length - 1]!.ms : null);
-  const avgLatency = $derived.by(() => {
-    if (samples.length === 0) return null;
-    const sum = samples.reduce((a, s) => a + s.ms, 0);
-    return Math.round(sum / samples.length);
-  });
-
-  /** Sparkline SVG — los últimos N valores normalizados. */
-  const sparklinePath = $derived.by(() => {
-    if (samples.length < 2) return '';
-    const w = 80; // viewBox width
-    const h = 24; // viewBox height
-    const max = Math.max(...samples.map((s) => s.ms), 50);
-    const min = 0;
-    const step = w / (SPARKLINE_LEN - 1);
-    return samples
-      .map((s, i) => {
-        const x = (i + (SPARKLINE_LEN - samples.length)) * step;
-        const y = h - ((s.ms - min) / (max - min || 1)) * h;
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
+    void checkHealth();
   });
 
   const latencyBand = $derived.by<'good' | 'mid' | 'high' | 'unknown'>(() => {
@@ -105,9 +70,11 @@
   });
   const latencyText = $derived.by(() => {
     if (pingFailed) return 'Sin respuesta';
-    if (lastLatency === null) return 'Midiendo…';
-    if (avgLatency !== null) return `~${avgLatency}ms de media`;
-    return '';
+    if (checking) return 'Comprobando…';
+    if (lastLatency === null) return 'Sin comprobar';
+    if (latencyBand === 'good') return 'Respuesta rápida';
+    if (latencyBand === 'mid') return 'Respuesta normal';
+    return 'Respuesta lenta';
   });
 
   const serverUrl = $derived(credentials.current?.serverUrl ?? '—');
@@ -308,7 +275,7 @@
 </svelte:head>
 
 <!-- ════════════════════════════════════════════════════════════════════
-     Hero Servidor — host + Subsonic + latencia LIVE con sparkline
+     Hero Servidor — host + Subsonic + salud (check on-demand)
      ════════════════════════════════════════════════════════════════════ -->
 <section class="hk-server-card">
   <div class="hk-server-cell">
@@ -319,16 +286,13 @@
     {#if serverVersion}
       <span class="hk-server-sub">Subsonic API v{serverVersion}</span>
     {:else}
-      <span class="hk-server-sub">Esperando respuesta…</span>
+      <span class="hk-server-sub">Sin comprobar</span>
     {/if}
   </div>
 
   <div class="hk-server-cell live" data-band={latencyBand}>
     <span class="hk-server-label">
       <Pulse size={11} weight="bold" /> Latencia
-      <span class="hk-live-badge" aria-hidden="true">
-        <span class="hk-live-dot"></span> LIVE
-      </span>
     </span>
     <div class="hk-latency-row">
       <span class="hk-server-value latency" data-band={latencyBand}>
@@ -338,23 +302,15 @@
           —
         {/if}
       </span>
-      {#if sparklinePath}
-        <svg
-          class="hk-sparkline"
-          viewBox="0 0 80 24"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <path
-            d={sparklinePath}
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      {/if}
+      <button
+        type="button"
+        class="hk-recheck"
+        onclick={checkHealth}
+        disabled={checking}
+        aria-label="Comprobar la latencia del servidor"
+      >
+        <ArrowsClockwise size={13} weight="bold" class={checking ? 'spin' : ''} />
+      </button>
     </div>
     <span class="hk-server-sub">{latencyText}</span>
   </div>
@@ -565,30 +521,6 @@
     text-transform: uppercase;
     color: var(--text-tertiary);
   }
-  .hk-live-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: 4px;
-    padding: 1px 6px;
-    background: color-mix(in srgb, oklch(0.72 0.18 145) 16%, transparent);
-    border-radius: 999px;
-    color: oklch(0.72 0.18 145);
-    font-size: 9px;
-    letter-spacing: 0.08em;
-  }
-  .hk-live-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 999px;
-    background: oklch(0.72 0.18 145);
-    animation: hk-live-pulse 1.4s ease-in-out infinite;
-  }
-  @keyframes hk-live-pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50%      { transform: scale(1.4); opacity: 0.5; }
-  }
-
   .hk-server-value {
     font-family: 'Söhne Mono', var(--font-mono);
     font-size: var(--text-xl);
@@ -617,23 +549,35 @@
     color: var(--text-tertiary);
   }
 
-  /* === Latency row con sparkline al lado === */
+  /* === Latency row con botón de recheck al lado === */
   .hk-latency-row {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 10px;
   }
-  .hk-sparkline {
-    width: 80px;
-    height: 24px;
+  .hk-recheck {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
-    color: color-mix(in srgb, currentColor 60%, transparent);
+    border: 0;
+    border-radius: 999px;
+    background: var(--bg-glass-thin);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition:
+      background 200ms var(--hk-spring-soft),
+      color 160ms var(--hk-spring-soft);
   }
-  /* Sparkline tinta — sigue al data-band del cell para que su trazo
-     coincida con el color del número grande. */
-  .hk-server-cell.live[data-band='good']  .hk-sparkline { color: oklch(0.72 0.18 145 / 0.7); }
-  .hk-server-cell.live[data-band='mid']   .hk-sparkline { color: oklch(0.78 0.15 75 / 0.7);  }
-  .hk-server-cell.live[data-band='high']  .hk-sparkline { color: var(--status-danger);       }
+  .hk-recheck:hover:not(:disabled) { background: var(--bg-glass); color: var(--text-primary); }
+  .hk-recheck:disabled { opacity: 0.5; cursor: progress; }
+  .hk-recheck:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  :global(.hk-recheck .spin) { animation: hk-spin 1s linear infinite; }
+  @keyframes hk-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.hk-recheck .spin) { animation: none; }
+  }
 
   /* ============================================================================
      === Action grid + Info grid ===
@@ -725,6 +669,9 @@
   @keyframes hk-dot-pulse {
     0%, 100% { transform: scale(1); opacity: 1; }
     50%      { transform: scale(1.6); opacity: 0.5; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hk-detail-stat[data-tone='running'] .hk-detail-dot { animation: none; }
   }
 
   /* ============================================================================
