@@ -574,7 +574,7 @@
     </button>
   </header>
 
-  <!-- ─── KPI cards (estilo HKInfoCard: pattern + tone + delta + sparkline) -->
+  <!-- ─── KPI cards (superficie sólida sobria; delta + sparkline, sin glass) -->
   <section class="dg-kpis" aria-label="Resumen">
     <DiagnosticsKPI
       Icon={Star}
@@ -585,7 +585,7 @@
       deltaSuffix={deltaSuffix.meanRating}
       sparkline={sparklines.meanRating}
       pattern="waves"
-      tone="accent"
+      variant="solid"
     />
     <DiagnosticsKPI
       Icon={ChartBar}
@@ -597,7 +597,7 @@
       deltaSuffix={deltaSuffix.total}
       sparkline={sparklines.total}
       pattern="lines"
-      tone="mint"
+      variant="solid"
     />
     <DiagnosticsKPI
       Icon={Diamond}
@@ -609,7 +609,7 @@
       deltaSuffix={deltaSuffix.diamonds}
       sparkline={sparklines.diamonds}
       pattern="mesh"
-      tone="amber"
+      variant="solid"
     />
     <DiagnosticsKPI
       Icon={CheckCircle}
@@ -622,7 +622,7 @@
       deltaSuffix={deltaSuffix.ratedPct}
       sparkline={sparklines.ratedPct}
       pattern="waves"
-      tone="pink"
+      variant="solid"
     />
   </section>
 
