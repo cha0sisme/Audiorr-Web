@@ -143,3 +143,20 @@ export const FailIpsListSchema = z.object({
   ips: z.array(FailIpSchema)
 });
 export type FailIpsList = z.infer<typeof FailIpsListSchema>;
+
+// ── GET /api/admin/auth-by-country?days=N ──────────────────────────────────
+// Accesos agregados por país (cf-ipcountry). `country` es ISO alpha-2, o '??'
+// para LAN/histórico sin país (se cuenta pero no se sitúa en el mapa).
+export const CountryAccessSchema = z.object({
+  country: z.string(),
+  ok: z.number(),
+  fail: z.number(),
+  blocked: z.number(),
+  total: z.number()
+});
+export const AuthByCountrySchema = z.object({
+  days: z.number(),
+  countries: z.array(CountryAccessSchema)
+});
+export type CountryAccess = z.infer<typeof CountryAccessSchema>;
+export type AuthByCountry = z.infer<typeof AuthByCountrySchema>;

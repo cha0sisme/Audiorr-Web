@@ -20,13 +20,15 @@ import {
   RateLimitStatsSchema,
   AuthRecentEventsSchema,
   FailIpsListSchema,
+  AuthByCountrySchema,
   type SystemInfo,
   type ScrobblesDaily,
   type SecuritySummary,
   type AuthDailySeries,
   type RateLimitStats,
   type AuthRecentEvents,
-  type FailIpsList
+  type FailIpsList,
+  type AuthByCountry
 } from '$types/dashboard';
 
 function userHeader(): Record<string, string> {
@@ -73,6 +75,15 @@ export function getFailIps(days = 7, limit = 50): Promise<FailIpsList | null> {
   return backendService.get(
     `/api/admin/fail-ips?days=${days}&limit=${limit}`,
     FailIpsListSchema,
+    userHeader()
+  );
+}
+
+/** Accesos agregados por país (cf-ipcountry) para el mapa de origen. */
+export function getAuthByCountry(days = 7): Promise<AuthByCountry | null> {
+  return backendService.get(
+    `/api/admin/auth-by-country?days=${days}`,
+    AuthByCountrySchema,
     userHeader()
   );
 }

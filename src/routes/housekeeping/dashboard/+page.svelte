@@ -35,12 +35,14 @@
   import DetailDrawer from '$components/housekeeping/DetailDrawer.svelte';
   import AccesosDetail from '$components/housekeeping/AccesosDetail.svelte';
   import FailIpsDetail from '$components/housekeeping/FailIpsDetail.svelte';
+  import CountryAccessPanel from '$components/housekeeping/CountryAccessPanel.svelte';
   import {
     getSecuritySummary,
     getSystemInfo,
     getScrobblesDaily,
     getAuthDailySeries,
-    getRateLimitStats
+    getRateLimitStats,
+    getFailIps
   } from '$services/dashboard';
   import { generateAllDailyMixes, regenerateAllCovers } from '$services/dailyMixes';
   import { generateAllSmartPlaylists } from '$services/smartPlaylists';
@@ -103,6 +105,14 @@
   const authDailyQ = createQuery(() => ({
     queryKey: ['hk-auth-daily', accesosDays],
     queryFn: () => getAuthDailySeries(accesosDays),
+    enabled,
+    staleTime: 5 * 60 * 1000
+  }));
+  // IPs con fallos: mismo patrón que Accesos (rango seleccionable, vía fail-ips).
+  let ipsDays = $state(7);
+  const failIpsCardQ = createQuery(() => ({
+    queryKey: ['hk-fail-ips-card', ipsDays],
+    queryFn: () => getFailIps(ipsDays, 6),
     enabled,
     staleTime: 5 * 60 * 1000
   }));
@@ -182,8 +192,8 @@
   // ─── Security summary ───────────────────────────────────────────────────
   const sec = $derived(securityQ.data ?? null);
 
-  // Card · IPs — lista ranked
-  const ipsAll = $derived(sec?.topFailIps ?? []);
+  // Card · IPs — lista ranked (rango propio vía fail-ips)
+  const ipsAll = $derived(failIpsCardQ.data?.ips ?? []);
   const ipsVisible = $derived(ipsAll.slice(0, 3));
   const ipsRest = $derived(ipsAll.slice(3));
   const ipMax = $derived(ipsAll[0]?.count ?? 1);
@@ -359,11 +369,14 @@
   <SecCard
     state={ipState}
     Icon={GlobeHemisphereWest}
-    kicker="IPs con fallos · 7 días"
+    kicker="IPs con fallos"
     arch="ranked"
     onExpand={() => (openDrawer = 'ips')}
     expandLabel="Ampliar IPs con fallos: tabla completa"
   >
+    {#snippet headerAction()}
+      <RangeSelect value={ipsDays} options={ACCESOS_RANGE} onChange={(v) => (ipsDays = v)} />
+    {/snippet}
     {#if ipsRest.length > 0}
       {#snippet peek()}
         <ul class="iplist">
@@ -377,9 +390,9 @@
       {/snippet}
     {/if}
 
-    {#if securityQ.isError}
+    {#if failIpsCardQ.isError}
       <span class="sec-unit">no se pudo leer</span>
-    {:else if !sec}
+    {:else if failIpsCardQ.isPending}
       <span class="sec-unit">cargando…</span>
     {:else if ipsAll.length === 0}
       <div class="empty-good">
@@ -571,6 +584,9 @@
     </button>
   </div>
 </AdminPanel>
+
+<!-- ─── Origen de accesos: mapa de símbolos + ranking por país ─────────────── -->
+<CountryAccessPanel />
 
 <!-- ─── Drill-down: drawers laterales de detalle ──────────────────────────── -->
 <DetailDrawer

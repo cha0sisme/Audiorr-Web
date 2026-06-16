@@ -62,7 +62,6 @@
   aria-label={wholeCardButton ? expandLabel : undefined}
   onclick={wholeCardButton ? onExpand : undefined}
 >
-  <span class="sec-rail" aria-hidden="true"></span>
   {#if wholeCardButton}
     <span class="sec-expand-caret" aria-hidden="true"><CaretRight size={12} weight="bold" /></span>
   {/if}
@@ -103,14 +102,14 @@
     background:
       linear-gradient(180deg, var(--sec-edge-light) 0%, transparent 40%),
       var(--sec-surface);
-    border: 1px solid var(--sec-border);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--hk-card-radius);
     box-shadow: var(--shadow-sm);
     transition: border-color 240ms var(--ease-ios-default);
   }
   .sec-card:hover,
   .sec-card:focus-within {
-    border-color: var(--sec-border-strong);
+    border-color: var(--border-strong);
   }
 
   /* ── Card ampliable (es <button>): reset de UA + affordance de lift ───── */
@@ -221,26 +220,13 @@
     .sec-card::after { display: none; }
   }
 
-  /* Accent rail — codifica el estado del dato de esta card. */
-  .sec-rail {
-    position: absolute;
-    left: 0;
-    inset-block: 0;
-    width: 3px;
-    z-index: 1;
-  }
-  .sec-card[data-state='calm']  .sec-rail { background: var(--sec-calm); }
-  .sec-card[data-state='watch'] .sec-rail { background: var(--sec-watch); }
-  .sec-card[data-state='alert'] .sec-rail { background: var(--sec-alert); }
-  .sec-card[data-state='good']  .sec-rail { background: var(--sec-good); }
-
   .sec-inner {
     position: relative;
     z-index: 1;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    padding: var(--space-4) var(--space-5) var(--space-4) calc(var(--space-5) + 3px);
+    padding: var(--space-4) var(--space-5);
     width: 100%;
     min-width: 0;
     color: var(--sec-fg);
