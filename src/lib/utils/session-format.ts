@@ -53,18 +53,20 @@ export function platformToneFromSession(s: SessionView): PlatformTone {
   return 'unknown';
 }
 
-/** Bandera emoji desde un ISO-3166 alpha-2 (regional indicators). Cadena
-    vacía si el código no es válido (null/LAN → sin bandera). */
-export function flagEmoji(country: string | null): string {
-  if (!country || country.length !== 2) return '';
-  const cc = country.toUpperCase();
-  if (!/^[A-Z]{2}$/.test(cc)) return '';
-  return String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + (c.charCodeAt(0) - 65)));
-}
+/** Nombre del país en español desde ISO-3166 alpha-2 (ES → "España"). API
+    nativa `Intl.DisplayNames`, cero deps, funciona en Windows/Chrome — a
+    diferencia de los emojis regional-indicator, que Chromium en Windows NO
+    renderiza (salían como el código duplicado). `null` si no hay país (LAN).
+    La instancia se crea UNA vez a nivel de módulo, no por render. */
+const REGION_NAMES = new Intl.DisplayNames(['es'], { type: 'region' });
 
-/** Código de país en mayúsculas, o "Desconocido" si no hay (LAN / legacy). */
-export function countryLabel(country: string | null): string {
-  return country ? country.toUpperCase() : 'Desconocido';
+export function countryName(country: string | null): string | null {
+  if (!country || !/^[A-Za-z]{2}$/.test(country)) return null;
+  try {
+    return REGION_NAMES.of(country.toUpperCase()) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 const ABSOLUTE_FMT = new Intl.DateTimeFormat('es-ES', {

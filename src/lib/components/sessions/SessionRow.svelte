@@ -1,19 +1,18 @@
 <script lang="ts">
   /**
    * SessionRow — una sesión activa, estilo "Tus dispositivos". Compartida por
-   * el panel admin (Housekeeping → Personas) y el panel propio (Ajustes).
-   *
-   * Lenguaje limpio: dos líneas (plataforma + badge · ubicación/IP/última vista),
-   * sin la fecha de inicio verbosa (va al tooltip). El icono se infiere del
-   * platform del backend y, si no lo clasificó, del user-agent (así Android no
-   * cae a "Desconocido"). Logos de marca con weight fill (regular no renderiza).
+   * Personas (Housekeeping) y Ajustes (panel propio). Diseño 2026 (spec
+   * design-lead): superficie blanda sin bordes, país por NOMBRE (los emojis de
+   * bandera no renderizan en Chromium/Windows), "este dispositivo" marcado con
+   * un dot de presencia + badge neutro (nunca el azul de marca), y la acción de
+   * cerrar revelándose en hover/focus para no gritar en reposo.
    */
   import { Globe, AppleLogo, AndroidLogo, DeviceMobile, SignOut, ArrowsClockwise } from 'phosphor-svelte';
   import type { SessionView } from '$types/backend';
   import {
     platformToneFromSession,
     platformLabelFromTone,
-    flagEmoji,
+    countryName,
     formatAbsolute,
     formatRelative
   } from '$utils/session-format';
@@ -37,12 +36,13 @@
   );
   // Los logos de marca solo renderizan bien en fill; los genéricos, en regular.
   const iconWeight = $derived(tone === 'ios' || tone === 'android' ? 'fill' : 'regular');
-  const flag = $derived(flagEmoji(session.country));
+  const country = $derived(countryName(session.country));
 </script>
 
 <div class="row" class:current={session.current} title={`Iniciada ${formatAbsolute(session.createdAt)}`}>
   <span class="icon" data-tone={tone} aria-hidden="true">
     <Icon size={18} weight={iconWeight} />
+    {#if session.current}<span class="dot"></span>{/if}
   </span>
 
   <div class="meta">
@@ -54,8 +54,8 @@
     </span>
 
     <span class="line-2">
-      {#if flag}
-        <span class="loc"><span class="flag">{flag}</span>{(session.country ?? '').toUpperCase()}</span>
+      {#if country}
+        <span class="loc">{country}</span>
         <span class="sep">·</span>
       {/if}
       {#if session.ip}
@@ -70,6 +70,7 @@
     <button
       type="button"
       class="close"
+      class:closing-visible={closing}
       disabled={closing}
       onclick={() => onClose?.()}
       aria-label="Cerrar esta sesión"
@@ -87,22 +88,22 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 38px minmax(0, 1fr) auto;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
     align-items: center;
     gap: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-surface);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
+    transition: background var(--duration-fast) var(--ease-ios-default);
   }
-  .row.current {
-    background: color-mix(in srgb, var(--accent) 9%, var(--bg-surface));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
-  }
+  /* "Este dispositivo": un peldaño más elevado, por materia — sin azul. */
+  .row.current { background: var(--bg-surface-elevated); }
 
   /* ── Icono del dispositivo, teñido por tipo ── */
   .icon {
-    width: 38px;
-    height: 38px;
+    position: relative;
+    width: 40px;
+    height: 40px;
     border-radius: var(--radius-md);
     display: grid;
     place-items: center;
@@ -113,14 +114,26 @@
   .icon[data-tone='web']     { background: color-mix(in srgb, var(--device-web) 15%, transparent);     color: var(--device-web); }
   .icon[data-tone='ios']     { background: color-mix(in srgb, var(--device-ios) 22%, transparent);     color: var(--device-ios); }
   .icon[data-tone='android'] { background: color-mix(in srgb, var(--device-android) 18%, transparent); color: var(--device-android); }
-  .icon[data-tone='unknown'] { background: var(--bg-surface-elevated);                                  color: var(--device-unknown); }
+  .icon[data-tone='unknown'] { background: var(--bg-surface-active);                                    color: var(--device-unknown); }
+  /* Dot de presencia de la sesión actual — verde, no azul. El anillo del color
+     del fondo de la fila current lo hace "respirar". */
+  .dot {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    background: var(--device-active);
+    border: 2px solid var(--bg-surface-elevated);
+  }
 
   /* ── Texto: 2 líneas ── */
   .meta {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
   }
   .line-1 {
     display: flex;
@@ -136,33 +149,28 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* Badge NEUTRO (etiqueta, no semáforo) — el color lo lleva el dot. */
   .badge {
     flex-shrink: 0;
-    padding: 1px 7px;
+    padding: 1px 8px;
     border-radius: var(--radius-full);
-    background: color-mix(in srgb, var(--accent) 16%, transparent);
-    color: var(--text-accent);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    background: var(--bg-surface-active);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
   }
   .line-2 {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
     font-size: var(--text-xs);
     color: var(--text-tertiary);
   }
-  .loc {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    flex-shrink: 0;
-  }
-  .flag { font-size: 13px; line-height: 1; }
-  .sep { color: var(--text-tertiary); opacity: 0.6; }
+  .loc { flex-shrink: 0; }
+  .sep { opacity: 0.5; }
   .ip {
     font-family: var(--font-mono);
     overflow: hidden;
@@ -171,7 +179,7 @@
   }
   .seen { flex-shrink: 0; white-space: nowrap; }
 
-  /* ── Botón cerrar ── */
+  /* ── Botón cerrar — se revela en hover/focus (no grita en reposo) ── */
   .close {
     flex-shrink: 0;
     display: inline-flex;
@@ -187,9 +195,19 @@
     font-weight: 700;
     cursor: pointer;
     white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
     transition:
+      opacity var(--duration-fast) var(--ease-ios-default),
       background var(--duration-fast) var(--ease-ios-default),
       transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .row:hover .close,
+  .row:focus-within .close,
+  .close.closing-visible,
+  .close:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
   }
   .close:hover:not(:disabled) { background: color-mix(in srgb, var(--status-danger) 17%, transparent); }
   .close:active:not(:disabled) { transform: scale(0.96); }
@@ -197,12 +215,18 @@
   .close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   :global(.close .spin) { animation: session-spin 1s linear infinite; }
   @keyframes session-spin { to { transform: rotate(360deg); } }
+
+  /* Touch: sin hover, el botón siempre visible. */
+  @media (hover: none) {
+    .close { opacity: 1; pointer-events: auto; }
+  }
   @media (prefers-reduced-motion: reduce) {
+    .close { transition: background var(--duration-fast) var(--ease-ios-default); opacity: 1; pointer-events: auto; }
     :global(.close .spin) { animation: none; }
   }
 
   @media (max-width: 560px) {
     .close-text { display: none; }
-    .close { padding: 7px; }
+    .close { padding: 7px; opacity: 1; pointer-events: auto; }
   }
 </style>

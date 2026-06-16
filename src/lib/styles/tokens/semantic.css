@@ -235,6 +235,10 @@
   --device-ios: var(--gray-9);
   --device-android: var(--green-9);
   --device-unknown: var(--text-tertiary);
+  /* Presencia de la sesión actual ("este dispositivo está vivo aquí"). Verde
+     de presencia, distinto del --accent de marca para no competir con el icono
+     del dispositivo web (que ya es accent). */
+  --device-active: var(--green-9);
 
 
   /* ==========================================================================
