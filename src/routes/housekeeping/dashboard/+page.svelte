@@ -21,14 +21,21 @@
     Database,
     ChartLineUp,
     Cpu,
-    CheckCircle
+    CheckCircle,
+    CaretRight,
+    ArrowsClockwise,
+    Image as ImageIcon
   } from 'phosphor-svelte';
   import SecCard from '$components/housekeeping/SecCard.svelte';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import AdminStatusPill from '$components/housekeeping/AdminStatusPill.svelte';
   import Sparkline from '$components/diagnostics/Sparkline.svelte';
   import { getSecuritySummary, getSystemInfo, getScrobblesDaily } from '$services/dashboard';
+  import { generateAllDailyMixes, regenerateAllCovers } from '$services/dailyMixes';
+  import { generateAllSmartPlaylists } from '$services/smartPlaylists';
+  import { BackendError } from '$services/BackendService.svelte';
   import { credentials } from '$stores/credentials.svelte';
+  import { toasts } from '$stores/toasts.svelte';
   import type { SystemCron } from '$types/dashboard';
 
   const enabled = $derived(credentials.isConfigured);
@@ -150,6 +157,78 @@
       case 'error':   return 'Con errores';
       default:        return 'En espera';
     }
+  }
+
+  // ─── Acordeón de Jobs: cada chip despliega su acción de regeneración ────
+  let openJob = $state<string | null>(null);
+  function toggleJob(key: string) {
+    openJob = openJob === key ? null : key;
+  }
+
+  type ActionState = { running: boolean; cooldown: number };
+  let dailyAction = $state<ActionState>({ running: false, cooldown: 0 });
+  let smartAction = $state<ActionState>({ running: false, cooldown: 0 });
+  let coversAction = $state<ActionState>({ running: false, cooldown: 0 });
+
+  function startCooldown(target: ActionState, seconds = 30) {
+    target.cooldown = seconds;
+    const tick = setInterval(() => {
+      target.cooldown -= 1;
+      if (target.cooldown <= 0) clearInterval(tick);
+    }, 1000);
+  }
+
+  async function runAction(
+    target: ActionState,
+    fn: () => Promise<unknown>,
+    okTitle: string,
+    okBody: string
+  ) {
+    if (target.running || target.cooldown > 0) return;
+    target.running = true;
+    try {
+      await fn();
+      void systemQ.refetch();
+      startCooldown(target);
+      toasts.success(okTitle, okBody);
+    } catch (err) {
+      if (err instanceof BackendError && err.status === 429) {
+        const s = err.retryAfter ?? 30;
+        startCooldown(target, s);
+        toasts.warning('Espera un momento', `Vuelve a intentarlo en ${s} s.`);
+      } else {
+        toasts.error('No se pudo regenerar', err instanceof Error ? err.message : 'Algo ha ido mal');
+      }
+    } finally {
+      target.running = false;
+    }
+  }
+
+  const handleDaily = () =>
+    runAction(dailyAction, generateAllDailyMixes, 'Daily Mixes regenerados', 'Generados para todos los usuarios.');
+  const handleSmart = () =>
+    runAction(smartAction, generateAllSmartPlaylists, 'Playlists inteligentes regeneradas', 'En bucle, Tiempo atrás y Radar recalculadas.');
+  const handleCovers = () =>
+    runAction(coversAction, regenerateAllCovers, 'Portadas en cola', 'Se están regenerando las portadas personalizadas.');
+
+  // Cada job (cron key) → su acción. Los 3 smart comparten llamada y cooldown
+  // (el backend no separa por key; el copy lo dice claro, sin botones que mientan).
+  type JobInfo = { label: string; copy: string; run: () => void; state: ActionState };
+  function jobInfo(key: string): JobInfo {
+    if (key === 'daily_mixes') {
+      return {
+        label: 'Regenerar Daily Mixes',
+        copy: 'Genera de nuevo los Daily Mixes para todos los usuarios.',
+        run: handleDaily,
+        state: dailyAction
+      };
+    }
+    return {
+      label: 'Regenerar playlists inteligentes',
+      copy: 'Recalcula En bucle, Tiempo atrás y Radar de novedades a la vez.',
+      run: handleSmart,
+      state: smartAction
+    };
   }
 </script>
 
@@ -294,16 +373,72 @@
     </div>
   </div>
 
-  <!-- Jobs: crons comprimidos en chips -->
+  <!-- Jobs: chips expandibles (acción de regeneración) + mantenimiento global -->
   <div class="jobs">
     <span class="jobs-label">Jobs</span>
     <div class="jobs-chips">
       {#each CRON_ORDER as key (key)}
         {@const c = systemQ.data?.crons?.[key]}
-        <span class="job-chip" title="Última {relativeTime(c?.lastRun)}">
+        <button
+          type="button"
+          class="job-chip"
+          class:expanded={openJob === key}
+          aria-expanded={openJob === key}
+          aria-controls="jobs-drawer"
+          disabled={!systemQ.data}
+          onclick={() => toggleJob(key)}
+        >
           <AdminStatusPill tone={cronTone(c?.status)} label={CRON_LABELS[key] ?? key} />
-        </span>
+          <span class="job-caret"><CaretRight size={11} weight="bold" /></span>
+        </button>
       {/each}
+    </div>
+
+    <div class="jobs-drawer" class:open={openJob !== null}>
+      <div class="jobs-drawer-inner" id="jobs-drawer" role="region" aria-label="Acción del job">
+        {#if openJob}
+          {@const job = jobInfo(openJob)}
+          {@const cron = systemQ.data?.crons?.[openJob]}
+          {#key openJob}
+            <div class="drawer-content">
+              <span class="drawer-meta">Última ejecución: {relativeTime(cron?.lastRun)}</span>
+              <button
+                type="button"
+                class="drawer-action"
+                onclick={job.run}
+                disabled={job.state.running || job.state.cooldown > 0}
+              >
+                {#if job.state.running}
+                  <ArrowsClockwise size={13} weight="bold" class="spin" /> Regenerando…
+                {:else if job.state.cooldown > 0}
+                  <ArrowsClockwise size={13} weight="bold" /> {job.label} ({job.state.cooldown}s)
+                {:else}
+                  <ArrowsClockwise size={13} weight="bold" /> {job.label}
+                {/if}
+              </button>
+              <span class="drawer-copy">{job.copy}</span>
+            </div>
+          {/key}
+        {/if}
+      </div>
+    </div>
+
+    <div class="jobs-maint">
+      <span class="jobs-label">Mantenimiento</span>
+      <button
+        type="button"
+        class="maint-action"
+        onclick={handleCovers}
+        disabled={coversAction.running || coversAction.cooldown > 0}
+      >
+        {#if coversAction.running}
+          <ArrowsClockwise size={13} weight="bold" class="spin" /> Regenerando…
+        {:else if coversAction.cooldown > 0}
+          <ImageIcon size={13} weight="regular" /> Regenerar portadas ({coversAction.cooldown}s)
+        {:else}
+          <ImageIcon size={13} weight="regular" /> Regenerar portadas
+        {/if}
+      </button>
     </div>
   </div>
 </AdminPanel>
@@ -553,5 +688,117 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+  }
+
+  /* Chip-job = botón disclosure (pill de estado + caret). */
+  .job-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px 3px 3px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      border-color var(--duration-fast) var(--ease-ios-default);
+  }
+  .job-chip:hover:not(:disabled) { background: var(--bg-surface-elevated); }
+  .job-chip.expanded {
+    background: var(--bg-surface-active);
+    border-color: var(--border-subtle);
+  }
+  .job-chip:disabled { opacity: 0.5; cursor: default; }
+  .job-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .job-caret {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-tertiary);
+    transition: transform var(--duration-fast) var(--ease-ios-default);
+  }
+  .job-chip.expanded .job-caret { transform: rotate(90deg); color: var(--text-secondary); }
+
+  /* Cajón compartido — morph de altura sin medir en JS (0fr → 1fr). */
+  .jobs-drawer {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--morph-duration) var(--morph-ease);
+  }
+  .jobs-drawer.open { grid-template-rows: 1fr; }
+  .jobs-drawer-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+  .drawer-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface-elevated);
+    /* Entrada escalonada blur-replace (sensación SmartMixButton). */
+    animation: drawer-in 260ms var(--morph-ease) var(--morph-icon-in-delay, 80ms) both;
+  }
+  @keyframes drawer-in {
+    from { opacity: 0; transform: translateY(6px); filter: blur(4px); }
+    to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
+  }
+  .drawer-meta {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+  .drawer-copy {
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+  .drawer-action,
+  .maint-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--bg-surface-active);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-ios-default);
+  }
+  .drawer-action :global(svg),
+  .maint-action :global(svg) { color: var(--accent); }
+  .drawer-action:hover:not(:disabled),
+  .maint-action:hover:not(:disabled) { background: var(--bg-surface-hover); }
+  .drawer-action:disabled,
+  .maint-action:disabled { opacity: 0.55; cursor: not-allowed; }
+  .drawer-action:focus-visible,
+  .maint-action:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  /* Mantenimiento: acción global (portadas), separada de los jobs. */
+  .jobs-maint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-1);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--separator-subtle);
+  }
+  .maint-action { padding: 6px 12px; font-size: var(--text-xs); }
+
+  :global(.jobs .spin) { animation: jobs-spin 1s linear infinite; }
+  @keyframes jobs-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .jobs-drawer { transition: none; }
+    .job-caret { transition: none; }
+    .drawer-content { animation: none; }
+    :global(.jobs .spin) { animation: none; }
   }
 </style>
