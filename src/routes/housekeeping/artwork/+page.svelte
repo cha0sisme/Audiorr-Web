@@ -16,6 +16,7 @@
     resolveArtworkVideoUrl,
     type AlbumArtworkEntry
   } from '$services/AlbumArtworkService';
+  import { getCoverArtUrl } from '$services/NavidromeService';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
 
@@ -65,16 +66,18 @@
     });
   }
 
-  // Preview bajo demanda: reproduce el vídeo de la fila al entrar el ratón o
-  // el foco, lo pausa al salir. Evita tener cientos de <video> en autoplay.
-  function hoverPlay(ev: Event & { currentTarget: HTMLElement }): void {
-    const video = ev.currentTarget.querySelector('video');
-    if (!video) return;
-    video.currentTime = 0;
-    void video.play().catch(() => {});
+  // Preview bajo demanda: por defecto cada fila muestra el cover ESTÁTICO del
+  // álbum (`<img>`, barato y gestionado por el cache de imágenes del browser).
+  // El `<video>` solo se MONTA en la fila bajo el ratón/foco — así nunca hay
+  // más de un decoder de vídeo vivo. Tener cientos de `<video>` montados (aun
+  // con preload="metadata") retiene un frame decodificado por elemento en GPU
+  // (~4.6 MB cada uno a 1080² → cientos de MB). El montaje on-demand lo evita.
+  let hoveredId = $state<string | null>(null);
+  function hoverEnter(id: string): void {
+    hoveredId = id;
   }
-  function hoverPause(ev: Event & { currentTarget: HTMLElement }): void {
-    ev.currentTarget.querySelector('video')?.pause();
+  function hoverLeave(id: string): void {
+    if (hoveredId === id) hoveredId = null;
   }
 
   function refLine(e: AlbumArtworkEntry): string {
@@ -127,18 +130,37 @@
             class="hk-art-preview"
             href={`/album/${e.albumId}`}
             aria-label={`Ver ${e.title ?? 'álbum'}`}
-            onmouseenter={hoverPlay}
-            onmouseleave={hoverPause}
-            onfocusin={hoverPlay}
-            onfocusout={hoverPause}
+            onmouseenter={() => hoverEnter(e.albumId)}
+            onmouseleave={() => hoverLeave(e.albumId)}
+            onfocusin={() => hoverEnter(e.albumId)}
+            onfocusout={() => hoverLeave(e.albumId)}
           >
             {#if videoUrl}
-              <!-- Sin autoplay: con cientos de filas, reproducir todos a la vez
-                   satura red/CPU. Solo se reproduce el que está bajo el ratón
-                   (o con foco de teclado). `preload="metadata"` muestra el
-                   primer frame como póster sin descargar el vídeo entero. -->
-              <!-- svelte-ignore a11y_media_has_caption -->
-              <video src={videoUrl} muted loop playsinline preload="metadata"></video>
+              <!-- Póster estático: cover del álbum (Navidrome). Lazy + barato.
+                   Es lo único que se ve en reposo — sin <video> = sin decoder
+                   ni frame en GPU. -->
+              <img
+                class="hk-art-poster"
+                src={getCoverArtUrl(e.albumId, 112)}
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
+              <!-- El <video> solo se monta cuando esta fila tiene hover/foco.
+                   autoplay+muted arranca al montar; al salir, se desmonta y el
+                   decoder se libera. Máximo un vídeo vivo en toda la página. -->
+              {#if hoveredId === e.albumId}
+                <!-- svelte-ignore a11y_media_has_caption -->
+                <video
+                  class="hk-art-video"
+                  src={videoUrl}
+                  autoplay
+                  muted
+                  loop
+                  playsinline
+                  preload="auto"
+                ></video>
+              {/if}
             {:else}
               <span class="hk-art-preview-fallback"><FilmSlate size={20} weight="regular" /></span>
             {/if}
@@ -294,8 +316,14 @@
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
+    /* Virtualización nativa: el navegador no renderiza ni hace layout de las
+       filas fuera de pantalla (el listado puede tener cientos). contain-
+       intrinsic-size reserva el alto para que el scroll no salte. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 74px;
   }
   .hk-art-preview {
+    position: relative;
     width: 56px;
     height: 56px;
     border-radius: var(--radius-sm);
@@ -304,11 +332,18 @@
     flex-shrink: 0;
     display: block;
   }
-  .hk-art-preview video {
+  .hk-art-poster,
+  .hk-art-video {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+  /* El vídeo se monta encima del póster al hacer hover. */
+  .hk-art-video {
+    z-index: 1;
   }
   .hk-art-preview-fallback {
     width: 100%;
