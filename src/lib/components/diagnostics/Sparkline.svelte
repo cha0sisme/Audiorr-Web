@@ -31,6 +31,11 @@
     showLast?: boolean;
     /** Curve smoothing — true = Catmull-Rom, false = polyline lineal. */
     smooth?: boolean;
+    /** Minimalismo puro: solo área con gradiente vertical, sin stroke ni dot.
+        Opt-in para no alterar el uso compartido en Diagnostics. */
+    lineless?: boolean;
+    /** Hairline horizontal en la base (ancla el área sin línea). */
+    baseline?: boolean;
   };
 
   let {
@@ -41,7 +46,9 @@
     height = 28,
     strokeWidth = 1.5,
     showLast = true,
-    smooth = true
+    smooth = true,
+    lineless = false,
+    baseline = false
   }: Props = $props();
 
   const stats = $derived.by(() => {
@@ -113,17 +120,28 @@
     preserveAspectRatio="none"
     aria-hidden="true"
   >
-    <path d={areaPath} class="sk-area" />
-    <path
-      d={linePath}
-      class="sk-line"
-      fill="none"
-      stroke="currentColor"
-      stroke-width={strokeWidth}
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    />
-    {#if showLast && lastPoint}
+    <path d={areaPath} class="sk-area" class:lineless />
+    {#if !lineless}
+      <path
+        d={linePath}
+        class="sk-line"
+        fill="none"
+        stroke="currentColor"
+        stroke-width={strokeWidth}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    {/if}
+    {#if baseline}
+      <line
+        x1="0"
+        y1={height - 0.5}
+        x2={width}
+        y2={height - 0.5}
+        class="sk-baseline"
+      />
+    {/if}
+    {#if showLast && lastPoint && !lineless}
       <circle
         cx={lastPoint.x}
         cy={lastPoint.y}
@@ -146,6 +164,19 @@
   .sk-area {
     fill: currentColor;
     opacity: 0.16;
+  }
+  /* Minimalismo puro: sin stroke, el área lleva un gradiente vertical de
+     opacidad (cresta → base) vía mask, para que "sin línea" lea como decisión
+     —volumen de luz que emana de la curva— y no como relleno plano inacabado. */
+  .sk-area.lineless {
+    opacity: 1;
+    -webkit-mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.26) 0%, rgb(0 0 0 / 0.02) 100%);
+    mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.26) 0%, rgb(0 0 0 / 0.02) 100%);
+  }
+  .sk-baseline {
+    stroke: var(--sec-spark-baseline);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
   }
   .sk-dot {
     fill: currentColor;

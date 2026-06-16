@@ -160,7 +160,7 @@
 <!-- ─── Sala de control: 3 cards de estado ────────────────────────────────── -->
 <div class="sec-grid">
   <!-- Card 1 · Accesos · balance de intentos -->
-  <SecCard state={accessState} Icon={ShieldCheck} kicker="Accesos · 7 días">
+  <SecCard state={accessState} Icon={ShieldCheck} kicker="Accesos · 7 días" arch="balance">
     {#snippet peek()}
       <span class="sec-peek-text">
         Últimas 24h: {sec ? sec.logins24h.ok : '·'} ok · {sec ? sec.logins24h.fail : '·'} fallidos
@@ -191,7 +191,7 @@
   </SecCard>
 
   <!-- Card 2 · IPs · lista ranked -->
-  <SecCard state={ipState} Icon={GlobeHemisphereWest} kicker="IPs con fallos · 7 días">
+  <SecCard state={ipState} Icon={GlobeHemisphereWest} kicker="IPs con fallos · 7 días" arch="ranked">
     {#if ipsRest.length > 0}
       {#snippet peek()}
         <ul class="iplist">
@@ -228,7 +228,7 @@
   </SecCard>
 
   <!-- Card 3 · Seguridad ahora · trío de tiles -->
-  <SecCard state={secNowState} Icon={UsersThree} kicker="Seguridad ahora">
+  <SecCard state={secNowState} Icon={UsersThree} kicker="Seguridad ahora" arch="tiles">
     {#if securityQ.isError}
       <span class="sec-unit">no se pudo leer</span>
     {:else}
@@ -265,7 +265,7 @@
       <span class="pulse-label"><ChartLineUp size={12} weight="bold" /> reproducciones · 7 días</span>
     </div>
     {#if hasSpark && scrobblesSeries}
-      <span class="pulse-spark"><Sparkline points={scrobblesSeries} smooth showLast={false} /></span>
+      <span class="pulse-spark"><Sparkline points={scrobblesSeries} smooth lineless baseline /></span>
     {/if}
   </div>
 

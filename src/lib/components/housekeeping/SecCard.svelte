@@ -22,12 +22,14 @@
     children: Snippet;
     /** Dato secundario revelado en hover/focus (progressive disclosure). */
     peek?: Snippet;
+    /** Arquetipo → rota el origen del fade del dot grid (sub-perceptible). */
+    arch?: 'balance' | 'ranked' | 'tiles';
   };
 
-  let { state, Icon, kicker, children, peek }: Props = $props();
+  let { state, Icon, kicker, children, peek, arch = 'balance' }: Props = $props();
 </script>
 
-<article class="sec-card" data-state={state}>
+<article class="sec-card" data-state={state} data-arch={arch}>
   <span class="sec-rail" aria-hidden="true"></span>
   <div class="sec-inner">
     <header class="sec-head">
@@ -51,7 +53,10 @@
     display: flex;
     min-height: 156px;
     overflow: hidden;
-    background: var(--sec-surface);
+    /* edge-light superior (luz física) sobre la superficie sólida. */
+    background:
+      linear-gradient(180deg, var(--sec-edge-light) 0%, transparent 40%),
+      var(--sec-surface);
     border: 1px solid var(--sec-border);
     border-radius: var(--hk-card-radius);
     box-shadow: var(--shadow-sm);
@@ -62,12 +67,53 @@
     border-color: var(--sec-border-strong);
   }
 
+  /* ── Capa MATERIA: grano feTurbulence (data-URI estático, cero red) que da
+     tactilidad. mix-blend overlay para modular la luz, no pintar gris. ──── */
+  .sec-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+    opacity: var(--sec-grain-opacity);
+  }
+  /* ── Capa GEOMETRÍA: dot grid neutro con fade radial que lo apaga bajo los
+     datos (premium = donde hay dato no hay textura). Origen del fade rota por
+     arquetipo: sub-perceptible, evita que las 3 cards sean fotocopia. ────── */
+  .sec-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle, var(--sec-dot) 1px, transparent 1.2px);
+    background-size: var(--sec-dot-size) var(--sec-dot-size);
+    -webkit-mask-image: radial-gradient(140% 120% at 0% 0%, #000 0%, rgb(0 0 0 / 0.35) 45%, transparent 80%);
+    mask-image: radial-gradient(140% 120% at 0% 0%, #000 0%, rgb(0 0 0 / 0.35) 45%, transparent 80%);
+  }
+  .sec-card[data-arch='ranked']::after {
+    -webkit-mask-image: radial-gradient(140% 120% at 100% 0%, #000 0%, rgb(0 0 0 / 0.35) 45%, transparent 80%);
+    mask-image: radial-gradient(140% 120% at 100% 0%, #000 0%, rgb(0 0 0 / 0.35) 45%, transparent 80%);
+  }
+  .sec-card[data-arch='tiles']::after {
+    -webkit-mask-image: radial-gradient(150% 120% at 50% 0%, #000 0%, rgb(0 0 0 / 0.35) 48%, transparent 82%);
+    mask-image: radial-gradient(150% 120% at 50% 0%, #000 0%, rgb(0 0 0 / 0.35) 48%, transparent 82%);
+  }
+  /* En alto contraste / forced-colors la textura es ruido: se apaga. */
+  @media (forced-colors: active) {
+    .sec-card::before,
+    .sec-card::after { display: none; }
+  }
+
   /* Accent rail — codifica el estado del dato de esta card. */
   .sec-rail {
     position: absolute;
     left: 0;
     inset-block: 0;
     width: 3px;
+    z-index: 1;
   }
   .sec-card[data-state='calm']  .sec-rail { background: var(--sec-calm); }
   .sec-card[data-state='watch'] .sec-rail { background: var(--sec-watch); }
@@ -75,6 +121,8 @@
   .sec-card[data-state='good']  .sec-rail { background: var(--sec-good); }
 
   .sec-inner {
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);

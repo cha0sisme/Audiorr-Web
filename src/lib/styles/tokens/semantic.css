@@ -470,6 +470,16 @@
   --sec-alert-soft: oklch(0.64 0.21 25  / 0.22);
   --sec-good-soft:  oklch(0.70 0.15 165 / 0.18);
 
+  /* ── Textura "blueprint" de las cards de estado (estática, NEUTRA) ──────
+     Da materia/profundidad de instrumento sin codificar estado (eso lo lleva
+     el rail). Dos capas: grano (materia) + dot grid (geometría), ambas por
+     debajo del umbral consciente y apagadas bajo los datos. */
+  --sec-dot:           oklch(0.55 0.04 255 / 0.08);  /* punto del dot grid */
+  --sec-dot-size:      16px;                          /* celda del grid */
+  --sec-edge-light:    oklch(0.97 0 0 / 0.05);        /* luz física superior */
+  --sec-grain-opacity: 0.03;                          /* ruido (0.025–0.035) */
+  --sec-spark-baseline: oklch(0.55 0.04 255 / 0.30);  /* suelo del sparkline */
+
   /* Mask del backdrop del hero — fade del fondo en el tercio inferior con
      curva ease-out aproximada por stops. La técnica: aplicar como
      `mask-image` al pseudo-element `::before` del hero, cuyo fondo es la
