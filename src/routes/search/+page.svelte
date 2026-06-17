@@ -12,6 +12,7 @@
    *     getPlaylists() client-side (mismo cache que /library).
    *   - staleTime 30s, gcTime 60s — searches son volátiles.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { untrack } from 'svelte';
@@ -254,9 +255,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>{urlQuery ? `${urlQuery} · Buscar` : 'Buscar'} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={urlQuery ? [urlQuery, 'Buscar'] : ['Buscar']} />
 
 <div class="search-page">
   <header class="header">

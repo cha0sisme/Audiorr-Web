@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { goto } from '$app/navigation';
   import FloatingInput from '$components/shared/FloatingInput.svelte';
   import Button from '$components/shared/Button.svelte';
@@ -79,9 +80,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Conectar · Audiorr</title>
-</svelte:head>
+<PageTitle segments={['Conectar']} />
 
 <div class="login-page">
   <div class="card">

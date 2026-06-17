@@ -15,6 +15,7 @@
    * Las playlists destacadas (Editorial=true) se gestionan en
    * `/housekeeping/editorial`. Aquí solo las consumimos.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     ArrowUp,
@@ -247,9 +248,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Portada · Editorial</title>
-</svelte:head>
+<PageTitle segments={['Portada', 'Housekeeping']} />
 
 <AdminPanel title="Tu portada" loading={isLoading}>
   {#snippet info()}

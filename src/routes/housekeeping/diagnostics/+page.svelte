@@ -16,6 +16,7 @@
    * Carga inicial `?limit=200` + `/sessions`. Después solo se mueven cosas
    * por bus reactivo — sin re-fetch por defecto.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { cubicOut, cubicIn } from 'svelte/easing';
@@ -541,6 +542,8 @@
     };
   }
 </script>
+
+<PageTitle segments={['Diagnósticos', 'Housekeeping']} />
 
 <div class="dg-shell">
   <!-- Mini toolbar: el contexto "Diagnostics" lo da el tab del housekeeping

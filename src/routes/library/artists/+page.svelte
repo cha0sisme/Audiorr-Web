@@ -14,6 +14,7 @@
    * estaba ahí queda obsoleta para 'artists' (los álbumes/playlists siguen
    * usándola).
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { CaretRight } from 'phosphor-svelte';
   import * as nav from '$services/NavidromeService';
   import { createQuery } from '@tanstack/svelte-query';
@@ -52,9 +53,7 @@
   const total = $derived(artistsQ.data?.length ?? 0);
 </script>
 
-<svelte:head>
-  <title>Todos los artistas · Audiorr</title>
-</svelte:head>
+<PageTitle segments={['Todos los artistas']} />
 
 <div class="page">
   <header class="page-header">

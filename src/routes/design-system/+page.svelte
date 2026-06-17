@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import Button from '$components/shared/Button.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import Toggle from '$components/shared/Toggle.svelte';
@@ -180,6 +181,8 @@
     { name: 'info',    solid: 'var(--status-info)',    bg: 'var(--status-info-bg)',    text: 'var(--status-info-text)' }
   ];
 </script>
+
+<PageTitle segments={['Design System']} />
 
 <div class="page">
   <header class="hero">

@@ -12,6 +12,7 @@
    *     sus propias rutas: /library/daily-mixes, /smart-playlists,
    *     /my-playlists).
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { error } from '@sveltejs/kit';
   import { createQuery } from '@tanstack/svelte-query';
@@ -69,9 +70,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>{title} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[title]} />
 
 <SeeAllGrid {title} kind="playlist">
   {#each items as p (p.id)}

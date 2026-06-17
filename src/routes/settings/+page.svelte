@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { theme } from '$stores/theme.svelte';
   import { audioSettings } from '$stores/audio-settings.svelte';
   import Toggle from '$components/shared/Toggle.svelte';
@@ -7,6 +8,8 @@
   let isDark = $derived(theme.current === 'dark');
   let useReplayGain = $derived(audioSettings.useReplayGain);
 </script>
+
+<PageTitle segments={['Ajustes']} />
 
 <div class="page">
   <header>

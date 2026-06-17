@@ -14,6 +14,7 @@
    * El endpoint de preview devolverá 404 hasta que el backend actualizado esté
    * desplegado — en ese caso se muestra un aviso claro en el panel.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { Check, ArrowsClockwise, Warning, Image, PaintBrush } from 'phosphor-svelte';
   import {
@@ -191,9 +192,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Covers · Housekeeping</title>
-</svelte:head>
+<PageTitle segments={['Covers', 'Housekeeping']} />
 
 <AdminPanel
   title="Portadas de playlists inteligentes"

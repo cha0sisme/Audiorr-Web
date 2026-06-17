@@ -13,6 +13,7 @@
    * (vinilo con groove animation, no caricatura), CTA primaria clara.
    * Mucho whitespace, bajo contraste cromático.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { ArrowClockwise, ArrowLeft } from 'phosphor-svelte';
@@ -63,9 +64,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>{status} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[`${status}`]} />
 
 <div class="error-page">
   <div class="vinyl-wrap" aria-hidden="true">

@@ -5,6 +5,7 @@
    * detail → si llegas desde el carrusel "Aparece en" la query ya está en
    * cache y la página renderiza instantáneo.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import SeeAllGrid from '$components/shared/SeeAllGrid.svelte';
@@ -42,9 +43,7 @@
   const title = $derived(artist ? `Aparece en` : 'Aparece en');
 </script>
 
-<svelte:head>
-  <title>{artist?.name ?? 'Artista'} · Aparece en · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[artist?.name ?? 'Artista', 'Aparece en']} />
 
 {#if collabsQ.isPending || artistQ.isPending}
   <div class="page-loading">

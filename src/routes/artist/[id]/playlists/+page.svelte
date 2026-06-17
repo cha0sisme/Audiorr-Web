@@ -6,6 +6,7 @@
    * detail del artista, así que si el usuario llega aquí desde el carrusel
    * la query ya está en cache y se renderiza instantáneo.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import SeeAllGrid from '$components/shared/SeeAllGrid.svelte';
@@ -46,9 +47,7 @@
   const title = $derived(artist ? `Playlists con ${artist.name}` : 'Playlists');
 </script>
 
-<svelte:head>
-  <title>{title} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[artist?.name ?? 'Artista', 'Listas']} />
 
 {#if artistPlaylistsQ.isPending || artistQ.isPending}
   <div class="page-loading">

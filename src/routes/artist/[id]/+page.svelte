@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { User, DotsThree, Plus, ListPlus, Shuffle, Pause } from 'phosphor-svelte';
@@ -290,9 +291,7 @@
   ]);
 </script>
 
-<svelte:head>
-  <title>{artist?.name ?? 'Artista'} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[artist?.name ?? 'Artista']} />
 
 <div class="artist-detail">
   <header class="hero" style:--hero-bg={heroBg}>

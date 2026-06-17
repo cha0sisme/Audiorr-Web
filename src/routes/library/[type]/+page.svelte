@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { error } from '@sveltejs/kit';
   import { createQuery } from '@tanstack/svelte-query';
@@ -166,9 +167,7 @@
   );
 </script>
 
-<svelte:head>
-  <title>{title} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[title]} />
 
 {#snippet createPlaylistAction()}
   <CreatePlaylistButton />

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery } from '@tanstack/svelte-query';
@@ -328,9 +329,7 @@
   ]);
 </script>
 
-<svelte:head>
-  <title>{album?.name ?? 'Álbum'} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[album?.name ?? 'Álbum']} />
 
 <div class="album-detail">
   <header class="hero" style:--hero-bg={heroBg}>

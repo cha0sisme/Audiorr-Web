@@ -9,6 +9,7 @@
    * existe (primer uso), dispara un sync y reintenta. El estado de fallo
    * cubre un backend desplegado sin la feature.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { Star, ArrowsClockwise } from 'phosphor-svelte';
@@ -43,9 +44,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>Favoritos · Audiorr</title>
-</svelte:head>
+<PageTitle segments={['Favoritos']} />
 
 <div class="fav-gate">
   {#if failed}

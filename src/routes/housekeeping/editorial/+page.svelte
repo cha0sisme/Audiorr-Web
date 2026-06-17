@@ -15,6 +15,7 @@
    *   - Cover picker visual con miniaturas (5 estilos) — solo cuando es
    *     Editorial.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     MagnifyingGlass,
@@ -262,9 +263,7 @@
   const thisIsEntries = $derived(Object.entries(thisIsQ.data ?? {}));
 </script>
 
-<svelte:head>
-  <title>Editorial · Housekeeping</title>
-</svelte:head>
+<PageTitle segments={['Editorial', 'Housekeeping']} />
 
 <AdminPanel title="Playlists destacadas" loading={isLoading}>
   {#snippet info()}

@@ -8,6 +8,7 @@
    * `getAlbumList2?type=byGenre` no expone parámetros de orden, así que el
    * sort lo hacemos cliente (datasets <= 100 álbumes — trivial).
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import SeeAllGrid from '$components/shared/SeeAllGrid.svelte';
@@ -68,9 +69,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>{genre} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[genre]} />
 
 {#snippet sortAction()}
   <label class="sort">

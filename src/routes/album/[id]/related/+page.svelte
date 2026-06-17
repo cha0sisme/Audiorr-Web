@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
@@ -33,9 +34,7 @@
   const related = $derived(relatedQ.data ?? []);
 </script>
 
-<svelte:head>
-  <title>{album?.name ?? 'Álbum'} · Relacionados · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[album?.name ?? 'Álbum', 'Relacionados']} />
 
 <div class="page">
   <header class="header">

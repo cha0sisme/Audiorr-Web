@@ -11,6 +11,7 @@
    * (barato); el <video> solo se monta en la celda con hover/foco — máximo un
    * decoder vivo en GPU.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { FilmSlate, Trash, ArrowSquareOut } from 'phosphor-svelte';
   import {
@@ -81,9 +82,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Artwork · Housekeeping · Audiorr</title>
-</svelte:head>
+<PageTitle segments={['Artwork', 'Housekeeping']} />
 
 <AdminPanel
   title="Animated artwork"

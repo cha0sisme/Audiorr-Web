@@ -27,6 +27,7 @@
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { authInfo } from '$stores/auth-info.svelte';
+  import { pageTitle } from '$stores/page-title.svelte';
   import { favorites } from '$stores/favorites.svelte';
   import { fetchCanvas, resolveCanvasVideoUrl } from '$services/CanvasService';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -256,6 +257,12 @@
   }
 
   beforeNavigate((nav) => {
+    // Reset del título ANTES de montar la página destino. Si esta declara su
+    // propio <PageTitle> lo sobrescribe al montar; si no (o es una ruta futura
+    // que lo olvida), cae al default ('Audiorr') en vez de heredar el anterior.
+    // Va en beforeNavigate y no en afterNavigate: afterNavigate corre tras
+    // montar el destino y pisaría el título que este acaba de poner.
+    pageTitle.reset();
     if (!mainEl || !nav.from) return;
     scrollPositions.set(nav.from.url.pathname, mainEl.scrollTop);
   });
@@ -418,6 +425,10 @@
     };
   }
 </script>
+
+<svelte:head>
+  <title>{pageTitle.full}</title>
+</svelte:head>
 
 <QueryClientProvider client={queryClient}>
   {#if isBareRoute}

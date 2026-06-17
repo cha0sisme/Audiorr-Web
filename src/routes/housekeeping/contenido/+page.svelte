@@ -15,6 +15,7 @@
    *   c) "Comprobar" → fetchSpotifyCanvas → preview del .mp4.
    *   d) "Asignar" → saveCanvasEntry persistente.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
     MagnifyingGlass,
@@ -168,9 +169,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Contenido · Housekeeping</title>
-</svelte:head>
+<PageTitle segments={['Contenido', 'Housekeeping']} />
 
 <!-- ════════════════════════════════════════════════════════════════════
      1. Asignar Canvas a una canción

@@ -14,6 +14,7 @@
    * Datos: /api/stats/user-stats. Devuelve shape completo con totales 0 y
    * arrays vacíos cuando no hay scrobbles.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { MusicNote, ChartBar, User } from 'phosphor-svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
@@ -87,9 +88,7 @@
   });
 </script>
 
-<svelte:head>
-  <title>{username || 'Perfil'} · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[username || 'Perfil']} />
 
 <div class="profile">
   <!-- Hero — mismo patrón que ArtistDetail/PlaylistDetail. Background del

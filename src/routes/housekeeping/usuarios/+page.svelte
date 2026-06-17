@@ -11,6 +11,7 @@
    * Datos reales: getAdminUsers (lastScrobble, avatarUrl, lastLogin) +
    * listAllSessions (sesiones por usuario). Join por username (lowercase).
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { UsersThree } from 'phosphor-svelte';
   import SecCard from '$components/housekeeping/SecCard.svelte';
@@ -180,9 +181,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Personas · Housekeeping</title>
-</svelte:head>
+<PageTitle segments={['Personas', 'Housekeeping']} />
 
 <!-- Tira de pulso (instrumento) -->
 <div class="pulse-strip">

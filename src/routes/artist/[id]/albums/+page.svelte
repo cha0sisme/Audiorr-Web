@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
@@ -22,9 +23,7 @@
   );
 </script>
 
-<svelte:head>
-  <title>{artist?.name ?? 'Artista'} · Discografía · Audiorr</title>
-</svelte:head>
+<PageTitle segments={[artist?.name ?? 'Artista', 'Discografía']} />
 
 <div class="page">
   <header class="header">

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -397,9 +398,7 @@
   );
 </script>
 
-<svelte:head>
-  <title>Tu librería · Audiorr</title>
-</svelte:head>
+<PageTitle segments={['Tu librería']} />
 
 <div class="library">
   <header class="header">

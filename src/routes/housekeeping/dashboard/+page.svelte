@@ -13,6 +13,7 @@
    * /api/stats/scrobbles-daily (verificados en prod). Sala de control: superficie
    * sólida con accent rail; lenguaje propio, distinto del card-poster de Diagnostics.
    */
+  import PageTitle from '$components/shared/PageTitle.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import {
     ShieldCheck,
@@ -315,9 +316,7 @@
   }
 </script>
 
-<svelte:head>
-  <title>Dashboard · Housekeeping</title>
-</svelte:head>
+<PageTitle segments={['Dashboard', 'Housekeeping']} />
 
 <!-- ─── Sala de control: 3 cards de estado ────────────────────────────────── -->
 <div class="sec-grid">
