@@ -113,6 +113,16 @@ export type FilterAutomationContext = {
     deeper cut (−18 dB+) produces when A's outro carries a long tail. */
 const BASS_KILL_TARGET_DEPTH = -16.0;
 
+/**
+ * v15.n — frecuencia de arranque del highpass A en la rampa anticipatoria de
+ * band 0 (vector "anticipación progresiva"). En vez del escalón pleno→startFreq
+ * de golpe, A arranca casi plena aquí (90 Hz, bajo el fundamental del kick) y
+ * trepa expInterp hasta startFreq sobre la ventana de anticipación.
+ * Calibración empírica 80–130 Hz: bajar si el arranque suena abrupto, subir si
+ * la anticipación no se oye. No pasar de 130 Hz (reintroduce escalón a t=0).
+ */
+const BAND0_ANT_ANCHOR_FREQ = 90;
+
 /** dynamicQ A bell center as a fraction of `[rampStart, rampEnd]`. */
 const DYN_Q_BELL_CENTER_A = 0.55;
 /** dynamicQ A bell width — narrower for full crossfades (0.30), wider for
@@ -190,6 +200,65 @@ const FILTERS_NOT_SET: FilterStages = {
  * 3-point sweep (start → mid @ pivot 40% → end) with expInterp for
  * frequencies and linInterp for gains.
  */
+
+/**
+ * v15.o — ganancia (dB) del lowshelf bassKill A según la forma de la rampa.
+ * `easeOut=true` aplica `p^0.65` (ease-out): reparte el descenso del bass desde
+ * el primer instante, para la rampa extendida a la anticipación (~10s) donde la
+ * sin² se percibía "rápida / no progresiva" al concentrar el gesto en p≈0.5.
+ * `easeOut=false` conserva la sin² ease-in-out legacy para la rampa NO extendida
+ * (pre-roll normal, bass swap puro), que nunca tuvo queja perceptual. Extremos
+ * invariantes en ambas curvas: p=0 → 0 dB, p=1 → BASS_KILL_TARGET_DEPTH.
+ * k=0.65 calibrable. Mirrors `DSPFilterManager.band1CoefficientA_bassKill`.
+ */
+function bassKillShapedGain(p: number, easeOut: boolean): number {
+  const cp = Math.min(1, Math.max(0, p));
+  const shaped = easeOut ? Math.pow(cp, 0.65) : Math.sin((cp * Math.PI) / 2) ** 2;
+  return shaped * BASS_KILL_TARGET_DEPTH;
+}
+
+/**
+ * v15.p — gain (dB) del mid-scoop A (band 2) en tiempo `t`. Único punto de
+ * cálculo del scoop — lo comparten el branch pre-roll y el main fade (antes
+ * duplicado en dos sitios). Curva de tres tramos:
+ *   - `[rampStart, pivot)` (pivot al 40%): rampa `startGain → holdTarget`.
+ *   - `[pivot, tailStart)` (tailStart al 82%): rampa `holdTarget → endGain`.
+ *   - `[tailStart, rampEnd]`: tail-easing `endGain → holdTarget` — en el último
+ *     18% el scoop deja de profundizar y se relaja desde su pico de vuelta hacia
+ *     holdTarget, para que A no llegue al swap con el mid-scoop clavado en su
+ *     punto más profundo. holdTarget (no 0): el hueco para la voz de B se
+ *     mantiene pero deja de crecer. Paridad con el tail-easing del high-shelf A.
+ * holdTarget = startGain + (endGain − startGain)·0.35. Ventana degenerada
+ * (rampEnd ≤ rampStart): scoop neutro (startGain), no endGain.
+ * Mirrors `CrossfadeExecutor.swift midScoopGainA`.
+ */
+function midScoopGainA(
+  t: number,
+  startGain: number,
+  endGain: number,
+  rampStart: number,
+  rampEnd: number
+): number {
+  const totalDur = rampEnd - rampStart;
+  const holdTarget = startGain + (endGain - startGain) * 0.35;
+  if (totalDur <= 0) return startGain;
+  const pivot = rampStart + totalDur * 0.4;
+  const tailStart = rampEnd - totalDur * 0.18;
+  if (t < pivot) {
+    const denom = pivot - rampStart;
+    const p = denom > 0 ? (t - rampStart) / denom : 1.0;
+    return linInterp(startGain, holdTarget, p);
+  } else if (t < tailStart) {
+    const denom = tailStart - pivot;
+    const p = denom > 0 ? (t - pivot) / denom : 1.0;
+    return linInterp(holdTarget, endGain, p);
+  } else {
+    const denom = rampEnd - tailStart;
+    const p = denom > 0 ? (t - tailStart) / denom : 1.0;
+    return linInterp(endGain, holdTarget, p);
+  }
+}
+
 export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterStages {
   const {
     config,
@@ -257,6 +326,23 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
     config.anticipationTime >= 1.5 &&
     bassKillExtendToAnticipationTypeOK;
 
+  // ── v15.n — gate del vector "anticipación progresiva de band 0 A" ──
+  // En presets con highpass audible (startFreq > 60) A saltaba de pleno a
+  // startFreq de golpe al entrar el pre-roll, percibido como anticipación
+  // brusca / no progresiva. Cuando este gate aplica, un branch dedicado rampea
+  // band 0 expInterp(ancla → startFreq) en [anticipationStart, preRollStart].
+  // Se excluyen los casos con bassKill ya extendido a la anticipación
+  // (`!bassKillExtendToAnticipation`) para no acumular doble gesto (A perdiendo
+  // graves + abriendo highpass a la vez) — ese caso lo cubre el branch bassKill
+  // a partir de v15.p. `preRollActive` ya garantiza !CUT && !useLowpassA &&
+  // filterLead ≥ 0.6 (los no-overlap retornan antes).
+  const band0AntExtendActive =
+    preRollActive &&
+    !bassKillExtendToAnticipation &&
+    preset.highpassA.startFreq > 60 &&
+    config.anticipationTime >= 1.5 &&
+    bassKillExtendToAnticipationTypeOK;
+
   // bassKill A rampStart adelantado:
   //   - Si bassKillExtendToAnticipation: snap al downbeat más cercano de
   //     `anticipationStartTime` (cap 1 bar backward).
@@ -315,8 +401,22 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
       bassKillRampStartOverride !== undefined
     ) {
       return applyBassKillAnticipationExtension(t, ctx, {
-        bassKillRampStart: bassKillRampStartOverride
+        bassKillRampStart: bassKillRampStartOverride,
+        preRollStart
       });
+    }
+    // ── v15.n — band 0 anticipation extension (sin bassKill) ──
+    // Excluyente con el branch bassKill de arriba por construcción del gate
+    // (band0AntExtendActive ⟹ !bassKillExtendToAnticipation). Rampa band 0
+    // expInterp(ancla → startFreq) en [anticipationStart, preRollStart]; bands
+    // 1/2/3 en initial state. En preRollStart entrega startFreq → empalme C0
+    // con el pre-roll branch (que pone startFreq constante).
+    if (
+      band0AntExtendActive &&
+      t >= timings.anticipationStartTime &&
+      t < preRollStart
+    ) {
+      return applyBand0AnticipationExtension(t, ctx, { preRollStart });
     }
     // Pre-roll window OR pre-pre-roll (no filters yet).
     if (preRollActive && t >= preRollStart) {
@@ -325,7 +425,8 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
         preRollDur,
         midScoopRampStartOverride,
         highShelfRampStartOverride,
-        bassKillRampStartOverride
+        bassKillRampStartOverride,
+        bassKillExtendToAnticipation
       });
     }
     return FILTERS_NOT_SET;
@@ -394,10 +495,8 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
       const bkRampStart = bassKillRampStartOverride ?? rampStart;
       const totalDur = rampEnd - bkRampStart;
       if (totalDur > 0) {
-        const p = Math.min(1, Math.max(0, (t - bkRampStart) / totalDur));
-        const angle = (p * Math.PI) / 2;
-        const sinSq = Math.sin(angle) * Math.sin(angle);
-        gain = sinSq * BASS_KILL_TARGET_DEPTH;
+        const p = (t - bkRampStart) / totalDur;
+        gain = bassKillShapedGain(p, bassKillExtendToAnticipation);
       } else {
         gain = 0;
       }
@@ -423,19 +522,7 @@ export function applyFiltersA(t: number, ctx: FilterAutomationContext): FilterSt
   if (useMidScoop && preset.midScoopA) {
     const ms = preset.midScoopA;
     const msRampStart = midScoopRampStartOverride ?? rampStart;
-    const msTotalDur = rampEnd - msRampStart;
-    const msPivot = msRampStart + msTotalDur * 0.40;
-    const holdTarget = ms.startGain + (ms.endGain - ms.startGain) * 0.35;
-    let gain: number;
-    if (t < msPivot) {
-      const denom = msPivot - msRampStart;
-      const p = denom > 0 ? (t - msRampStart) / denom : 1.0;
-      gain = linInterp(ms.startGain, holdTarget, p);
-    } else {
-      const denom = rampEnd - msPivot;
-      const p = denom > 0 ? (t - msPivot) / denom : 1.0;
-      gain = linInterp(holdTarget, ms.endGain, p);
-    }
+    const gain = midScoopGainA(t, ms.startGain, ms.endGain, msRampStart, rampEnd);
     band2A = calcPeaking(ms.frequency, gain, ms.bandwidth, sampleRate);
   }
 
@@ -491,6 +578,7 @@ function applyPreRollA(
     midScoopRampStartOverride: number | undefined;
     highShelfRampStartOverride: number | undefined;
     bassKillRampStartOverride: number | undefined;
+    bassKillExtendToAnticipation: boolean;
   }
 ): FilterStages {
   const { preset, sampleRate, useBassManagement, useMidScoop, useHighShelfCut, timings } = ctx;
@@ -499,7 +587,8 @@ function applyPreRollA(
     preRollDur,
     midScoopRampStartOverride,
     highShelfRampStartOverride,
-    bassKillRampStartOverride
+    bassKillRampStartOverride,
+    bassKillExtendToAnticipation
   } = args;
   const rampEnd = timings.transitionEndTime;
   const p = (t - preRollStart) / preRollDur;
@@ -528,10 +617,8 @@ function applyPreRollA(
     if (ctx.useBassKill && bassKillRampStartOverride !== undefined) {
       const totalDur = rampEnd - bassKillRampStartOverride;
       if (totalDur > 0) {
-        const bkP = Math.min(1, Math.max(0, (t - bassKillRampStartOverride) / totalDur));
-        const angle = (bkP * Math.PI) / 2;
-        const sinSq = Math.sin(angle) * Math.sin(angle);
-        const gain = sinSq * BASS_KILL_TARGET_DEPTH;
+        const bkP = (t - bassKillRampStartOverride) / totalDur;
+        const gain = bassKillShapedGain(bkP, bassKillExtendToAnticipation);
         band1A = calcLowShelf(ls.frequency, gain, 1.0, sampleRate);
       }
     } else {
@@ -546,15 +633,7 @@ function applyPreRollA(
   let band2A: BiquadCoefficients = PASSTHROUGH;
   if (useMidScoop && preset.midScoopA && midScoopRampStartOverride !== undefined) {
     const ms = preset.midScoopA;
-    const msTotalDur = rampEnd - midScoopRampStartOverride;
-    const msPivot = midScoopRampStartOverride + msTotalDur * 0.40;
-    const holdTarget = ms.startGain + (ms.endGain - ms.startGain) * 0.35;
-    let gain = ms.startGain;
-    if (t < msPivot && msPivot > midScoopRampStartOverride) {
-      const denom = msPivot - midScoopRampStartOverride;
-      const pp = Math.min(1, Math.max(0, (t - midScoopRampStartOverride) / denom));
-      gain = linInterp(ms.startGain, holdTarget, pp);
-    }
+    const gain = midScoopGainA(t, ms.startGain, ms.endGain, midScoopRampStartOverride, rampEnd);
     band2A = calcPeaking(ms.frequency, gain, ms.bandwidth, sampleRate);
   }
 
@@ -596,22 +675,35 @@ function applyPreRollA(
 function applyBassKillAnticipationExtension(
   t: number,
   ctx: FilterAutomationContext,
-  args: { bassKillRampStart: number }
+  args: { bassKillRampStart: number; preRollStart: number }
 ): FilterStages {
   const { config, preset, sampleRate, useLowpassA, useMidScoop, useHighShelfCut, timings } = ctx;
-  const { bassKillRampStart } = args;
+  const { bassKillRampStart, preRollStart } = args;
   const isCutTransition =
     config.transitionType === 'CUT' || config.transitionType === 'CUT_A_FADE_IN_B';
   const rampEnd = timings.transitionEndTime;
 
-  // ── Band 0: highpass(startFreq) or lowpass(startFreq) in initial state.
+  // ── Band 0: rampa expInterp(ancla → startFreq) si startFreq>60, else initial.
+  // v15.p — band 0 highpass A ya no queda congelado en startFreq mientras band 1
+  // (bassKill) rampea: arrancaría como escalón seco al entrar el pre-roll. Ahora
+  // rampea del ancla baja hasta startFreq igual que el caso sin bassKill (v15.n),
+  // y en preRollStart entrega startFreq → empalme C0 con el plateau band 0. Solo
+  // presets audibles (startFreq>60); el resto mantiene el initial congelado.
   let band0A: BiquadCoefficients = PASSTHROUGH;
   if (!isCutTransition) {
     if (useLowpassA && preset.lowpassA) {
       band0A = calcLowpass(preset.lowpassA.startFreq, preset.lowpassA.q, sampleRate);
     } else {
       const hp = preset.highpassA;
-      band0A = calcHighpass(hp.startFreq, hp.q, sampleRate);
+      if (hp.startFreq > 60) {
+        const antDur = preRollStart - timings.anticipationStartTime;
+        const pAnt =
+          antDur > 0 ? Math.min(1, Math.max(0, (t - timings.anticipationStartTime) / antDur)) : 1.0;
+        const freqA = expInterp(BAND0_ANT_ANCHOR_FREQ, hp.startFreq, pAnt);
+        band0A = calcHighpass(freqA, hp.q, sampleRate);
+      } else {
+        band0A = calcHighpass(hp.startFreq, hp.q, sampleRate);
+      }
     }
   }
 
@@ -621,10 +713,9 @@ function applyBassKillAnticipationExtension(
     const ls = preset.lowshelfA;
     const totalDur = rampEnd - bassKillRampStart;
     if (totalDur > 0) {
-      const p = Math.min(1, Math.max(0, (t - bassKillRampStart) / totalDur));
-      const angle = (p * Math.PI) / 2;
-      const sinSq = Math.sin(angle) * Math.sin(angle);
-      const gain = sinSq * BASS_KILL_TARGET_DEPTH;
+      // easeOut=true: este branch es SIEMPRE la rampa extendida a la anticipación.
+      const p = (t - bassKillRampStart) / totalDur;
+      const gain = bassKillShapedGain(p, true);
       band1A = calcLowShelf(ls.frequency, gain, 1.0, sampleRate);
     }
   }
@@ -639,6 +730,56 @@ function applyBassKillAnticipationExtension(
   // ── Band 3: highShelf in initial state (startGain).
   let band3A: BiquadCoefficients = PASSTHROUGH;
   if (!isCutTransition && useHighShelfCut && preset.highShelfA) {
+    const hs = preset.highShelfA;
+    band3A = calcHighShelf(hs.frequency, hs.startGain, 1.0, sampleRate);
+  }
+
+  return { set: true, stages: [band0A, band1A, band2A, band3A] };
+}
+
+/**
+ * v15.n — band 0 anticipation extension (caso SIN bassKill). Rampa band 0
+ * highpass expInterp(ancla → startFreq) sobre `[anticipationStart,
+ * preRollStart]` para repartir el gesto del highpass en vez del escalón
+ * pleno→startFreq al entrar el pre-roll. Bands 1/2/3 quedan en initial state;
+ * band 1 sin la cosSquared porque aquí no hay bassKill (gate ⟹
+ * !bassKillExtendToAnticipation). En preRollStart entrega startFreq con la Q
+ * del preset → empalme C0 con el pre-roll branch (startFreq constante). Solo se
+ * invoca en tipos blendy (gate ⟹ !CUT) → band 0/2/3 sin guarda de CUT. Mirrors
+ * iOS CrossfadeExecutor.swift band0AntExtend branch.
+ */
+function applyBand0AnticipationExtension(
+  t: number,
+  ctx: FilterAutomationContext,
+  args: { preRollStart: number }
+): FilterStages {
+  const { preset, sampleRate, useBassManagement, useMidScoop, useHighShelfCut, timings } = ctx;
+  const { preRollStart } = args;
+
+  // ── Band 0: highpass rampando del ancla baja hasta startFreq.
+  const hp = preset.highpassA;
+  const antDur = preRollStart - timings.anticipationStartTime;
+  const pAnt =
+    antDur > 0 ? Math.min(1, Math.max(0, (t - timings.anticipationStartTime) / antDur)) : 1.0;
+  const freqA = expInterp(BAND0_ANT_ANCHOR_FREQ, hp.startFreq, pAnt);
+  const band0A = calcHighpass(freqA, hp.q, sampleRate);
+
+  // ── Band 1: lowshelf en initial state (startGain). Sin bassKill aquí.
+  let band1A: BiquadCoefficients = PASSTHROUGH;
+  if (useBassManagement && preset.lowshelfA) {
+    band1A = calcLowShelf(preset.lowshelfA.frequency, preset.lowshelfA.startGain, 1.0, sampleRate);
+  }
+
+  // ── Band 2: midScoop en initial state (startGain).
+  let band2A: BiquadCoefficients = PASSTHROUGH;
+  if (useMidScoop && preset.midScoopA) {
+    const ms = preset.midScoopA;
+    band2A = calcPeaking(ms.frequency, ms.startGain, ms.bandwidth, sampleRate);
+  }
+
+  // ── Band 3: highShelf en initial state (startGain).
+  let band3A: BiquadCoefficients = PASSTHROUGH;
+  if (useHighShelfCut && preset.highShelfA) {
     const hs = preset.highShelfA;
     band3A = calcHighShelf(hs.frequency, hs.startGain, 1.0, sampleRate);
   }
