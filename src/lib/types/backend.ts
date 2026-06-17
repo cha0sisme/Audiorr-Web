@@ -887,3 +887,34 @@ export const CloseSessionsResultSchema = z.object({
   closed: z.number()
 });
 export type CloseSessionsResult = z.infer<typeof CloseSessionsResultSchema>;
+
+// ============================================================================
+// Álbumes relacionados — GET /api/related-albums?albumId=<id>&limit=12
+// ============================================================================
+
+/**
+ * Un álbum relacionado devuelto por el endpoint. El backend lo resuelve vía
+ * Subsonic `getSimilarSongs2.view` (Navidrome → Last.fm) y garantiza que
+ * todos los álbumes existen en la biblioteca y son reproducibles.
+ *
+ * `coverArt` es el id Subsonic de la portada → getCoverArtUrl(coverArt, 300).
+ * `score` es el número de canciones similares que apuntaron a ese álbum
+ * (métrica de relevancia interna, no se muestra en UI).
+ */
+export const RelatedAlbumSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  artist: z.string(),
+  artistId: z.string().optional(),
+  coverArt: z.string().optional(),
+  score: z.number()
+});
+export type RelatedAlbum = z.infer<typeof RelatedAlbumSchema>;
+
+export const RelatedAlbumsResponseSchema = z.object({
+  albumId: z.string(),
+  relatedAlbums: z.array(RelatedAlbumSchema),
+  source: z.literal('subsonic'),
+  cached: z.boolean()
+});
+export type RelatedAlbumsResponse = z.infer<typeof RelatedAlbumsResponseSchema>;

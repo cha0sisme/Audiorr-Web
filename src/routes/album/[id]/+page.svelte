@@ -18,6 +18,9 @@
   import { songToListItem, type SongListItem } from '$utils/navidrome-mappers';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
+  import { fetchRelatedAlbums } from '$services/RelatedAlbumsService';
+  import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
+  import AlbumCard from '$components/shared/AlbumCard.svelte';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
@@ -97,6 +100,20 @@
   }));
 
   const artworkVideoUrl = $derived(resolveArtworkVideoUrl(artworkQ.data ?? null));
+
+  // Álbumes relacionados — footer estilo Apple Music.
+  // El backend resuelve vía getSimilarSongs2.view → Last.fm → filtra a biblioteca.
+  // 404/5xx → array vacío silencioso (sección no renderizada).
+  // Inerte mientras el backend no tenga el commit 86e043f desplegado.
+  const relatedAlbumsQ = createQuery(() => ({
+    queryKey: ['relatedAlbums', albumId],
+    queryFn: () => fetchRelatedAlbums(albumId),
+    enabled: !!albumId,
+    staleTime: 1000 * 60 * 30,
+    retry: false
+  }));
+
+  const relatedAlbums = $derived(relatedAlbumsQ.data ?? []);
 
   // Fallback al cover estático si el <video> falla al cargar (evento error).
   // Solo se activa si realmente hubo un intento de cargar un vídeo.
@@ -496,6 +513,28 @@
     </div>
   {/if}
 
+  {#if relatedAlbums.length > 0}
+    <div class="related-albums">
+      <HorizontalScrollSection
+        title="Álbumes relacionados"
+        items={relatedAlbums}
+      >
+        {#snippet item(ra)}
+          <AlbumCard
+            id={ra.id}
+            title={ra.name}
+            artist={ra.artist}
+            coverUrl={ra.coverArt ? getCoverArtUrl(ra.coverArt, 300) : undefined}
+            href={`/album/${ra.id}`}
+            prefetchHero={() => {
+              if (ra.coverArt) getCoverArtUrl(ra.coverArt, 600);
+            }}
+          />
+        {/snippet}
+      </HorizontalScrollSection>
+    </div>
+  {/if}
+
   <div class="bottom-spacer" aria-hidden="true"></div>
 </div>
 
@@ -800,6 +839,12 @@
     padding: 0 var(--space-4);
     font-size: var(--text-sm);
     color: var(--text-tertiary);
+  }
+
+  /* Sección footer "Álbumes relacionados" — separación del listado de pistas. */
+  .related-albums {
+    margin-top: var(--space-8);
+    padding-bottom: var(--space-4);
   }
 
   .bottom-spacer { height: 120px; }
