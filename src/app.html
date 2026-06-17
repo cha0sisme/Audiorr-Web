@@ -6,9 +6,9 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0a121a" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#fafdff" media="(prefers-color-scheme: light)" />
-    <!-- El <title> lo gestiona el layout raíz vía <svelte:head> (store pageTitle),
-         inyectado en %sveltekit.head%. Sin título estático aquí para no duplicar
-         el elemento en SSR. -->
+    <!-- Sin título estático aquí: lo aporta el layout raíz (store pageTitle) y
+         SvelteKit lo inyecta en el head al renderizar. Tenerlo aquí lo
+         duplicaría en SSR. -->
 
     <link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
     <link rel="icon" type="image/png" sizes="96x96" href="%sveltekit.assets%/favicon-96x96.png" />
