@@ -21,6 +21,14 @@ export function registerQueryClient(qc: QueryClient): void {
   _client = qc;
 }
 
+/** Acceso al QueryClient global para servicios plain TS que necesiten
+    prefetch/invalidate fuera del context de Svelte (p. ej. el prefetch
+    on-hover de álbumes relacionados desde AlbumCard). `null` antes de que
+    +layout.svelte lo registre. */
+export function getQueryClient(): QueryClient | null {
+  return _client;
+}
+
 /** Marca la query `['recentContexts', ...]` como stale → TanStack refetchea
     al siguiente acceso (cuando el usuario navegue al home, o si ya está
     observada por un componente montado, inmediatamente). */

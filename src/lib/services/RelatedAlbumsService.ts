@@ -15,12 +15,18 @@
  */
 
 import { backendService } from '$services/BackendService.svelte';
+import { getQueryClient } from '$services/query-bus';
 import {
   RelatedAlbumsResponseSchema,
   type RelatedAlbum
 } from '$types/backend';
 
 export type { RelatedAlbum };
+
+/** staleTime compartido con la query de AlbumDetail (`['relatedAlbums', id]`).
+    Debe coincidir para que el prefetch on-hover quede "fresco" cuando el detalle
+    monte su `createQuery` → render instantáneo sin refetch. */
+const RELATED_STALE_MS = 1000 * 60 * 30;
 
 /**
  * Obtiene los álbumes relacionados para un albumId de Navidrome.
@@ -46,4 +52,26 @@ export async function fetchRelatedAlbums(
     // 404 (backend sin desplegar), 5xx o network error → sección oculta.
     return [];
   }
+}
+
+/**
+ * Pre-carga los álbumes relacionados de un albumId en la caché de TanStack,
+ * usando la MISMA queryKey que AlbumDetail (`['relatedAlbums', id]`). Se invoca
+ * on-hover desde las cards: cuando el usuario navega al detalle, el dato ya está
+ * fresco → la sección renderiza al instante en lugar de esperar el round-trip
+ * (getAlbum + 3× getSimilarSongs2 → Last.fm) del primer cache miss del backend.
+ *
+ * `prefetchQuery` respeta `staleTime`, así que repetir el hover sobre el mismo
+ * álbum dentro de la ventana es un no-op (no duplica peticiones). No-op también
+ * antes de que +layout.svelte registre el QueryClient.
+ */
+export function prefetchRelatedAlbums(albumId: string): void {
+  const qc = getQueryClient();
+  if (!qc || !albumId) return;
+  void qc.prefetchQuery({
+    queryKey: ['relatedAlbums', albumId],
+    queryFn: () => fetchRelatedAlbums(albumId),
+    staleTime: RELATED_STALE_MS,
+    retry: false
+  });
 }

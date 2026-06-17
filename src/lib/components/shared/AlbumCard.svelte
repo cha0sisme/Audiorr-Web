@@ -8,6 +8,8 @@
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import * as nav from '$services/NavidromeService';
+  import { prefetchRelatedAlbums } from '$services/RelatedAlbumsService';
+  import { onDestroy } from 'svelte';
 
   type Props = HTMLAnchorAttributes & {
     /** ID del álbum — necesario para detectar si el playback viene de aquí
@@ -61,6 +63,24 @@
 
   let coverEl: HTMLDivElement | undefined = $state();
 
+  /** Hover-intent para el prefetch de álbumes relacionados. A diferencia del
+      prefetchHero del cover (barato, dispara inmediato), este calienta la query
+      `['relatedAlbums', id]` cuyo cache miss en backend toca Last.fm — caro. Por
+      eso solo dispara si el cursor se queda ~200 ms sobre la card (intención real
+      de entrar), no en barridos rápidos por una grid. */
+  const RELATED_HOVER_INTENT_MS = 200;
+  let relatedTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function onPointerEnter() {
+    prefetchHero?.();
+    clearTimeout(relatedTimer);
+    relatedTimer = setTimeout(() => prefetchRelatedAlbums(id), RELATED_HOVER_INTENT_MS);
+  }
+  function onPointerLeave() {
+    clearTimeout(relatedTimer);
+  }
+  onDestroy(() => clearTimeout(relatedTimer));
+
   /** Setea view-transition-name SOLO en el cover de ESTA card al click.
       Crítico porque el mismo álbum puede aparecer en varias rows del Home —
       sin esto, múltiples elementos compartirían el mismo name y el browser
@@ -104,8 +124,10 @@
   class="card"
   {href}
   onclick={handleClick}
-  onmouseenter={prefetchHero}
-  onfocus={prefetchHero}
+  onmouseenter={onPointerEnter}
+  onmouseleave={onPointerLeave}
+  onfocus={onPointerEnter}
+  onblur={onPointerLeave}
   {...rest}
 >
   <div class="cover-wrap">

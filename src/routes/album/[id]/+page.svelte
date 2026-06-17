@@ -115,6 +115,13 @@
 
   const relatedAlbums = $derived(relatedAlbumsQ.data ?? []);
 
+  // Skeleton mientras resuelve el primer cache miss del backend (getAlbum +
+  // 3× getSimilarSongs2 → Last.fm, varios segundos). Si el prefetch on-hover
+  // ya pobló la caché, la query arranca en 'success' y este estado se salta
+  // → render instantáneo. Placeholders dummy para el grid de HorizontalScrollSection.
+  const RELATED_SKELETON = Array.from({ length: 8 }, (_, i) => i);
+  const relatedLoading = $derived(relatedAlbumsQ.isFetching && relatedAlbums.length === 0);
+
   // Fallback al cover estático si el <video> falla al cargar (evento error).
   // Solo se activa si realmente hubo un intento de cargar un vídeo.
   let videoLoadError = $state(false);
@@ -513,11 +520,27 @@
     </div>
   {/if}
 
-  {#if relatedAlbums.length > 0}
+  {#if relatedLoading}
+    <!-- Mientras resuelve el primer miss: título YA visible + una fila de
+         skeletons (overflow hidden → no se desborda a 2 filas). Si resuelve
+         vacío, el bloque desaparece (no hay sección "Álbumes relacionados"
+         huérfana). Mismo patrón que el skeleton de carruseles de ArtistDetail. -->
+    <div class="related-albums">
+      <header class="related-header">
+        <h2 class="related-title">Álbumes relacionados</h2>
+      </header>
+      <div class="card-row-skeleton" aria-hidden="true">
+        {#each RELATED_SKELETON as _}
+          <div class="card-sk"></div>
+        {/each}
+      </div>
+    </div>
+  {:else if relatedAlbums.length > 0}
     <div class="related-albums">
       <HorizontalScrollSection
         title="Álbumes relacionados"
         items={relatedAlbums}
+        seeAllHref={`/album/${albumId}/related`}
       >
         {#snippet item(ra)}
           <AlbumCard
@@ -845,6 +868,49 @@
   .related-albums {
     margin-top: var(--space-8);
     padding-bottom: var(--space-4);
+  }
+
+  /* Header del skeleton — mismo tamaño/posición que el title de
+     HorizontalScrollSection para que no haya salto cuando llegan los datos. */
+  .related-header {
+    padding: 0 var(--space-6);
+    margin-bottom: var(--space-3);
+  }
+  .related-title {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: var(--tracking-display);
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  /* Una sola fila de skeletons (overflow hidden recorta lo que no cabe) —
+     replica el carrusel de AlbumCards 180px mientras resuelve el primer miss. */
+  .card-row-skeleton {
+    display: flex;
+    gap: var(--space-5);
+    padding: 0 var(--space-6);
+    overflow: hidden;
+  }
+  .card-sk {
+    flex: 0 0 180px;
+    aspect-ratio: 1;
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  @media (max-width: 640px) {
+    .related-header {
+      padding: 0 var(--space-4);
+    }
+    .related-title {
+      font-size: var(--text-xl);
+    }
+    .card-row-skeleton {
+      gap: var(--space-4);
+      padding: 0 var(--space-4);
+    }
   }
 
   .bottom-spacer { height: 120px; }
