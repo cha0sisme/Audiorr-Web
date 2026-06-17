@@ -189,11 +189,16 @@
       </span>
     </div>
     <div class="sep" role="separator"></div>
-    <button type="button" role="menuitem" class="item" disabled>
+    <a
+      role="menuitem"
+      class="item"
+      href={`/user/${encodeURIComponent(listener.username)}`}
+      data-sveltekit-preload-data="hover"
+      onclick={close}
+    >
       <User size={16} weight="regular" />
       <span>Ver perfil</span>
-      <span class="soon">Pronto</span>
-    </button>
+    </a>
     <button type="button" role="menuitem" class="item" disabled>
       <ChatCircle size={16} weight="regular" />
       <span>Enviar mensaje</span>
@@ -424,10 +429,12 @@
     font: inherit;
     font-size: var(--text-sm);
     text-align: left;
+    text-decoration: none;
     cursor: pointer;
     transition: background var(--duration-fast) var(--ease-ios-default);
   }
   .item:hover:not(:disabled) { background: var(--row-hover); }
+  .item:focus-visible { outline: none; background: var(--row-hover); }
   .item:disabled {
     color: var(--text-tertiary);
     cursor: not-allowed;
