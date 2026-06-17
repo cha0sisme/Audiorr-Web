@@ -20,6 +20,11 @@ function readInitial(): boolean {
 class SidebarUIStore {
   collapsed = $state(readInitial());
 
+  /** Si la lista de pinned está expandida más allá del límite ("+N más").
+      Ephemeral — no se persiste: cada sesión arranca colapsada para no
+      saturar el rail con muchas ancladas. */
+  pinnedExpanded = $state(false);
+
   toggle(): void {
     this.collapsed = !this.collapsed;
     this.#persist();
@@ -28,6 +33,10 @@ class SidebarUIStore {
   set(value: boolean): void {
     this.collapsed = value;
     this.#persist();
+  }
+
+  togglePinned(): void {
+    this.pinnedExpanded = !this.pinnedExpanded;
   }
 
   #persist(): void {

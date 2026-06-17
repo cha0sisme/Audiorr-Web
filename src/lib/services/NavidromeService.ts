@@ -355,16 +355,21 @@ export async function ping(): Promise<{ ok: boolean; version: string }> {
 /**
  * Subsonic getNowPlaying — qué está reproduciendo cada usuario AHORA mismo.
  * Endpoint estándar de Navidrome; el `entry` trae `username` + la canción +
- * `minutesAgo`. Lo usamos en Personas para marcar quién escucha en vivo
- * (cruzando por username). Schema tolerante (`passthrough`): el entry es un
- * Child completo, solo tipamos lo que consumimos.
+ * `minutesAgo`. Lo usamos en Personas para marcar quién escucha en vivo y en
+ * la superficie "Escuchando ahora" del Sidebar (avatar + portada del álbum).
+ * Schema tolerante (`passthrough`): el entry es un Child completo, solo tipamos
+ * lo que consumimos. `coverArt`/`albumId`/`id` ya viajaban en el passthrough;
+ * los tipamos para poder pintar la portada type-safe.
  */
 const NowPlayingEntrySchema = z
   .object({
     username: z.string(),
     title: z.string().optional(),
     artist: z.string().optional(),
-    minutesAgo: z.number().optional()
+    minutesAgo: z.number().optional(),
+    coverArt: z.string().optional(),
+    albumId: z.string().optional(),
+    id: z.string().optional()
   })
   .passthrough();
 const NowPlayingResponseSchema = z.object({

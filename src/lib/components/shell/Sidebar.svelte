@@ -5,11 +5,12 @@
   import { createQuery } from '@tanstack/svelte-query';
   import {
     House, MagnifyingGlass, VinylRecord, Star,
-    ListPlus, UsersThree, X, SidebarSimple
+    ListPlus, UsersThree, X, SidebarSimple, CaretUp
   } from 'phosphor-svelte';
   import Logo from '$components/shared/Logo.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import UserMenu from '$components/shell/UserMenu.svelte';
+  import LiveListeners from '$components/shell/LiveListeners.svelte';
   import BrandWord from '$components/shell/BrandWord.svelte';
   import * as user from '$services/user';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
@@ -173,6 +174,17 @@
   }));
   const pinnedPlaylists = $derived(pinnedQ.data ?? []);
 
+  // Límite de pinned visibles. Si hay más, se muestran las primeras + un toggle
+  // "+N más" que expande el resto (morph grid-rows). Colapsado muestra menos
+  // (el rail es estrecho). Estado en sidebarUI (ephemeral por sesión).
+  const PINNED_LIMIT_EXPANDED = 6;
+  const PINNED_LIMIT_COLLAPSED = 5;
+  const pinnedLimit = $derived(collapsed ? PINNED_LIMIT_COLLAPSED : PINNED_LIMIT_EXPANDED);
+  const pinnedOverflow = $derived(Math.max(0, pinnedPlaylists.length - pinnedLimit));
+  const pinnedFirst = $derived(pinnedPlaylists.slice(0, pinnedLimit));
+  const pinnedRest = $derived(pinnedPlaylists.slice(pinnedLimit));
+  const pinnedExpanded = $derived(sidebarUI.pinnedExpanded);
+
   // Atajo global ⌘K / Ctrl+K / "/" → focus al input. Esto vive en el sidebar
   // porque es el dueño del input — el layout NO lo gestiona, evitando un
   // detour por context o store global solo para el focus.
@@ -197,7 +209,7 @@
 
 <aside class="sidebar" class:collapsed>
   <div class="brand-row">
-    <a href="/" class="brand-icon" aria-label="Audiorr — Inicio">
+    <a href="/" class="brand-icon" aria-label="Audiorr — Inicio" use:tooltip={collapsed ? 'Inicio' : ''}>
       <Logo size={32} />
     </a>
     {#if !collapsed}
@@ -209,7 +221,7 @@
       onclick={() => sidebarUI.toggle()}
       aria-label={collapsed ? 'Expandir sidebar' : 'Contraer sidebar'}
       aria-pressed={collapsed}
-      title={collapsed ? 'Expandir' : 'Contraer'}
+      use:tooltip={collapsed ? 'Expandir' : 'Contraer'}
     >
       <SidebarSimple size={18} weight="regular" />
     </button>
@@ -283,7 +295,7 @@
           class="nav-item"
           class:active={isActive(item)}
           data-sveltekit-preload-data="hover"
-          title={collapsed ? item.label : undefined}
+          use:tooltip={collapsed ? item.label : ''}
         >
           <item.Icon size={20} weight={isActive(item) ? 'fill' : 'regular'} />
           {#if !collapsed}<span>{item.label}</span>{/if}
@@ -292,35 +304,67 @@
     </nav>
   </div>
 
+  {#snippet pinnedItem(p: (typeof pinnedPlaylists)[number])}
+    <a
+      class="pinned-item"
+      href={`/playlist/${p.id}`}
+      class:active={page.url.pathname === `/playlist/${p.id}`}
+      data-sveltekit-preload-data="hover"
+      aria-label={collapsed ? p.name : undefined}
+      use:tooltip={p.name}
+    >
+      <span class="pinned-cover">
+        <CoverImage src={getPlaylistCoverUrl(p.id)} alt="">
+          {#snippet fallback()}
+            <ListPlus size="60%" weight="regular" />
+          {/snippet}
+        </CoverImage>
+      </span>
+      {#if !collapsed}<span class="pinned-name">{p.name}</span>{/if}
+    </a>
+  {/snippet}
+
   {#if pinnedPlaylists.length > 0}
     <div class="section pinned-section">
       {#if !collapsed}<p class="section-label">Ancladas</p>{/if}
       <nav class="pinned-list" aria-label="Playlists ancladas">
-        {#each pinnedPlaylists as p (p.id)}
-          <a
-            class="pinned-item"
-            href={`/playlist/${p.id}`}
-            class:active={page.url.pathname === `/playlist/${p.id}`}
-            data-sveltekit-preload-data="hover"
-            aria-label={collapsed ? p.name : undefined}
-            use:tooltip={collapsed ? p.name : ''}
-          >
-            <span class="pinned-cover">
-              <CoverImage src={getPlaylistCoverUrl(p.id)} alt="">
-                {#snippet fallback()}
-                  <ListPlus size="60%" weight="regular" />
-                {/snippet}
-              </CoverImage>
-            </span>
-            {#if !collapsed}<span class="pinned-name">{p.name}</span>{/if}
-          </a>
-        {/each}
+        {#each pinnedFirst as p (p.id)}{@render pinnedItem(p)}{/each}
       </nav>
+      {#if pinnedOverflow > 0}
+        <div class="pinned-extra" class:open={pinnedExpanded}>
+          <div class="pinned-extra-inner">
+            <nav class="pinned-list" aria-label="Más playlists ancladas">
+              {#each pinnedRest as p (p.id)}{@render pinnedItem(p)}{/each}
+            </nav>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="pinned-toggle"
+          class:collapsed
+          onclick={() => sidebarUI.togglePinned()}
+          aria-expanded={pinnedExpanded}
+          use:tooltip={collapsed ? (pinnedExpanded ? 'Mostrar menos' : `Ver ${pinnedOverflow} más`) : ''}
+        >
+          {#if collapsed}
+            {#if pinnedExpanded}
+              <CaretUp size={14} weight="bold" />
+            {:else}
+              <span class="more-count">+{pinnedOverflow}</span>
+            {/if}
+          {:else}
+            <span>{pinnedExpanded ? 'Mostrar menos' : `+${pinnedOverflow} más`}</span>
+          {/if}
+        </button>
+      {/if}
     </div>
   {/if}
 
-  <div class="footer">
-    <UserMenu compact={collapsed} />
+  <div class="sidebar-bottom">
+    <LiveListeners {collapsed} />
+    <div class="footer">
+      <UserMenu compact={collapsed} />
+    </div>
   </div>
 </aside>
 
@@ -618,6 +662,69 @@
     min-width: 0;
   }
 
+  /* Overflow de pinned: morph grid-rows 0fr→1fr (mismo patrón que el acordeón
+     de Jobs / PersonCard). No max-height — anima limpio sin magic numbers. */
+  .pinned-extra {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--morph-duration) var(--morph-ease);
+  }
+  .pinned-extra.open {
+    grid-template-rows: 1fr;
+  }
+  .pinned-extra-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Toggle "+N más" / "Mostrar menos". Discreto, alineado con las pinned. */
+  .pinned-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    margin-top: 2px;
+    padding: 6px var(--space-3);
+    border: 0;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-tertiary);
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--duration-fast) var(--ease-ios-default),
+      color var(--duration-fast) var(--ease-ios-default);
+  }
+  .pinned-toggle:hover {
+    background: var(--row-hover);
+    color: var(--text-secondary);
+  }
+  .pinned-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .pinned-toggle.collapsed {
+    justify-content: center;
+    width: 40px;
+    height: 32px;
+    margin: 2px auto 0;
+    padding: 0;
+  }
+  .pinned-toggle .more-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pinned-extra {
+      transition: none;
+    }
+  }
+
   .nav-item {
     position: relative;
     display: flex;
@@ -684,14 +791,22 @@
     box-shadow: var(--focus-ring);
   }
 
+  /* Grupo inferior: "Escuchando ahora" + footer. El margin-top:auto vive aquí
+     (no en .footer) para empujar AMBOS al fondo como una unidad — así la
+     presencia social queda pegada encima del avatar, estilo Spotify. Cuando
+     no hay nadie escuchando, LiveListeners no pinta nada y el gap colapsa. */
+  .sidebar-bottom {
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
   .footer {
     display: grid;
     gap: 2px;
     padding-top: var(--space-3);
     border-top: 1px solid var(--separator-subtle);
-    /* Auto-push al fondo del sidebar (flex column). El void va arriba del
-       footer, no entre las secciones de nav. */
-    margin-top: auto;
   }
 
   /* Mobile: oculta sidebar, los Tab Bar lo reemplazan (lo armamos después) */
