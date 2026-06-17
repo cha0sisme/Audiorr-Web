@@ -25,7 +25,7 @@
  * new iOS round (e.g., when iOS lands v15.n with algorithm changes).
  * Pure metadata — used to tag transition telemetry once we wire it up.
  */
-export const PORTED_FROM_IOS_VERSION = 'v15.m' as const;
+export const PORTED_FROM_IOS_VERSION = 'v15.q' as const;
 
 // ============================================================================
 // MARK: - MixMode (DJMixingService.swift:200)
@@ -152,6 +152,13 @@ export type EntryPointSource =
   | 'punchBufferFallback'
   | 'punchEnergyBoost'
   | 'punchVocalCappedRollback'
+  /**
+   * v15.q — lateEntryRetreat: B entraba tarde (>30s) pegado a su primer evento
+   * vocal con BPM incompatible; el entry se retrajo a `introEndTimeHeuristic`
+   * ("el principio del cuerpo de B") para no aterrizar a media canción sobre el
+   * verso. Fuente propia para aislar estos casos en la telemetría.
+   */
+  | 'punchLateEntryRetreat'
   | 'minimal'
   | 'unknown';
 

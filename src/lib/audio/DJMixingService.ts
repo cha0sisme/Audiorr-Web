@@ -1,7 +1,8 @@
 /**
  * DJMixingService — pure crossfade intelligence calculations.
  *
- * Port of `ios/App/App/Services/DJMixingService.swift` v15.m (commit 589d4fd).
+ * Port of `ios/App/App/Services/DJMixingService.swift` v15.q (589d4fd→7a1258f:
+ * v15.n/v15.o/v15.p de origin/main + lateEntryRetreat local).
  * Module of pure functions (matches Swift `enum DJMixingService` with
  * `static func`s — no instance state).
  *
@@ -56,8 +57,8 @@ import { harmonicPenaltyIsClash } from './dj-types';
 // MARK: - Algorithm versioning (mirrors DJMixingService.swift:128)
 // ============================================================================
 
-export const kAlgorithmVersion = 'v15.m-web1' as const;
-export const kBuildId = 'v15.m-web1-pending' as const;
+export const kAlgorithmVersion = 'v15.q-web1' as const;
+export const kBuildId = 'v15.q-web1-pending' as const;
 
 // ============================================================================
 // MARK: - Feature flags (mirrors DJMixingService.swift:161)
@@ -951,10 +952,25 @@ export function decideTransitionType(args: DecideTransitionTypeArgs): Transition
   // ── Safety: extreme BPM jump override ──
   const bpmCutThreshold = useFilters ? 35 : 20;
   if (profile.bpmDiff > bpmCutThreshold && fadeDuration > 3 && type !== 'CUT') {
-    type = 'CUT';
     const normalizedNote =
       profile.bpmBNormalized !== profile.bpmB ? ` (norm:${Math.trunc(profile.bpmBNormalized)})` : '';
-    reason = `Polirritmia evitada (A:${Math.trunc(profile.bpmA)} B:${Math.trunc(profile.bpmB)}${normalizedNote} diff=${fmt1(profile.bpmDiff)}) → CUT forzado`;
+    // v15.o — discriminante isOutroInstrumental:
+    //   outroInstrumental=true  → CUT limpio: A sale por zona sin voz, el corte
+    //     seco sobre material instrumental no se percibe como error.
+    //   outroInstrumental=false → cortar a A en seco con voz/drums activos suena
+    //     a error. SEQUENTIAL deja a A terminar natural y B arranca desde su
+    //     intro, sin overlap de grids polirrítmicos (lo que este branch evita)
+    //     ni trauma de corte. NATURAL_BLEND descartado: superpondría dos grooves
+    //     incompatibles, justo lo que se evita.
+    // La rama CUT sigue siendo elegible al override energy-crash de más abajo
+    // (no-cambio); la rama SEQUENTIAL no lo es (su gate no incluye SEQUENTIAL).
+    if (outroInstrumental) {
+      type = 'CUT';
+      reason = `Polirritmia evitada (A:${Math.trunc(profile.bpmA)} B:${Math.trunc(profile.bpmB)}${normalizedNote} diff=${fmt1(profile.bpmDiff)}) outroInst → CUT forzado`;
+    } else {
+      type = 'SEQUENTIAL';
+      reason = `Polirritmia + A no instrumental (A:${Math.trunc(profile.bpmA)} B:${Math.trunc(profile.bpmB)}${normalizedNote} diff=${fmt1(profile.bpmDiff)}) → SEQUENTIAL`;
+    }
   }
 
   // ── Override: energy crash A → instrumental B ──
@@ -982,7 +998,12 @@ export function decideTransitionType(args: DecideTransitionTypeArgs): Transition
     nextAnalysis &&
     !nextAnalysis.hasError &&
     type !== 'CUT' &&
-    type !== 'STEM_MIX'
+    type !== 'STEM_MIX' &&
+    // `type !== 'SEQUENTIAL'` añadido (v15.o): el redirect Polirritmia→SEQUENTIAL
+    // (rama !outroInstrumental de arriba) NO debe ser reprocesado a CUT/EQ_MIX
+    // por el trainwreck. SEQUENTIAL no tiene overlap (A termina, B desde 0) → no
+    // hay colisión vocal posible. Inseparable del vector anterior.
+    type !== 'SEQUENTIAL'
   ) {
     // vocalStartTime nil/undefined → sentinel 0. The `> 0` guard below filters
     // both undefined and literal 0.0 (vocal-at-t=0 means entryPoint already
@@ -3463,6 +3484,59 @@ export function calculateCrossfadeConfig(args: {
     };
   }
 
+  // ── 2c. lateEntryRetreat (v15.q) ──
+  // Cuando B entra tarde (>30s), pegado a su primer evento vocal (gap<4s) y con
+  // BPM incompatible (|Δbpm|≥16), el entry aterriza a media canción sobre el
+  // verso de B saltándose su intro instrumental — se percibe como un salto en
+  // mitad del tema entrante en vez de una presentación. Si existe una zona
+  // instrumental temprana real (introEndTimeHeuristic suficientemente por
+  // delante del entry), se retrae el entry al principio del cuerpo de B.
+  //
+  // Floor `min(introH, vocalStartB−2)`: introEndTimeHeuristic puede inflarse por
+  // encima de la voz en pistas de voz inmediata; el floor garantiza no retroceder
+  // DENTRO del verso. La guarda `|entry−introH|≥3` evita actuar cuando B ya entra
+  // por su principio. Se aplica antes del cálculo de fade a propósito:
+  // calculateAdaptiveFadeDuration recalcula con el entry retrocedido → el fade se
+  // acorta en consecuencia. El umbral |Δbpm|≥16 es el discriminante que preserva
+  // las entradas tardías legítimas (B con BPM compatible y colchón instrumental
+  // antes de la voz no se ve afectada).
+  if (safeNext && !safeNext.hasError && entry.entrySource !== 'punchLateEntryRetreat') {
+    const ep = entry.entryPoint;
+    const vocalStartB = safeNext.vocalStartTime ?? -1;
+    const introH =
+      safeNext.introEndTimeHeuristic ??
+      (safeNext.hasIntroData ? safeNext.introEndTime : undefined);
+    const bpmDiff = safeCurrent ? Math.abs(safeCurrent.bpm - safeNext.bpm) : 0;
+    if (
+      ep > 30 &&
+      vocalStartB >= 0 &&
+      vocalStartB - ep < 4 &&
+      bpmDiff >= 16 &&
+      introH !== undefined &&
+      Math.abs(ep - introH) >= 3
+    ) {
+      const retreatTarget = Math.max(2, Math.min(introH, vocalStartB - 2));
+      // Solo si es un retroceso real y significativo (>1s hacia atrás).
+      if (retreatTarget < ep - 1) {
+        entry = {
+          entryPoint: retreatTarget,
+          beatSyncInfo: `${entry.beatSyncInfo} [lateEntryRetreat]`,
+          usedFallback: entry.usedFallback,
+          // El snap original se ataba al downbeat pre-retreat; el retroceso nos
+          // saca de ahí.
+          isBeatSynced: false,
+          entrySource: 'punchLateEntryRetreat',
+          ...(entry.genreCapApplied !== undefined
+            ? { genreCapApplied: entry.genreCapApplied }
+            : {}),
+          ...(entry.entryFinalCapApplied !== undefined
+            ? { entryFinalCapApplied: entry.entryFinalCapApplied }
+            : {})
+        };
+      }
+    }
+  }
+
   // ── 3. Fade duration ──
   const fade = calculateAdaptiveFadeDuration({
     entryPoint: entry.entryPoint,
@@ -3596,6 +3670,43 @@ export function calculateCrossfadeConfig(args: {
       transition = {
         type: 'SEQUENTIAL',
         reason: `CUT sin outro instrumental fiable (preOutroInstrumental=${preOutroInstrumental}, outroEnergyA=${oeStr}) → SEQUENTIAL [old: ${oldReason}]`,
+        sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
+        ...(transition.f5bRetiredFrom !== undefined
+          ? { f5bRetiredFrom: transition.f5bRetiredFrom }
+          : {})
+      };
+    }
+  }
+
+  // ── 6b-quinquies. Entry chorus tardío sin drop → SEQUENTIAL ──
+  //
+  // Cuando el entryPoint se calcula vía chorus (punchChorusPromotion /
+  // punchChorusFallback) y supera 30s sin que B sea drop-driven, la entrada
+  // cae en mitad de un verso/pre-chorus y el oyente no reconoce dónde está la
+  // canción. SEQUENTIAL preserva el material introductorio de B: A termina
+  // natural y B arranca desde el inicio.
+  //
+  // Exime drop-driven (mismo criterio percusivo que el gate 6b-ter y el cap
+  // final): ahí el entry tardío apunta a un drop legítimo. El umbral 30s queda
+  // al filo de algún caso bien valorado, aceptable por el balance. Va ANTES del
+  // 6b-bis para que el reset entry=0 lo recoja.
+  if (
+    safeNext &&
+    !safeNext.hasError &&
+    transition.type !== 'SEQUENTIAL' &&
+    transition.type !== 'VINYL_STOP' &&
+    transition.type !== 'CUT' &&
+    transition.type !== 'CUT_A_FADE_IN_B' &&
+    (entry.entrySource === 'punchChorusPromotion' ||
+      entry.entrySource === 'punchChorusFallback') &&
+    entry.entryPoint > 30.0
+  ) {
+    const { isDrop: bIsDropDriven } = isBDropDrivenByPercussive(safeNext.percussiveCurve);
+    if (!bIsDropDriven) {
+      const oldReason = transition.reason;
+      transition = {
+        type: 'SEQUENTIAL',
+        reason: `Entry chorus tardío sin drop (entry=${entry.entryPoint.toFixed(1)}s, source=${entry.entrySource}) → SEQUENTIAL [old: ${oldReason}]`,
         sequentialOverrideByVectorD: transition.sequentialOverrideByVectorD,
         ...(transition.f5bRetiredFrom !== undefined
           ? { f5bRetiredFrom: transition.f5bRetiredFrom }

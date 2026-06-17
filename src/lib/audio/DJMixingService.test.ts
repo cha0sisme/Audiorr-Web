@@ -361,7 +361,7 @@ describe('decideTransitionType — safety overrides', () => {
     expect(result.type).toBe('CUT');
   });
 
-  it('bpmDiff > 35 + useFilters → CUT forzado (polirritmia)', () => {
+  it('bpmDiff > 35 + useFilters + outroInstrumental → CUT forzado (polirritmia)', () => {
     const result = decideTransitionType({
       profile: makeProfile({
         character: 'smooth',
@@ -374,9 +374,32 @@ describe('decideTransitionType — safety overrides', () => {
       fadeDuration: 6,
       isBeatSynced: false,
       useFilters: true,
+      outroInstrumental: true,
       bufferADuration: 200
     });
     expect(result.type).toBe('CUT');
+    expect(result.reason).toContain('Polirritmia');
+  });
+
+  it('bpmDiff > 35 + useFilters + !outroInstrumental → SEQUENTIAL (v15.o)', () => {
+    // v15.o — con A no instrumental, cortar en seco sobre voz/drums suena a
+    // error: el override de polirritmia redirige a SEQUENTIAL en vez de CUT.
+    const result = decideTransitionType({
+      profile: makeProfile({
+        character: 'smooth',
+        bpmRelationship: 'compatible',
+        bpmDiff: 40,
+        bpmA: 80,
+        bpmB: 120
+      }),
+      entryPoint: 8,
+      fadeDuration: 6,
+      isBeatSynced: false,
+      useFilters: true,
+      outroInstrumental: false,
+      bufferADuration: 200
+    });
+    expect(result.type).toBe('SEQUENTIAL');
     expect(result.reason).toContain('Polirritmia');
   });
 
