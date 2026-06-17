@@ -361,7 +361,12 @@ class ConnectService {
       volume: player.volume,
       queue: queueData,
       deviceId: this.deviceId,
-      contextUri: player.contextUri ?? ''
+      contextUri: player.contextUri ?? '',
+      // El backend replica este estado a `last-playback` (persistRestSnapshot).
+      // Sin `playbackMode`, ese snapshot pisa el PUT de SmartMix y el refresh
+      // pierde el DJ Mode (la cola sobrevive, el modo no). Mandarlo aquí cierra
+      // ese hueco junto con el fix backend que lo persiste.
+      playbackMode: player.playbackMode
     });
   }
 
