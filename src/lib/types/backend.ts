@@ -94,10 +94,15 @@ export type CanvasGenerationJobList = z.infer<typeof CanvasGenerationJobListSche
  * - `coverArtId` es el id Subsonic de la portada (sirve via NavidromeService.
  *   getCoverArtUrl). Para algunos tipos (playlists generadas por backend,
  *   smart mixes) puede ser null y se usa el cover del backend en su lugar.
- * - Para `type === 'artist'`, el backend guarda el NOMBRE en `id` (no el id
- *   Subsonic — limitación histórica del scrobble que entró en producción
- *   antes de tener el ID resuelto). Se navega a /search?q=<name> hasta que
- *   el backend exponga el id real.
+ *   ⚠️ Para `type === 'artist'` apunta al cover del ÁLBUM de la última pista
+ *   escuchada (deriva de `album_id`), NO a un avatar de artista — la home lo
+ *   ignora y resuelve el avatar real vía getArtist(id).
+ * - Para `type === 'artist'`, `id` es el id Subsonic del artista (lo que
+ *   QueueManager scrobblea como `artist:<id>`) → se navega a /artist/<id> y el
+ *   avatar/nombre canónico se resuelven con getArtist(id), igual que iOS.
+ * - Para `type === 'artist'`, `title` puede traer el nombre del ÁLBUM (el
+ *   backend hace COALESCE(context_name, album)); el nombre fiable del artista
+ *   está en `artist`. La home normaliza title := artist (paridad iOS).
  */
 export const RecentContextItemSchema = z.object({
   contextUri: z.string(),

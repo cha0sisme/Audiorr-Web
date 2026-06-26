@@ -98,6 +98,21 @@ export function playlistToCardProps(p: NavidromePlaylist): PlaylistCardProps {
   };
 }
 
+/** Resuelve la URL del avatar de un artista a partir de los campos que expone
+    Navidrome: `artistImageUrl` (URL fija scrapeada de Last.fm, sin parámetro de
+    tamaño) tiene prioridad; si falta, `coverArt` (Subsonic estándar, con size).
+    Devuelve undefined si el artista no tiene ninguna de las dos. Mirror del
+    `artistAvatarURL` de iOS NavidromeService — lo consumen las cards que solo
+    tienen un id de artista y deben resolver la imagen ellas mismas (Jump Back
+    In). */
+export function artistAvatarUrl(
+  a: { artistImageUrl?: string | undefined; coverArt?: string | undefined },
+  size: number
+): string | undefined {
+  const ext = a.artistImageUrl && a.artistImageUrl.length > 0 ? a.artistImageUrl : undefined;
+  return ext ?? (a.coverArt ? getCoverArtUrl(a.coverArt, size) : undefined);
+}
+
 /** Props comunes a ArtistCard. */
 export type ArtistCardProps = {
   id: string;

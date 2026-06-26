@@ -3,7 +3,7 @@
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
-  import ArtistCard from '$components/shared/ArtistCard.svelte';
+  import RecentArtistCard from '$components/home/RecentArtistCard.svelte';
   import QuickAccessCard from '$components/home/QuickAccessCard.svelte';
   import TopWeeklyChart from '$components/home/TopWeeklyChart.svelte';
   import * as nav from '$services/NavidromeService';
@@ -117,6 +117,13 @@
         const tb = new Date(b.lastPlayedAt).getTime();
         return tb - ta;
       })
+      // Paridad iOS HomeView.loadRecentContexts: para contextos de artista el
+      // backend deja `title = COALESCE(context_name, album)`, que cae al nombre
+      // del ÁLBUM de la última pista cuando el scrobble no guardó context_name.
+      // El nombre fiable del artista está en `artist` → lo usamos como título.
+      .map((ctx) =>
+        ctx.type === 'artist' && ctx.artist ? { ...ctx, title: ctx.artist } : ctx
+      )
   );
 
   const topWeeklyQ = createQuery(() => ({
@@ -234,14 +241,14 @@
             href={`/playlist/${ctx.id}`}
           />
         {:else if ctx.type === 'artist'}
-          <!-- ctx.id es el NOMBRE para artist (limitación backend) → href cae
-               a /search?q=<name>. Cuando el backend exponga el id Subsonic
-               real, simplificar a /artist/<id>. -->
+          <!-- ctx.id = id Subsonic del artista → navega al detalle. El avatar
+               y el nombre canónico los resuelve QuickAccessCard vía getArtist.
+               Mirror iOS HomeView (NavigationLink a ArtistDetail con ctx.id). -->
           <QuickAccessCard
             id={ctx.id}
             contextType="artist"
             title={ctx.title}
-            href={`/search?q=${encodeURIComponent(ctx.title)}`}
+            href={`/artist/${ctx.id}`}
           />
         {/if}
       {:else}
@@ -292,12 +299,10 @@
             prefetchHero={() => {}}
           />
         {:else if ctx.type === 'artist'}
-          <ArtistCard
-            id={ctx.id}
-            name={ctx.title}
-            href={`/search?q=${encodeURIComponent(ctx.title)}`}
-            prefetchHero={() => {}}
-          />
+          <!-- RecentArtistCard resuelve el avatar real del artista vía
+               getArtist(ctx.id) y navega a /artist/<id>. Paridad iOS
+               ArtistCardView (resuelve su propio avatar). -->
+          <RecentArtistCard id={ctx.id} name={ctx.title} />
         {/if}
       {/snippet}
     </HorizontalScrollSection>

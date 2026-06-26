@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { HTMLAnchorAttributes } from 'svelte/elements';
-  import { MusicNote, Play } from 'phosphor-svelte';
+  import { MusicNote, Play, User } from 'phosphor-svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import { player, type PlaybackContext } from '$stores/player.svelte';
   import * as nav from '$services/NavidromeService';
+  import { artistAvatarUrl } from '$utils/navidrome-mappers';
 
   type Props = HTMLAnchorAttributes & {
     /** ID del item — para detectar si el playback viene de aquí. */
@@ -45,10 +46,33 @@
     gcTime: 30 * 60 * 1000,
     retry: false
   }));
+  // Para items artist solo tenemos id + nombre — el avatar hay que resolverlo
+  // (el `coverArtId` del backend apunta al cover de un álbum, no al avatar).
+  // Mirror de iOS ArtistCardView. Reutiliza la queryKey ['artist', id] de
+  // ArtistDetail → cache compartido.
+  const artistQ = createQuery(() => ({
+    queryKey: ['artist', id],
+    queryFn: () => nav.getArtist(id),
+    enabled: contextType === 'artist',
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false
+  }));
+
   const resolvedTitle = $derived(
     contextType === 'playlist' && playlistQ.data?.name
       ? playlistQ.data.name
-      : title
+      : contextType === 'artist' && artistQ.data?.name
+        ? artistQ.data.name
+        : title
+  );
+
+  // Cover efectivo: para artist usamos el avatar resuelto; para el resto, el
+  // coverUrl que llega por props.
+  const resolvedCover = $derived(
+    contextType === 'artist' && artistQ.data
+      ? artistAvatarUrl(artistQ.data, 120)
+      : coverUrl
   );
 
   let coverEl: HTMLDivElement | undefined = $state();
@@ -76,9 +100,13 @@
   {...rest}
 >
   <div bind:this={coverEl} class="cover">
-    <CoverImage src={coverUrl} alt="">
+    <CoverImage src={resolvedCover} alt="">
       {#snippet fallback()}
-        <MusicNote size="100%" weight="regular" />
+        {#if contextType === 'artist'}
+          <User size="100%" weight="regular" />
+        {:else}
+          <MusicNote size="100%" weight="regular" />
+        {/if}
       {/snippet}
     </CoverImage>
 
