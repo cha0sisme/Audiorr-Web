@@ -16,6 +16,7 @@ import { browser } from '$app/environment';
 import { audioEngine } from '$lib/audio/AudioEngine.svelte';
 import { getStreamUrl } from '$services/NavidromeService';
 import { audioSettings } from '$stores/audio-settings.svelte';
+import type { NavidromeItemArtist } from '$types/navidrome';
 
 /** Clave de localStorage para el volumen — misma key que iOS UserDefaults
     (`PersistenceService.swift:20`) por coherencia entre clientes, aunque cada
@@ -57,6 +58,11 @@ export type Song = {
       (Connect remoto, restore) no lo propagan. Cuando existe, el MiniPlayer
       y Now Playing renderizan el nombre como link a `/artist/<id>`. */
   artistId?: string | undefined;
+  /** Lista completa de artistas (OpenSubsonic `song.artists[]`). Cuando trae
+      >1 entrada, el MiniPlayer pinta "A feat. B & C" con cada nombre como link
+      individual. Se persiste en lastPlayback y se propaga por Connect para que
+      los links sobrevivan a un refresh / control remoto. */
+  artists?: NavidromeItemArtist[] | undefined;
   album?: string | undefined;
   coverUrl?: string | undefined;
   durationSec?: number | undefined;

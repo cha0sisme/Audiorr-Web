@@ -1,11 +1,13 @@
 <script lang="ts">
   import {
     Play, Pause, SkipForward, SkipBack, Shuffle, Repeat,
-    MusicNote, Queue, YoutubeLogo, SpeakerHigh, ArrowsOutSimple,
+    MusicNote, Queue, YoutubeLogo, SpeakerHigh,
     Broadcast
   } from 'phosphor-svelte';
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import { formatTime } from '$utils/format';
+  import ArtistLinks from '$components/shared/ArtistLinks.svelte';
+  import type { NavidromeItemArtist } from '$types/navidrome';
   import WaveText from '$components/shared/WaveText.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import EqualizerIcon from '$components/shared/EqualizerIcon.svelte';
@@ -27,6 +29,10 @@
         siendo texto plano (no inferimos `/search?q=<name>` aquí — UX raro
         desde un mini-player). */
     artistId?: string | undefined;
+    /** Lista completa de artistas (OpenSubsonic). Cuando trae >1 entrada el
+        MiniPlayer pinta "A feat. B & C" con cada nombre como link individual
+        (los separadores no son links). Fallback a `artist`/`artistId`. */
+    artists?: NavidromeItemArtist[] | undefined;
     coverUrl?: string | undefined;
     explicit?: boolean;
     progress?: number;
@@ -71,6 +77,7 @@
     title,
     artist,
     artistId,
+    artists,
     coverUrl,
     explicit = false,
     progress = 0,
@@ -180,11 +187,9 @@
             <ExplicitBadge size="13px" />
           {/if}
         </p>
-        {#if artistId}
-          <a class="artist artist-link" href="/artist/{artistId}">{artist}</a>
-        {:else}
-          <p class="artist">{artist}</p>
-        {/if}
+        <p class="artist">
+          <ArtistLinks {artists} {artist} {artistId} />
+        </p>
       </div>
       <!-- EqualizerIcon: indicador visual del audio en vivo. Reactivo al
            AnalyserNode del AudioEngine; coste compartido entre todas las
@@ -340,15 +345,6 @@
           </div>
         </div>
       </div>
-      <button
-        type="button"
-        class="icon-btn"
-        aria-label="Pantalla completa"
-        tabindex={compact ? -1 : 0}
-        onclick={onExpand}
-      >
-        <ArrowsOutSimple size={18} weight="regular" />
-      </button>
     </div>
   </div>
 
@@ -386,10 +382,10 @@
         <p class="auto-mix-line">
           <WaveText text="AutoMix" />
         </p>
-      {:else if artistId}
-        <a class="artist artist-link" href="/artist/{artistId}">{artist}</a>
       {:else}
-        <p class="artist">{artist}</p>
+        <p class="artist">
+          <ArtistLinks {artists} {artist} {artistId} />
+        </p>
       {/if}
     </div>
 
@@ -583,37 +579,16 @@
     min-width: 0;
   }
   .artist {
+    /* Contenedor de los segmentos de ArtistLinks. El ellipsis vive aquí; los
+       <a>/<span> internos son inline y heredan color. */
     font-size: 12px;
     font-weight: 400;
     line-height: 1.25;
     color: var(--text-secondary);
+    margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  /* Variante <a>: que el hit-area se limite al ancho del propio texto (no
-     toda la franja del meta). `inline-block` + `max-width: 100%` colapsa
-     al contenido pero sigue permitiendo ellipsis cuando overflowa. */
-  .artist-link {
-    display: inline-block;
-    /* Grid item: sin esto, justify-self:stretch (default) estira el <a> a
-       toda la celda y el hit-area/hover cubre la franja entera. start lo
-       colapsa a su contenido — el link ocupa solo lo que mide el artista. */
-    justify-self: start;
-    max-width: 100%;
-    color: var(--text-secondary);
-    text-decoration: none;
-    cursor: pointer;
-    transition: color var(--duration-fast) var(--ease-ios-default);
-  }
-  .artist-link:hover {
-    color: var(--text-primary);
-  }
-  .artist-link:focus-visible {
-    outline: none;
-    color: var(--text-primary);
-    box-shadow: var(--focus-ring);
-    border-radius: var(--radius-xs);
   }
 
   /* Flex column con márgenes específicos en lugar de grid gap uniforme:

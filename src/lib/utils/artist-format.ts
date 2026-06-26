@@ -36,6 +36,56 @@ export function displayArtistName(
   return names.length === 0 ? fallback : joinAmpersand(names);
 }
 
+/** Segmento de una lista de artistas renderizable con links individuales.
+    `artist` lleva nombre + id opcional (link cuando hay id); `sep` es texto
+    plano (", ", " & ", " feat. ") que NUNCA es link. */
+export type ArtistSegment =
+  | { kind: 'artist'; name: string; id?: string | undefined }
+  | { kind: 'sep'; text: string };
+
+/**
+ * Descompone una lista de artistas en segmentos para renderizar cada nombre
+ * como link y los separadores como texto plano. Patrón Apple Music tratando
+ * el primer artista como titular: "Titular feat. Invitado1 & Invitado2".
+ *
+ * - 0 artistas en la lista → un único segmento desde `fallbackName` (+
+ *   `fallbackId` si existe). Cubre las fuentes que solo traen el string
+ *   `artist` + `artistId` (single-artist legacy).
+ * - 1 artista → solo ese nombre.
+ * - 2+ → primero + " feat. " + resto unido con comas y " & " final.
+ *
+ * Cada nombre arrastra su `id` (cuando el server expone `artists[]`); sin id,
+ * el segmento se renderiza como texto sin link. El consumidor (ArtistLinks)
+ * decide el markup.
+ */
+export function artistSegments(
+  artists: NavidromeItemArtist[],
+  fallbackName: string,
+  fallbackId?: string
+): ArtistSegment[] {
+  const list = artists.filter((a) => a.name.length > 0);
+
+  if (list.length === 0) {
+    if (fallbackName.length === 0) return [];
+    return [{ kind: 'artist', name: fallbackName, ...(fallbackId ? { id: fallbackId } : {}) }];
+  }
+  if (list.length === 1) {
+    const a = list[0]!;
+    return [{ kind: 'artist', name: a.name, ...(a.id ? { id: a.id } : {}) }];
+  }
+
+  const segs: ArtistSegment[] = [];
+  const head = list[0]!;
+  const rest = list.slice(1);
+  segs.push({ kind: 'artist', name: head.name, ...(head.id ? { id: head.id } : {}) });
+  segs.push({ kind: 'sep', text: ' feat. ' });
+  rest.forEach((a, i) => {
+    if (i > 0) segs.push({ kind: 'sep', text: i === rest.length - 1 ? ' & ' : ', ' });
+    segs.push({ kind: 'artist', name: a.name, ...(a.id ? { id: a.id } : {}) });
+  });
+  return segs;
+}
+
 /**
  * Para una canción dentro del contexto de un álbum, devuelve el texto del
  * artista SOLO si hay featurings reales (artistas distintos del titular del

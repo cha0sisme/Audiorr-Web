@@ -30,6 +30,7 @@ import {
   clearSnapshot
 } from '$services/persistence/queue-db';
 import type { NavidromeSong } from '$types/navidrome';
+import { NavidromeItemArtistSchema } from '$types/navidrome';
 import type { SongListItem } from '$utils/navidrome-mappers';
 import { getCoverArtUrl, songReplayGainMultiplier } from '$services/NavidromeService';
 import { credentials } from '$stores/credentials.svelte';
@@ -52,6 +53,9 @@ export const PersistableSongSchema = z.object({
   album: z.string().optional(),
   albumId: z.string().optional(),
   artistId: z.string().optional(),
+  /** Lista de artistas (OpenSubsonic) — persistida para que el MiniPlayer
+      pinte multi-artista con links tras un restore de lastPlayback. */
+  artists: z.array(NavidromeItemArtistSchema).optional(),
   coverArt: z.string().optional(),
   duration: z.number(),
   /** Lineal multiplier — iOS guarda 1.0 cuando no hay info. */
@@ -84,6 +88,7 @@ export function navidromeSongToPersistable(s: NavidromeSong): PersistableSong {
     ...(s.album !== undefined ? { album: s.album } : {}),
     ...(s.albumId !== undefined ? { albumId: s.albumId } : {}),
     ...(s.artistId !== undefined ? { artistId: s.artistId } : {}),
+    ...(s.artists !== undefined ? { artists: s.artists } : {}),
     ...(s.coverArt !== undefined ? { coverArt: s.coverArt } : {}),
     duration: s.duration ?? 0,
     // Computado real desde los tags Subsonic (track preferido, album fallback,
@@ -107,6 +112,7 @@ export function songListItemToPersistable(
     ...(item.album !== undefined ? { album: item.album } : {}),
     ...(item.albumId !== undefined ? { albumId: item.albumId } : {}),
     ...(item.artistId !== undefined ? { artistId: item.artistId } : {}),
+    ...(item.artists !== undefined ? { artists: item.artists } : {}),
     duration: item.durationSec,
     // SongListItem no carga tags ReplayGain (vienen del shape Subsonic
     // crudo, no de este DTO). Usamos el helper con objeto vacío → cae al
@@ -122,6 +128,7 @@ function persistableToPlayerSong(s: PersistableSong): {
   title: string;
   artist: string;
   artistId?: string | undefined;
+  artists?: PersistableSong['artists'];
   album?: string | undefined;
   coverUrl?: string | undefined;
   durationSec?: number | undefined;
@@ -133,6 +140,7 @@ function persistableToPlayerSong(s: PersistableSong): {
     title: s.title,
     artist: s.artist,
     ...(s.artistId !== undefined ? { artistId: s.artistId } : {}),
+    ...(s.artists !== undefined ? { artists: s.artists } : {}),
     ...(s.album !== undefined ? { album: s.album } : {}),
     ...(s.coverArt ? { coverUrl: getCoverArtUrl(s.coverArt, 300) } : {}),
     durationSec: s.duration > 0 ? s.duration : undefined,
@@ -790,6 +798,8 @@ class QueueManager {
         // Restauramos artistId persistido — antes se hardcodeaba '' (legacy
         // iOS), lo que rompía el link al artista del MiniPlayer tras restore.
         artistId: item.artistId ?? '',
+        // artists[] restaurado → multi-artista con links sobrevive al refresh.
+        ...(item.artists ? { artists: item.artists } : {}),
         coverArt: item.coverArt ?? '',
         duration: item.duration,
         replayGainMultiplier: 1.0
@@ -815,6 +825,7 @@ class QueueManager {
           album: last.album,
           albumId: last.albumId ?? '',
           artistId: last.artistId ?? '',
+          ...(last.artists ? { artists: last.artists } : {}),
           coverArt: last.coverArt ?? '',
           duration: last.duration,
           replayGainMultiplier: 1.0
@@ -1440,6 +1451,9 @@ class QueueManager {
         // surfaces que dependen del link al artista (artist-link) sigan
         // funcionando tras un restore de lastPlayback.
         artistId: s.artistId ?? null,
+        // artists[] — el MiniPlayer multi-artista necesita la lista completa
+        // (con ids) para pintar "A feat. B & C" con links tras el restore.
+        artists: s.artists ?? null,
         coverArt: s.coverArt ?? null,
         duration: s.duration
       }));
@@ -1450,6 +1464,7 @@ class QueueManager {
       album: cur.album ?? '',
       albumId: cur.albumId ?? null,
       artistId: cur.artistId ?? null,
+      artists: cur.artists ?? null,
       coverArt: cur.coverArt ?? null,
       path: '',
       duration: cur.duration,

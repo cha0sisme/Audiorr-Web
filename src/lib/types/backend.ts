@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NavidromeItemArtistSchema } from '$types/navidrome';
 
 export const CanvasEntrySchema = z.object({
   songId: z.string(),
@@ -793,6 +794,10 @@ export const LastPlaybackQueueItemSchema = z
     // necesitamos para que el nombre del artista del MiniPlayer siga siendo
     // clickeable tras un restore de lastPlayback.
     artistId: z.string().nullable().optional(),
+    // Lista de artistas (OpenSubsonic) — persistida para que el MiniPlayer
+    // pinte multi-artista con links ("A feat. B & C") tras restore. Blob
+    // passthrough en el backend; somos los únicos consumidores.
+    artists: z.array(NavidromeItemArtistSchema).nullable().optional(),
     coverArt: z.string().nullable().optional(),
     duration: z.number()
   })
@@ -818,6 +823,8 @@ export const LastPlaybackStateSchema = z
     albumId: z.string().nullable().optional(),
     /** Ver nota en LastPlaybackQueueItemSchema. */
     artistId: z.string().nullable().optional(),
+    /** Ver nota en LastPlaybackQueueItemSchema. */
+    artists: z.array(NavidromeItemArtistSchema).nullable().optional(),
     path: z.string().optional(),
     duration: z.number(),
     position: z.number(),

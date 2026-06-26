@@ -26,6 +26,7 @@ import { audioEngine } from '$lib/audio/AudioEngine.svelte';
 import { getCoverArtUrl, ensureBackendSession } from '$services/NavidromeService';
 import { diagnosticsBus } from '$stores/diagnostics-bus.svelte';
 import { TransitionRecordSchema } from '$types/diagnostics';
+import type { NavidromeItemArtist } from '$types/navidrome';
 
 // ============================================================================
 // Types
@@ -49,6 +50,8 @@ type RemoteSong = {
   id: string;
   title: string;
   artist: string;
+  artistId?: string;
+  artists?: NavidromeItemArtist[];
   album?: string;
   albumId?: string;
   coverArt?: string;
@@ -60,6 +63,8 @@ type RemotePlaybackPayload = {
   metadata?: {
     title?: string;
     artist?: string;
+    artistId?: string;
+    artists?: NavidromeItemArtist[];
     album?: string;
     coverArt?: string;
     duration?: number;
@@ -151,10 +156,28 @@ function parseRemoteSongs(arr: unknown[]): RemoteSong[] {
       const i = item[key];
       return typeof i === 'number' ? i : 0;
     };
+    const pickArtists = (): NavidromeItemArtist[] | undefined => {
+      const raw = (Array.isArray(meta.artists) && meta.artists) || item.artists;
+      if (!Array.isArray(raw)) return undefined;
+      const list: NavidromeItemArtist[] = [];
+      for (const a of raw) {
+        if (a && typeof a === 'object') {
+          const o = a as Record<string, unknown>;
+          if (typeof o.id === 'string' && typeof o.name === 'string') {
+            list.push({ id: o.id, name: o.name });
+          }
+        }
+      }
+      return list.length > 0 ? list : undefined;
+    };
+    const artistId = pickStr('artistId');
+    const artists = pickArtists();
     out.push({
       id,
       title: pickStr('title') ?? '',
       artist: pickStr('artist') ?? '',
+      ...(artistId ? { artistId } : {}),
+      ...(artists ? { artists } : {}),
       album: pickStr('album') ?? '',
       albumId: typeof item.albumId === 'string' ? item.albumId : '',
       coverArt: pickStr('coverArt') ?? '',
@@ -339,6 +362,11 @@ class ConnectService {
     const metadata = {
       title: cur.title,
       artist: cur.artist,
+      // artistId + artists para que el receptor (otra pestaña / iOS) pinte el
+      // nombre del artista como link y soporte multi-artista. Sin esto el
+      // estado remoto/restaurado pierde los links (solo texto plano).
+      artistId: cur.artistId ?? '',
+      artists: cur.artists ?? [],
       album: cur.album ?? '',
       coverArt: coverArtId,
       duration: cur.durationSec ?? 0
@@ -645,6 +673,10 @@ class ConnectService {
       id: trackId,
       title: meta.title ?? '',
       artist: meta.artist ?? '',
+      ...(meta.artistId ? { artistId: meta.artistId } : {}),
+      ...(Array.isArray(meta.artists) && meta.artists.length > 0
+        ? { artists: meta.artists }
+        : {}),
       album: meta.album ?? '',
       coverUrl,
       durationSec: meta.duration ?? 0
@@ -882,6 +914,8 @@ class ConnectService {
       trackId: s.id,
       title: s.title,
       artist: s.artist,
+      artistId: s.artistId ?? '',
+      artists: s.artists ?? [],
       album: s.album ?? '',
       albumId: s.albumId ?? '',
       coverArt: s.coverArt ?? '',
@@ -889,6 +923,8 @@ class ConnectService {
       metadata: {
         title: s.title,
         artist: s.artist,
+        artistId: s.artistId ?? '',
+        artists: s.artists ?? [],
         album: s.album ?? '',
         coverArt: s.coverArt ?? '',
         duration: s.duration

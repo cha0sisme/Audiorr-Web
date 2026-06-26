@@ -461,6 +461,7 @@
             title={player.currentSong.title}
             artist={player.currentSong.artist}
             artistId={player.currentSong.artistId}
+            artists={player.currentSong.artists}
             coverUrl={player.currentSong.coverUrl}
             explicit={player.currentSong.explicit ?? false}
             durationSec={player.currentSong.durationSec ?? 0}
