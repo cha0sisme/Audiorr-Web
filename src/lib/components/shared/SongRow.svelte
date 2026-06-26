@@ -34,8 +34,15 @@
 
   type Props = {
     track: SongListItem;
-    /** Posición del row en la lista (1-indexed). Usado en el slot izquierdo. */
+    /** Número visible del row (1-indexed). En álbumes multi-disco es el número
+        real de pista dentro de su disco (reinicia por disco); en el resto es
+        la posición en la lista. Pintado en el slot izquierdo. */
     index: number;
+    /** Posición VISUAL de la fila en el render completo (0-indexed, contando
+        separadores de disco). Alimenta el stagger de la entry animation para
+        que la cascada fluya linealmente top→bottom aun con separadores
+        intercalados. Si se omite, cae a `index - 1` (caso lista plana). */
+    rowIndex?: number | undefined;
     /** True = es la canción actualmente sonando desde este contexto. */
     isCurrent: boolean;
     /** Artist crudo de la pista (titular principal). Se usa para el menú
@@ -57,7 +64,7 @@
     onPlay: () => void;
   };
 
-  let { track, index, isCurrent, artist, albumArtist, coverUrl, contextType, onPlay }: Props =
+  let { track, index, rowIndex, isCurrent, artist, albumArtist, coverUrl, contextType, onPlay }: Props =
     $props();
 
   const explicit = $derived(track.explicit ?? false);
@@ -244,7 +251,7 @@
   class:menu-open={menuOpen}
   role="button"
   tabindex="0"
-  style:--row-i={index - 1}
+  style:--row-i={rowIndex ?? index - 1}
   onmouseenter={() => (hovered = true)}
   onmouseleave={() => (hovered = false)}
   onclick={handleRowClick}

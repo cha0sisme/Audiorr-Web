@@ -163,6 +163,11 @@ export type SongListItem = {
   title: string;
   durationSec: number;
   trackNumber: number;
+  /** Disco al que pertenece la pista en álbumes multi-disco (OpenSubsonic
+      `song.discNumber`). SongList agrupa por este valor y pinta un separador
+      de disco cuando el álbum tiene >1 disco distinto. undefined → disco
+      único (caso normal), no se agrupa. */
+  discNumber?: number | undefined;
   artist?: string | undefined;
   explicit?: boolean | undefined;
   coverUrl?: string | undefined;
@@ -195,6 +200,7 @@ export function songToListItem(
     title: song.title,
     durationSec: song.duration ?? 0,
     trackNumber: song.track ?? index + 1,
+    discNumber: song.discNumber,
     artist: includeArtist ? song.artist : undefined,
     explicit: song.explicitStatus === 'explicit',
     coverUrl: includeCover && song.coverArt ? getCoverArtUrl(song.coverArt, ROW_SIZE) : undefined,

@@ -43,6 +43,18 @@ export const NavidromeRecordLabelSchema = z.object({
 
 export type NavidromeRecordLabel = z.infer<typeof NavidromeRecordLabelSchema>;
 
+/** OpenSubsonic extension. Subtítulo de un disco en un álbum multi-disco
+    ({disc: 2, title: "Bonus Tracks"}). Navidrome lo expone en
+    `album.discTitles[]` cuando los archivos tienen el tag de subtítulo.
+    SongList lo usa para enriquecer el separador de disco ("Disco 2: Bonus
+    Tracks"); si falta, cae al genérico "Disco N". */
+export const NavidromeDiscTitleSchema = z.object({
+  disc: z.number(),
+  title: z.string()
+});
+
+export type NavidromeDiscTitle = z.infer<typeof NavidromeDiscTitleSchema>;
+
 export const NavidromeAlbumSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -61,7 +73,10 @@ export const NavidromeAlbumSchema = z.object({
   explicitStatus: z.string().optional(),
   // OpenSubsonic extension. Lista de sellos discográficos asociados al álbum.
   // Usado para el footer "© {year} {labels}" en AlbumDetail.
-  recordLabels: z.array(NavidromeRecordLabelSchema).optional()
+  recordLabels: z.array(NavidromeRecordLabelSchema).optional(),
+  // OpenSubsonic extension. Subtítulos de disco para álbumes multi-disco.
+  // SongList los consume para titular el separador de cada disco.
+  discTitles: z.array(NavidromeDiscTitleSchema).optional()
 });
 
 export type NavidromeAlbum = z.infer<typeof NavidromeAlbumSchema>;

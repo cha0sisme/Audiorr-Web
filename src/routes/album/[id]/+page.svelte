@@ -497,6 +497,7 @@
         {tracks}
         contextType="album"
         contextId={albumId}
+        discTitles={album?.discTitles}
         albumArtist={album?.artist ?? ''}
         onPlay={loadTrack}
       />
