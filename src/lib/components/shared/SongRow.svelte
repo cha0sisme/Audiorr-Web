@@ -223,6 +223,14 @@
     onPlay();
   }
 
+  /** Clic derecho en cualquier parte de la fila abre el mismo menú contextual
+      que el botón de 3 puntos — así no hay que llegar hasta el final de la
+      fila. El menú queda anclado a `.menu-anchor` (extremo derecho). */
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    menuOpen = true;
+  }
+
   function handleRowKeydown(e: KeyboardEvent) {
     if (menuOpen) return;
     if (e.key === 'Enter' || e.key === ' ') {
@@ -255,6 +263,7 @@
   onmouseenter={() => (hovered = true)}
   onmouseleave={() => (hovered = false)}
   onclick={handleRowClick}
+  oncontextmenu={handleContextMenu}
   onkeydown={handleRowKeydown}
 >
   <button
@@ -436,7 +445,8 @@
   }
 
   .duration {
-    font-family: var(--font-mono);
+    /* Fuente del sistema (no mono) — `tabular-nums` mantiene los dígitos
+       alineados sin el look "consola" del monoespaciado. */
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
     color: var(--text-tertiary);
