@@ -29,6 +29,9 @@ import {
   Search3ResponseSchema,
   LyricsBySongIdResponseSchema,
   LyricsLegacyResponseSchema,
+  GenresResponseSchema,
+  type NavidromeGenre,
+  type NavidromeItemDate,
   type NavidromeAlbum,
   type NavidromeArtist,
   type NavidromePlaylist,
@@ -463,6 +466,66 @@ export async function getAlbumsByGenre(
     AlbumList2ResponseSchema
   );
   return data.albumList2.album ?? [];
+}
+
+/** Géneros de la biblioteca con su nº de álbumes/canciones (Subsonic
+    `getGenres`). No depende del backend Audiorr. Mirror
+    NavidromeService.swift getGenres. */
+export async function getGenres(): Promise<NavidromeGenre[]> {
+  const creds = requireCreds();
+  const data = await call(creds, 'getGenres', {}, GenresResponseSchema);
+  return data.genres?.genre ?? [];
+}
+
+/** Clave de orden por fecha de lanzamiento REAL: y*10000 + m*100 + d, con
+    fallback releaseDate → originalReleaseDate → year. Mirror
+    releaseSortValue de NavidromeModels.swift. */
+function releaseSortValue(album: NavidromeAlbum): number {
+  const value = (d: NavidromeItemDate | undefined): number | undefined => {
+    if (!d?.year) return undefined;
+    return d.year * 10000 + (d.month ?? 0) * 100 + (d.day ?? 0);
+  };
+  return (
+    value(album.releaseDate) ??
+    value(album.originalReleaseDate) ??
+    (album.year ?? 0) * 10000
+  );
+}
+
+/**
+ * "Lanzamientos recientes" — álbumes lanzados en los últimos `months` meses,
+ * ordenados newest-first por fecha de lanzamiento real. Mirror
+ * NavidromeService.swift getRecentReleases:
+ *
+ * - Pool generoso vía `byYear` (puede venir en orden ascendente; con pool
+ *   pequeño los lanzamientos del año en curso quedaban fuera del corte).
+ * - Orden por releaseSortValue (releaseDate/originalReleaseDate vía
+ *   OpenSubsonic), no solo por año — dentro del mismo año `created` (fecha
+ *   de alta en la biblioteca) no refleja recencia del lanzamiento.
+ *   Tiebreaker por `created` (ISO 8601 lexicográfico == cronológico).
+ */
+export async function getRecentReleases(months = 6, size = 30): Promise<NavidromeAlbum[]> {
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - months);
+  const fromYear = cutoff.getFullYear();
+  const toYear = now.getFullYear();
+
+  const desiredSize = Math.max(size * 8, 300);
+  let pool = await getAlbumsByYear(fromYear, toYear, desiredSize);
+  if (pool.length === 0) {
+    pool = await getAlbumList2('newest', desiredSize);
+  }
+
+  return pool
+    .filter((a) => (a.year ?? 0) >= fromYear)
+    .sort((a, b) => {
+      const ka = releaseSortValue(a);
+      const kb = releaseSortValue(b);
+      if (ka !== kb) return kb - ka;
+      return (b.created ?? '').localeCompare(a.created ?? '');
+    })
+    .slice(0, size);
 }
 
 /**

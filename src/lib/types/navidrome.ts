@@ -55,6 +55,17 @@ export const NavidromeDiscTitleSchema = z.object({
 
 export type NavidromeDiscTitle = z.infer<typeof NavidromeDiscTitleSchema>;
 
+/** OpenSubsonic ItemDate — fecha desglosada {year, month, day} (todos
+    opcionales). Navidrome la expone en `album.releaseDate` /
+    `album.originalReleaseDate` cuando los tags traen fecha completa. */
+export const NavidromeItemDateSchema = z.object({
+  year: z.number().optional(),
+  month: z.number().optional(),
+  day: z.number().optional()
+});
+
+export type NavidromeItemDate = z.infer<typeof NavidromeItemDateSchema>;
+
 export const NavidromeAlbumSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -84,7 +95,12 @@ export const NavidromeAlbumSchema = z.object({
   // songCount (ver utils/release-kind.ts).
   releaseTypes: z.array(z.string()).optional(),
   // OpenSubsonic extension. Flag de recopilatorio (tag COMPILATION).
-  isCompilation: z.boolean().optional()
+  isCompilation: z.boolean().optional(),
+  // OpenSubsonic extension. Fecha de lanzamiento real (año/mes/día) — base
+  // del orden "newest-first" de getRecentReleases (mirror releaseSortValue
+  // de NavidromeModels.swift).
+  releaseDate: NavidromeItemDateSchema.optional(),
+  originalReleaseDate: NavidromeItemDateSchema.optional()
 });
 
 export type NavidromeAlbum = z.infer<typeof NavidromeAlbumSchema>;
@@ -103,6 +119,20 @@ export const NavidromeArtistSchema = z.object({
 });
 
 export type NavidromeArtist = z.infer<typeof NavidromeArtistSchema>;
+
+// ============================================================================
+// Genre
+// ============================================================================
+
+/** Subsonic getGenres — género de la biblioteca con sus contadores. `value`
+    es el nombre tal cual viene de los tags. */
+export const NavidromeGenreSchema = z.object({
+  value: z.string(),
+  songCount: z.number().optional(),
+  albumCount: z.number().optional()
+});
+
+export type NavidromeGenre = z.infer<typeof NavidromeGenreSchema>;
 
 // ============================================================================
 // Playlist
@@ -207,6 +237,13 @@ export const AlbumList2ResponseSchema = z.object({
   albumList2: z.object({
     album: z.array(NavidromeAlbumSchema).optional()
   })
+});
+
+/** GET /rest/getGenres → genres.genre[] */
+export const GenresResponseSchema = z.object({
+  genres: z
+    .object({ genre: z.array(NavidromeGenreSchema).optional() })
+    .optional()
 });
 
 /** GET /rest/getArtists → artists.index[].artist[] (alphabetic indexing) */

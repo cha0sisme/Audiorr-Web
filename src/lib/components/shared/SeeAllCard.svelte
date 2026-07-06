@@ -5,17 +5,26 @@
     /** Cantidad de elementos restantes que quedan fuera del scroll. */
     remaining: number;
     href: string;
+    /** 'square' (covers 1:1, default) | 'wide' (slots apaisados 168:100,
+        p. ej. GenreCard) — en wide el label va DENTRO de la card para que
+        la altura de fila case con las cards vecinas. */
+    shape?: 'square' | 'wide';
   };
 
-  let { remaining, href }: Props = $props();
+  let { remaining, href, shape = 'square' }: Props = $props();
 </script>
 
-<a class="card" {href}>
+<a class="card" class:wide={shape === 'wide'} {href}>
   <div class="cover">
-    <CaretCircleRight size={32} weight="fill" />
+    <CaretCircleRight size={shape === 'wide' ? 24 : 32} weight="fill" />
     <span class="count">+{remaining}</span>
+    {#if shape === 'wide'}
+      <span class="label-inner">Ver todo</span>
+    {/if}
   </div>
-  <p class="label">Ver todo</p>
+  {#if shape !== 'wide'}
+    <p class="label">Ver todo</p>
+  {/if}
 </a>
 
 <style>
@@ -56,18 +65,33 @@
     box-shadow: var(--shadow-md);
   }
 
+  .wide .cover {
+    aspect-ratio: 168 / 100;
+    margin-bottom: 0;
+    gap: 2px;
+    border-radius: var(--radius-lg);
+  }
+
   .count {
     font-family: var(--font-mono);
     font-size: var(--text-base);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
   }
+  .wide .count {
+    font-size: var(--text-sm);
+  }
 
-  .label {
+  .label,
+  .label-inner {
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--text-secondary);
     line-height: 1.3;
+  }
+  .label-inner {
+    font-size: var(--text-xs);
+    color: inherit;
   }
   .card:hover .label {
     color: var(--text-primary);

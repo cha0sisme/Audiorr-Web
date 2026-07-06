@@ -6,14 +6,18 @@
   import RecentArtistCard from '$components/home/RecentArtistCard.svelte';
   import QuickAccessCard from '$components/home/QuickAccessCard.svelte';
   import TopWeeklyChart from '$components/home/TopWeeklyChart.svelte';
+  import WeeklyStatsCard from '$components/home/WeeklyStatsCard.svelte';
+  import GenreCard from '$components/shared/GenreCard.svelte';
   import * as nav from '$services/NavidromeService';
   import * as stats from '$services/stats';
   import { getDailyMixes, getPlaylistCoverUrl } from '$services/dailyMixes';
   import { getSmartPlaylists } from '$services/smartPlaylists';
+  import { getPinnedPlaylists } from '$services/user';
   import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { prefetchCover } from '$utils/cover-cache';
-  import { albumToCardProps } from '$utils/navidrome-mappers';
+  import { albumToCardProps, playlistToCardProps } from '$utils/navidrome-mappers';
+  import { dailyMixToProps } from '$utils/playlist-section-mappers';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
   import { credentials } from '$stores/credentials.svelte';
@@ -34,12 +38,12 @@
   // Subsonic queries.
   //
   // - `newest` = recién añadidos a la biblioteca (Navidrome ordena por
-  //   `created_at` desc). Es lo que queremos en "Recientemente añadido".
+  //   `created_at` desc). Es lo que queremos en "Últimos álbumes añadidos".
   // - `frequent` = más reproducidos del usuario.
-  // - `random` = surtido aleatorio (refresca cada visita, staleTime 0).
-  // - `byYear` con año actual = "Nuevos lanzamientos" — no son adds recientes
-  //   sino lanzamientos del año (un álbum del 2026 añadido hoy y uno del
-  //   2026 añadido hace meses entran ambos).
+  // - `random` = surtido aleatorio (refresca cada visita, staleTime 0) —
+  //   sección "Descubre algo nuevo".
+  // - getRecentReleases = "Lanzamientos recientes", ventana 6 meses por
+  //   fecha de lanzamiento real (no son adds recientes sino lanzamientos).
   //
   // Eliminado: `recent` (recently played) — el feed correcto de "lo que has
   // estado escuchando" lo da el backend Audiorr en /api/stats/recent-contexts.
@@ -58,13 +62,51 @@
     enabled: credentials.isConfigured
   }));
 
-  const currentYear = new Date().getFullYear();
-  const newReleases = createQuery(() => ({
-    queryKey: ['albumList2', 'byYear', currentYear],
-    queryFn: () => nav.getAlbumsByYear(currentYear, currentYear, 30),
+  // "Lanzamientos recientes" — ventana de 6 meses ordenada por fecha de
+  // lanzamiento REAL (releaseDate OpenSubsonic), mirror de
+  // HomeViewModel.loadRecentReleases. Reemplaza al antiguo byYear del año
+  // en curso, que dejaba fuera lanzamientos de diciembre en enero.
+  const recentReleasesQ = createQuery(() => ({
+    queryKey: ['recentReleases'],
+    queryFn: () => nav.getRecentReleases(6, 30),
     enabled: credentials.isConfigured,
     staleTime: 60 * 60 * 1000
   }));
+
+  /** Fisher-Yates — rotación honesta del pool de géneros. */
+  function shuffle<T>(arr: readonly T[]): T[] {
+    const out = [...arr];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const a = out[i]!;
+      out[i] = out[j]!;
+      out[j] = a;
+    }
+    return out;
+  }
+
+  // Géneros (Navidrome — funciona sin backend). Selección "pro": prioriza
+  // los más populares (nº de álbumes) pero rota un subconjunto para dar
+  // variedad en cada visita — ventana top-20 barajada → 12. Mirror
+  // HomeViewModel.loadGenres. staleTime 0 = re-shuffle por visita (como el
+  // load() de iOS con TTL corto).
+  const genresQ = createQuery(() => ({
+    queryKey: ['genres', 'home'],
+    queryFn: async () => {
+      const all = (await nav.getGenres()).filter(
+        (g) => (g.albumCount ?? 0) > 0 && g.value.trim().length > 0
+      );
+      const popular = [...all].sort((a, b) => (b.albumCount ?? 0) - (a.albumCount ?? 0));
+      return {
+        featured: shuffle(popular.slice(0, 20)).slice(0, 12),
+        total: popular.length
+      };
+    },
+    enabled: credentials.isConfigured,
+    staleTime: 0
+  }));
+  const homeGenres = $derived(genresQ.data?.featured ?? []);
+  const totalGenres = $derived(genresQ.data?.total ?? 0);
 
   // ===========================================================================
   // Backend Audiorr — Jump Back In + Top semanal.
@@ -178,19 +220,22 @@
     queueManager.play(songs, index, { contextUri: 'playlist:top-weekly' });
   }
 
-  // Side effect: pre-cargar los `coverContentHash` de daily mixes + smart
-  // playlists en el store global `playlistCovers`. Mirrors
-  // `api.refreshPlaylistCoverHashes()` de iOS HomeView.
-  // Sin esto, los covers de playlists en Jump Back In se servirían sin
-  // `?v=` y caducarían al cabo de 30 min (vs 1 año con el hash).
-  // No renderizamos los datos aquí — es solo para hidratar el cache.
-  createQuery(() => ({
+  const queryClient = useQueryClient();
+
+  // Daily mixes: la query hidrata los `coverContentHash` en el store global
+  // `playlistCovers` (side effect del service, mirrors
+  // `api.refreshPlaylistCoverHashes()` de iOS) Y alimenta la sección
+  // "Tus mixes diarios". Solo mixes con playlist Navidrome resuelta — sin
+  // navidromeId la card no puede navegar (mirror resolveMixPlaylists iOS).
+  const dailyMixesQ = createQuery(() => ({
     queryKey: ['dailyMixes', credentials.current?.username ?? ''],
     queryFn: () => getDailyMixes(credentials.current!.username),
     enabled: credentials.isConfigured,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000
   }));
+  const dailyMixes = $derived((dailyMixesQ.data ?? []).filter((m) => m.navidromeId));
+
   createQuery(() => ({
     queryKey: ['smartPlaylists', credentials.current?.username ?? ''],
     queryFn: () => getSmartPlaylists(credentials.current!.username),
@@ -199,11 +244,44 @@
     gcTime: 30 * 60 * 1000
   }));
 
+  // Playlists fijadas (backend), resueltas contra las playlists reales de
+  // Navidrome manteniendo el orden del pin — mirror
+  // HomeViewModel.loadPinnedPlaylists. Key derivada de la del Sidebar
+  // (['pinnedPlaylists', user]) para que un invalidate por prefijo refresque
+  // ambas sin chocar tipos (el Sidebar cachea las PinnedPlaylist crudas).
+  const pinnedResolvedQ = createQuery(() => ({
+    queryKey: ['pinnedPlaylists', credentials.current?.username ?? '', 'resolved'],
+    queryFn: async () => {
+      const pinned = await getPinnedPlaylists(credentials.current!.username);
+      if (pinned.length === 0) return [];
+      const all = await queryClient.fetchQuery({
+        queryKey: ['library', 'playlists'],
+        queryFn: () => nav.getPlaylists(),
+        staleTime: 5 * 60 * 1000
+      });
+      const lookup = new Map(all.map((p) => [p.id, p]));
+      return pinned.flatMap((p) => lookup.get(p.id) ?? []);
+    },
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000
+  }));
+  const pinnedPlaylists = $derived(pinnedResolvedQ.data ?? []);
+
+  // "Tu semana" — misma key shape que ProfileView (['userStats', user,
+  // period]) para compartir cache con el perfil.
+  const weeklyStatsQ = createQuery(() => ({
+    queryKey: ['userStats', credentials.current?.username ?? '', 'week'],
+    queryFn: () => stats.getUserStats(credentials.current!.username, 'week'),
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000
+  }));
+  const weeklyStats = $derived(weeklyStatsQ.data);
+
   // Trigger Layer 2 (HEAD/ETag) para playlists no cubiertas por los bulks
   // de arriba — editorial, Spotify-synced, "This Is …", playlists del usuario.
   // Mirror HomeView.swift:91. Idempotente: si el usuario navega Home→Library
   // en pocos segundos, el segundo trigger comparte la misma promise.
-  const queryClient = useQueryClient();
   $effect(() => {
     if (!credentials.isConfigured) return;
     void refreshPlaylistCoverHashes(queryClient, credentials.current?.username);
@@ -308,20 +386,68 @@
     </HorizontalScrollSection>
   {/if}
 
-  <HorizontalScrollSection
-    title="Recientemente añadido"
-    items={newestAlbums.data ?? []}
-    seeAllHref="/library/recent"
-  >
-    {#snippet item(a)}
-      {@const props = albumToCardProps(a)}
-      <AlbumCard {...props} />
-    {/snippet}
-  </HorizontalScrollSection>
+  <!-- ═══ Orden de secciones = HomeView.swift body: personales (quick /
+       top semanal / volver a escuchar / fijadas) → descubrimiento
+       (lanzamientos / géneros / mixes / random) → catálogo (últimos
+       añadidos) → stats (Tu semana). ═══ -->
+
+  <!-- === Playlists fijadas (backend) === -->
+  {#if pinnedPlaylists.length > 0}
+    <HorizontalScrollSection title="Playlists fijadas" items={pinnedPlaylists}>
+      {#snippet item(p)}
+        {@const props = playlistToCardProps(p)}
+        <PlaylistCard {...props} />
+      {/snippet}
+    </HorizontalScrollSection>
+  {/if}
+
+  <!-- === Lanzamientos recientes: ventana 6 meses por fecha de lanzamiento
+       real — diferente de "Últimos álbumes añadidos" (newest = recién
+       metidos a la biblioteca). -->
+  {#if (recentReleasesQ.data ?? []).length > 0}
+    <HorizontalScrollSection
+      title="Lanzamientos recientes"
+      items={recentReleasesQ.data ?? []}
+      seeAllHref="/library/new-releases"
+    >
+      {#snippet item(a)}
+        {@const props = albumToCardProps(a)}
+        <AlbumCard {...props} subtitleMode="year" />
+      {/snippet}
+    </HorizontalScrollSection>
+  {/if}
+
+  <!-- === Géneros (Navidrome — funciona sin backend) === -->
+  {#if homeGenres.length > 0}
+    <HorizontalScrollSection
+      title="Géneros"
+      items={homeGenres}
+      itemMinWidth={168}
+      seeAllShape="wide"
+      seeAllHref={totalGenres > homeGenres.length ? '/library/genres' : undefined}
+    >
+      {#snippet item(g)}
+        <GenreCard genre={g} />
+      {/snippet}
+    </HorizontalScrollSection>
+  {/if}
+
+  <!-- === Tus mixes diarios (backend) === -->
+  {#if dailyMixes.length > 0}
+    <HorizontalScrollSection
+      title="Tus mixes diarios"
+      items={dailyMixes}
+      seeAllHref="/library/daily-mixes"
+    >
+      {#snippet item(mix)}
+        {@const props = dailyMixToProps(mix)}
+        <PlaylistCard {...props} />
+      {/snippet}
+    </HorizontalScrollSection>
+  {/if}
 
   <HorizontalScrollSection
-    title="Aleatorio"
-    subtitle="Algo distinto cada visita"
+    title="Descubre algo nuevo"
     items={randomAlbums.data ?? []}
     seeAllHref="/library/random"
   >
@@ -331,20 +457,20 @@
     {/snippet}
   </HorizontalScrollSection>
 
-  <!-- Nuevos lanzamientos: álbumes del año en curso (`byYear`) — diferente
-       de "Recientemente añadido" (newest = recién metidos a la biblioteca). -->
-  {#if (newReleases.data ?? []).length > 0}
-    <HorizontalScrollSection
-      title="Nuevos lanzamientos"
-      subtitle={`Lanzamientos de ${currentYear}`}
-      items={newReleases.data ?? []}
-      seeAllHref="/library/new-releases"
-    >
-      {#snippet item(a)}
-        {@const props = albumToCardProps(a)}
-        <AlbumCard {...props} subtitleMode="year" />
-      {/snippet}
-    </HorizontalScrollSection>
+  <HorizontalScrollSection
+    title="Últimos álbumes añadidos"
+    items={newestAlbums.data ?? []}
+    seeAllHref="/library/recent"
+  >
+    {#snippet item(a)}
+      {@const props = albumToCardProps(a)}
+      <AlbumCard {...props} />
+    {/snippet}
+  </HorizontalScrollSection>
+
+  <!-- === Tu semana (backend stats) === -->
+  {#if weeklyStats && weeklyStats.total_plays > 0}
+    <WeeklyStatsCard stats={weeklyStats} />
   {/if}
 </div>
 

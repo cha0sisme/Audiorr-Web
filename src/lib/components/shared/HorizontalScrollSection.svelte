@@ -11,8 +11,9 @@
     seeAllHref?: string | undefined;
     /** Width mínimo de cada card. Album/Playlist = 180, Artist = 140. */
     itemMinWidth?: number;
-    /** Variante visual del SeeAllCard. */
-    seeAllShape?: 'square' | 'round';
+    /** Variante visual del SeeAllCard. 'round' = artistas; 'wide' = slots
+        apaisados (GenreCard 168:100). */
+    seeAllShape?: 'square' | 'round' | 'wide';
     item: Snippet<[T]>;
   };
 
@@ -93,7 +94,11 @@
         {#if seeAllShape === 'round'}
           <SeeAllArtistCard {remaining} href={seeAllHref} />
         {:else}
-          <SeeAllCard {remaining} href={seeAllHref} />
+          <SeeAllCard
+            {remaining}
+            href={seeAllHref}
+            shape={seeAllShape === 'wide' ? 'wide' : 'square'}
+          />
         {/if}
       </div>
     {/if}

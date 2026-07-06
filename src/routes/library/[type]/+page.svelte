@@ -38,12 +38,14 @@
 
   type Kind = 'album' | 'playlist' | 'artist';
 
+  // Títulos alineados con las secciones del Home (paridad iOS L.latestAlbums /
+  // L.discoverSomethingNew / L.recentReleases).
   const ROUTES: Record<LibraryType, { title: string; kind: Kind }> = {
-    'recent':           { title: 'Recientemente añadido',     kind: 'album' },
+    'recent':           { title: 'Últimos álbumes añadidos',  kind: 'album' },
     'most-played':      { title: 'Más escuchado',             kind: 'album' },
-    'random':           { title: 'Aleatorio',                 kind: 'album' },
+    'random':           { title: 'Descubre algo nuevo',       kind: 'album' },
     'newest':           { title: 'Nuevos lanzamientos',       kind: 'album' },
-    'new-releases':     { title: 'Nuevos lanzamientos',       kind: 'album' },
+    'new-releases':     { title: 'Lanzamientos recientes',    kind: 'album' },
     'playlists':        { title: 'Tus playlists',             kind: 'playlist' },
     'artists':          { title: 'Artistas',                  kind: 'artist' },
     'daily-mixes':      { title: 'Tus mixes diarios',         kind: 'playlist' },
@@ -79,8 +81,6 @@
     : 'random'
   );
 
-  const currentYear = new Date().getFullYear();
-
   // ============================================================================
   // Albums (recent / most-played / random / newest / new-releases)
   //
@@ -88,7 +88,7 @@
   //   - 'newest'    → ['albumList2', 'newest']          size 30
   //   - 'frequent'  → ['albumList2', 'frequent']        size 30
   //   - 'random'    → ['albumList2', 'random']          size 30
-  //   - 'byYear'    → ['albumList2', 'byYear', year]    size 30
+  //   - new-releases → ['recentReleases']               size 30
   //
   // Si pedimos un size distinto o una key distinta, el "Ver todo" carga
   // OTRO set de álbumes — eso era el bug: el contador "+25" de SeeAllCard
@@ -100,12 +100,10 @@
   const HOME_SIZE = 30;
   const albumsQ = createQuery(() => ({
     queryKey:
-      type === 'new-releases'
-        ? ['albumList2', 'byYear', currentYear]
-        : ['albumList2', albumListType],
+      type === 'new-releases' ? ['recentReleases'] : ['albumList2', albumListType],
     queryFn: () =>
       type === 'new-releases'
-        ? nav.getAlbumsByYear(currentYear, currentYear, HOME_SIZE)
+        ? nav.getRecentReleases(6, HOME_SIZE)
         : nav.getAlbumList2(albumListType, HOME_SIZE),
     enabled: credentials.isConfigured && kind === 'album',
     staleTime: type === 'new-releases' ? 60 * 60 * 1000 : 0

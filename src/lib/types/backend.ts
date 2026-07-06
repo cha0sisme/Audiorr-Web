@@ -599,6 +599,9 @@ export const UserStatsTopGenreSchema = z.object({
 
 export const UserStatsSchema = z.object({
   total_plays: z.number(),
+  // Minutos totales escuchados en el periodo. Optional: builds antiguas del
+  // backend no lo exponen (iOS lo trata como 0 cuando falta).
+  total_minutes: z.number().optional(),
   weighted_average_release_year: z.number().nullable(),
   weighted_average_BPM: z.number().nullable(),
   weighted_average_Energy: z.number().nullable(),
