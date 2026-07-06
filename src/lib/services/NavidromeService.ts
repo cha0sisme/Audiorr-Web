@@ -480,7 +480,7 @@ export async function getGenres(): Promise<NavidromeGenre[]> {
 /** Clave de orden por fecha de lanzamiento REAL: y*10000 + m*100 + d, con
     fallback releaseDate → originalReleaseDate → year. Mirror
     releaseSortValue de NavidromeModels.swift. */
-function releaseSortValue(album: NavidromeAlbum): number {
+export function releaseSortValue(album: NavidromeAlbum): number {
   const value = (d: NavidromeItemDate | undefined): number | undefined => {
     if (!d?.year) return undefined;
     return d.year * 10000 + (d.month ?? 0) * 100 + (d.day ?? 0);
@@ -504,6 +504,18 @@ function releaseSortValue(album: NavidromeAlbum): number {
  *   de alta en la biblioteca) no refleja recencia del lanzamiento.
  *   Tiebreaker por `created` (ISO 8601 lexicográfico == cronológico).
  */
+/** Fecha de lanzamiento COMPLETA (year+month+day de los tags) como Date, o
+    null si falta cualquiera de los tres campos — sin fecha completa no se
+    afirma nada sobre recencia. Mirror fullReleaseDate de
+    NavidromeModels.swift. */
+export function fullReleaseDate(
+  album: Pick<NavidromeAlbum, 'releaseDate' | 'originalReleaseDate'>
+): Date | null {
+  const from = (d: NavidromeItemDate | undefined): Date | null =>
+    d?.year && d.month && d.day ? new Date(d.year, d.month - 1, d.day) : null;
+  return from(album.releaseDate) ?? from(album.originalReleaseDate);
+}
+
 export async function getRecentReleases(months = 6, size = 30): Promise<NavidromeAlbum[]> {
   const now = new Date();
   const cutoff = new Date(now);
@@ -592,6 +604,76 @@ export async function getArtists(): Promise<NavidromeArtist[]> {
   const data = await call(creds, 'getArtists', {}, ArtistsResponseSchema);
   // Navidrome devuelve los artistas indexados alfabéticamente — los aplastamos
   return (data.artists.index ?? []).flatMap((idx) => idx.artist ?? []);
+}
+
+/**
+ * Apariciones por artista en BULK — nº de álbumes donde cada artista
+ * participa (song.artists[] / song.artistId) sin ser album artist. Misma
+ * semántica que `getArtistCollaborations` ("Aparece en" de ArtistDetail),
+ * pero derivada del catálogo completo en O(páginas) para poder pintar
+ * "X apariciones" en TODAS las cards de /library/artists sin un search3
+ * por artista.
+ *
+ * Coste: catálogo de álbumes (1 req/500) + catálogo de canciones vía
+ * search3 con query vacía (comportamiento OpenSubsonic estándar: query ""
+ * devuelve toda la biblioteca; 1 req/500 canciones). Cachear con staleTime
+ * generoso — el catálogo cambia despacio.
+ */
+export async function getAppearanceCounts(): Promise<Map<string, number>> {
+  const PAGE = 500;
+  // Backstop para bibliotecas enormes: 40 páginas = 20k canciones. Más allá,
+  // devolvemos lo acumulado (conteo parcial es mejor que colgar la vista).
+  const MAX_PAGES = 40;
+
+  // 1. Álbumes propios por artista (album artist primario + co-créditos).
+  const albums: NavidromeAlbum[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const batch = await getAlbumList2('alphabeticalByName', PAGE, page * PAGE);
+    albums.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  const ownAlbums = new Map<string, Set<string>>();
+  const addOwn = (artistId: string, albumId: string) => {
+    let set = ownAlbums.get(artistId);
+    if (!set) {
+      set = new Set();
+      ownAlbums.set(artistId, set);
+    }
+    set.add(albumId);
+  };
+  for (const al of albums) {
+    if (al.artistId) addOwn(al.artistId, al.id);
+    for (const a of al.artists ?? []) addOwn(a.id, al.id);
+  }
+
+  // 2. Participaciones a nivel canción → álbumes distintos no-propios.
+  const appearances = new Map<string, Set<string>>();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const result = await search3('', {
+      artistCount: 0,
+      albumCount: 0,
+      songCount: PAGE,
+      songOffset: page * PAGE
+    });
+    for (const song of result.songs) {
+      if (!song.albumId) continue;
+      const participantIds = new Set<string>();
+      for (const a of song.artists ?? []) participantIds.add(a.id);
+      if (song.artistId) participantIds.add(song.artistId);
+      for (const id of participantIds) {
+        if (ownAlbums.get(id)?.has(song.albumId)) continue;
+        let set = appearances.get(id);
+        if (!set) {
+          set = new Set();
+          appearances.set(id, set);
+        }
+        set.add(song.albumId);
+      }
+    }
+    if (result.songs.length < PAGE) break;
+  }
+
+  return new Map([...appearances].map(([id, set]) => [id, set.size]));
 }
 
 export async function getPlaylists(): Promise<NavidromePlaylist[]> {

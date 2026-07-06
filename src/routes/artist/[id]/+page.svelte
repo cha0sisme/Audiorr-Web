@@ -16,6 +16,7 @@
   import SongList from '$components/shared/SongList.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
   import ImageLightbox from '$components/shared/ImageLightbox.svelte';
+  import RecentReleaseCard from '$components/artist/RecentReleaseCard.svelte';
   import * as nav from '$services/NavidromeService';
   import {
     albumToCardProps,
@@ -31,6 +32,7 @@
     RELEASE_KIND_LABEL,
     type DiscographyFilter
   } from '$utils/release-kind';
+  import { artistCountsLabel } from '$utils/artist-counts';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -46,7 +48,7 @@
     HERO_PLACEHOLDER_PALETTE,
     type CoverPalette
   } from '$utils/palette';
-  import type { NavidromeSimilarArtist } from '$types/navidrome';
+  import type { NavidromeAlbum, NavidromeSimilarArtist } from '$types/navidrome';
 
   const artistId = $derived(page.params.id ?? '');
 
@@ -97,6 +99,56 @@
     gcTime: 60 * 60 * 1000
   }));
   const collaborations = $derived(collaborationsQ.data ?? []);
+
+  // ─── Lanzamiento reciente ────────────────────────────────────────────────
+  // El más nuevo entre discografía y "Aparece en", SOLO si su fecha REAL de
+  // lanzamiento (year+month+day de los tags) cae dentro de la ventana — sin
+  // fecha completa no se afirma nada y la card no sale. Los albums de
+  // getArtist.view no traen releaseDate (solo year) → los pocos candidatos
+  // plausibles se resuelven con getAlbum. Mirror resolveRecentRelease de
+  // ArtistDetailView.swift, con ventana ampliada: iOS usa 30 días; en una
+  // biblioteca que se alimenta con calma eso deja la card casi siempre
+  // invisible, así que aquí consideramos "reciente" ~3 meses.
+  const RECENT_RELEASE_WINDOW_DAYS = 90;
+
+  // Espera a que la query de collabs termine (éxito O error) para que el
+  // candidato ganador pueda venir de "Aparece en" — mirror del await de iOS.
+  const collabsSettled = $derived(collaborationsQ.isSuccess || collaborationsQ.isError);
+
+  const recentReleaseQ = createQuery(() => ({
+    queryKey: ['artistRecentRelease', artistId, collaborations.length],
+    queryFn: async () => {
+      const currentYear = new Date().getFullYear();
+      const candidates = [...albums, ...collaborations]
+        .filter((a) => (a.year ?? 0) >= currentYear - 1)
+        .sort((a, b) => nav.releaseSortValue(b) - nav.releaseSortValue(a))
+        .slice(0, 4);
+
+      let best: { album: NavidromeAlbum; date: Date } | null = null;
+      for (const candidate of candidates) {
+        let resolved: NavidromeAlbum = candidate;
+        if (!nav.fullReleaseDate(resolved)) {
+          try {
+            resolved = (await nav.getAlbum(candidate.id)) as NavidromeAlbum;
+          } catch {
+            // Sin detalle → candidato sin fecha completa, se descarta solo.
+          }
+        }
+        const date = nav.fullReleaseDate(resolved);
+        if (date && (!best || date > best.date)) best = { album: resolved, date };
+      }
+      if (!best) return null;
+
+      const now = new Date();
+      const cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - RECENT_RELEASE_WINDOW_DAYS);
+      return best.date >= cutoff && best.date <= now ? best : null;
+    },
+    enabled: credentials.isConfigured && !!artist && collabsSettled,
+    staleTime: 30 * 60 * 1000,
+    retry: false
+  }));
+  const recentRelease = $derived(recentReleaseQ.data ?? null);
 
   // Playlists con este artista — SOLO Editorial o "This is …".
   // Aislada del resto de queries: nunca bloquea el render del hero/discografía
@@ -167,6 +219,11 @@
   const isCurrentArtist = $derived(player.isPlayingFrom('artist', artistId));
 
   const initial = $derived(artist?.name?.charAt(0).toUpperCase() ?? '?');
+
+  // "X álbumes · Y apariciones" — mismo formato que las ArtistCard de
+  // /library/artists. Las apariciones llegan tarde (query de collabs
+  // aislada): el label crece reactivamente cuando resuelven.
+  const heroCountsLabel = $derived(artistCountsLabel(albums.length, collaborations.length));
 
   // Lightbox state — avatar clickeable abre el visor fullscreen.
   let lightboxOpen = $state(false);
@@ -377,10 +434,8 @@
         <p class="kicker">Artista</p>
         <h1 class="title">{artist.name}</h1>
 
-        {#if albums.length > 0}
-          <p class="meta-line">
-            {albums.length} {albums.length === 1 ? 'álbum' : 'álbumes'}
-          </p>
+        {#if heroCountsLabel}
+          <p class="meta-line">{heroCountsLabel}</p>
         {/if}
 
         {#if artistInfoQ.isPending}
@@ -443,6 +498,24 @@
   </header>
 
   <div class="sections">
+    <!-- === Lanzamiento reciente === Card destacada estilo Apple Music,
+         solo cuando el lanzamiento más nuevo (propio o "Aparece en") cae
+         dentro de la ventana. Va antes de Popular, como en iOS. -->
+    {#if recentRelease && artist}
+      <section class="section">
+        <header class="section-header">
+          <h2 class="section-title">Lanzamiento reciente</h2>
+        </header>
+        <div class="recent-release">
+          <RecentReleaseCard
+            album={recentRelease.album}
+            date={recentRelease.date}
+            artistName={artist.name}
+          />
+        </div>
+      </section>
+    {/if}
+
     <!-- === Popular (top songs) === -->
     {#if topSongsQ.isPending}
       <section class="section">
@@ -763,6 +836,11 @@
     padding: 0 var(--space-6);
   }
 
+  /* Card de lanzamiento reciente — mismo gutter que el resto de secciones. */
+  .recent-release {
+    padding: 0 var(--space-6);
+  }
+
   .toggle-btn {
     background: none;
     border: none;
@@ -896,6 +974,7 @@
     .actions { justify-content: center; }
     .section-header { padding: 0 var(--space-4); }
     .disco-filters { padding: 0 var(--space-4); }
+    .recent-release { padding: 0 var(--space-4); }
     .popular-list { padding: 0 var(--space-3); }
     .card-row-skeleton { padding: 0 var(--space-4); }
     .bio-line { text-align: center; }

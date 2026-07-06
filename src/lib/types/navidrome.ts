@@ -55,6 +55,17 @@ export const NavidromeDiscTitleSchema = z.object({
 
 export type NavidromeDiscTitle = z.infer<typeof NavidromeDiscTitleSchema>;
 
+/** OpenSubsonic ItemArtist — {id, name} de un artist en una pista o álbum.
+    Navidrome lo expone en `song.artists[]` / `album.artists[]` cuando el ID3
+    multi-artist está poblado. Permite detectar collabs por id en lugar de
+    string matching contra `artist` (que solo trae el primario). */
+export const NavidromeItemArtistSchema = z.object({
+  id: z.string(),
+  name: z.string()
+});
+
+export type NavidromeItemArtist = z.infer<typeof NavidromeItemArtistSchema>;
+
 /** OpenSubsonic ItemDate — fecha desglosada {year, month, day} (todos
     opcionales). Navidrome la expone en `album.releaseDate` /
     `album.originalReleaseDate` cuando los tags traen fecha completa. */
@@ -100,7 +111,11 @@ export const NavidromeAlbumSchema = z.object({
   // del orden "newest-first" de getRecentReleases (mirror releaseSortValue
   // de NavidromeModels.swift).
   releaseDate: NavidromeItemDateSchema.optional(),
-  originalReleaseDate: NavidromeItemDateSchema.optional()
+  originalReleaseDate: NavidromeItemDateSchema.optional(),
+  // OpenSubsonic extension. Album artists completos (co-créditos "A & B").
+  // getAppearanceCounts los usa para no contar un álbum co-firmado como
+  // "aparición" de su co-autor.
+  artists: z.array(NavidromeItemArtistSchema).optional()
 });
 
 export type NavidromeAlbum = z.infer<typeof NavidromeAlbumSchema>;
@@ -156,17 +171,6 @@ export type NavidromePlaylist = z.infer<typeof NavidromePlaylistSchema>;
 // ============================================================================
 // Song
 // ============================================================================
-
-/** OpenSubsonic ItemArtist — {id, name} de un artist en una pista o álbum.
-    Navidrome lo expone en `song.artists[]` / `album.artists[]` cuando el ID3
-    multi-artist está poblado. Permite detectar collabs por id en lugar de
-    string matching contra `artist` (que solo trae el primario). */
-export const NavidromeItemArtistSchema = z.object({
-  id: z.string(),
-  name: z.string()
-});
-
-export type NavidromeItemArtist = z.infer<typeof NavidromeItemArtistSchema>;
 
 export const NavidromeSongSchema = z.object({
   id: z.string(),

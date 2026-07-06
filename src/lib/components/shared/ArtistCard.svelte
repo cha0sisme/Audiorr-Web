@@ -4,12 +4,17 @@
   import EqualizerIcon from './EqualizerIcon.svelte';
   import CoverImage from './CoverImage.svelte';
   import { player } from '$stores/player.svelte';
+  import { artistCountsLabel } from '$utils/artist-counts';
 
   type Props = HTMLAnchorAttributes & {
     /** ID del artista — para detectar si el playback viene de aquí. */
     id: string;
     name: string;
     albumCount?: number | undefined;
+    /** Nº de álbumes donde el artista aparece SIN ser album artist
+        ("Aparece en"). Con él, el subtítulo desglosa "X álbumes ·
+        Y apariciones" — sin él, comportamiento clásico (solo álbumes). */
+    appearsCount?: number | undefined;
     coverUrl?: string | undefined;
     href?: string | undefined;
     /** Pre-fetch del hero del avatar on hover/focus. Para artistImageUrl
@@ -18,7 +23,16 @@
     prefetchHero?: () => void;
   };
 
-  let { id, name, albumCount, coverUrl, href = '#', prefetchHero, ...rest }: Props = $props();
+  let {
+    id,
+    name,
+    albumCount,
+    appearsCount,
+    coverUrl,
+    href = '#',
+    prefetchHero,
+    ...rest
+  }: Props = $props();
 
   const isCurrent = $derived(player.isPlayingFrom('artist', id));
 
@@ -32,13 +46,12 @@
     }
   }
 
-  // 0 álbumes = artista colaborador sin discografía propia indexada
-  // (típico en resultados de búsqueda). Mostrar "0 álbumes" confunde —
-  // tratamos 0 igual que undefined → subtítulo genérico "Artista".
+  // "X álbumes · Y apariciones" cuando hay datos; los ceros se omiten del
+  // label (mostrar "0 álbumes" confunde — un colaborador sin discografía
+  // propia muestra solo "Y apariciones"). Sin ningún conteo → genérico
+  // "Artista" (típico en resultados de búsqueda).
   const subtitle = $derived(
-    albumCount === undefined || albumCount === 0
-      ? 'Artista'
-      : `${albumCount} ${albumCount === 1 ? 'álbum' : 'álbumes'}`
+    artistCountsLabel(albumCount ?? 0, appearsCount ?? 0) ?? 'Artista'
   );
 </script>
 

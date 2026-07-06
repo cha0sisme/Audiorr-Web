@@ -156,6 +156,21 @@
     enabled: credentials.isConfigured && kind === 'artist'
   }));
 
+  // Apariciones por artista en bulk ("X álbumes · Y apariciones" en las
+  // cards). Deriva del catálogo completo (álbumes + canciones paginados) —
+  // caro pero cacheable: el catálogo cambia despacio, staleTime generoso.
+  // Mientras resuelve, las cards muestran solo los álbumes (label crece
+  // reactivamente).
+  const appearancesQ = createQuery(() => ({
+    queryKey: ['artistAppearances'],
+    queryFn: () => nav.getAppearanceCounts(),
+    enabled: credentials.isConfigured && kind === 'artist',
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    retry: false
+  }));
+  const appearances = $derived(appearancesQ.data);
+
   // Para vistas con N potencialmente grande (cientos de items) virtualizamos
   // — bibliotecas serias pueden tener 500+ playlists o artistas. Para los
   // tipos cap-30 (recent, most-played, etc.) un grid normal es suficiente
@@ -213,7 +228,7 @@
     >
       {#snippet item(a)}
         {@const props = artistToCardProps(a)}
-        <ArtistCard {...props} />
+        <ArtistCard {...props} appearsCount={appearances?.get(a.id) ?? 0} />
       {/snippet}
     </VirtualGrid>
   {:else if kind === 'album'}
