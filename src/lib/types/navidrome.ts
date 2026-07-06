@@ -76,7 +76,15 @@ export const NavidromeAlbumSchema = z.object({
   recordLabels: z.array(NavidromeRecordLabelSchema).optional(),
   // OpenSubsonic extension. Subtítulos de disco para álbumes multi-disco.
   // SongList los consume para titular el separador de cada disco.
-  discTitles: z.array(NavidromeDiscTitleSchema).optional()
+  discTitles: z.array(NavidromeDiscTitleSchema).optional(),
+  // OpenSubsonic extension. Tipos MusicBrainz del release group ("album",
+  // "single", "ep", "compilation", "live"…). Navidrome los expone cuando
+  // los archivos tienen el tag RELEASETYPE. Base del tipo de lanzamiento
+  // en Discografía (ArtistDetail); si falta, se cae a la heurística por
+  // songCount (ver utils/release-kind.ts).
+  releaseTypes: z.array(z.string()).optional(),
+  // OpenSubsonic extension. Flag de recopilatorio (tag COMPILATION).
+  isCompilation: z.boolean().optional()
 });
 
 export type NavidromeAlbum = z.infer<typeof NavidromeAlbumSchema>;

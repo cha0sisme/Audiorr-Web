@@ -26,6 +26,13 @@
         artista. 'year' → año (modo Discografía en ArtistDetail, donde el
         artist es redundante). */
     subtitleMode?: 'artist' | 'year';
+    /** Etiqueta del tipo de lanzamiento ("Álbum", "Sencillo", "EP"…) —
+        ver RELEASE_KIND_LABEL en utils/release-kind.ts. Solo se pinta en
+        subtitleMode 'year', como "Año · Tipo". En web el año va primero
+        (el subtítulo extiende el año ya existente; divergencia consciente
+        de superficie — la card Lanzamiento reciente de iOS usa
+        "Tipo · Año"). */
+    releaseKindLabel?: string | undefined;
     /** Timestamp ISO de cuándo se añadió a la biblioteca. Si está dentro
         de 48h, pinta NewArrivalBadge (HOY / AYER) en la esquina sup-izq
         del cover. */
@@ -46,6 +53,7 @@
     explicit = false,
     year,
     subtitleMode = 'artist',
+    releaseKindLabel,
     createdAt,
     prefetchHero,
     ...rest
@@ -53,9 +61,9 @@
 
   const subtitle = $derived(
     subtitleMode === 'year'
-      ? year !== undefined
-        ? String(year)
-        : ''
+      ? [year !== undefined ? String(year) : undefined, releaseKindLabel]
+          .filter(Boolean)
+          .join(' · ')
       : artist
   );
 

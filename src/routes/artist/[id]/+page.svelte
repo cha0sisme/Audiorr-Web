@@ -9,6 +9,7 @@
   import { smartMixManager } from '$services/SmartMixManager.svelte';
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import HorizontalScrollSection from '$components/shared/HorizontalScrollSection.svelte';
+  import FilterChips from '$components/shared/FilterChips.svelte';
   import AlbumCard from '$components/shared/AlbumCard.svelte';
   import ArtistCard from '$components/shared/ArtistCard.svelte';
   import PlaylistCard from '$components/shared/PlaylistCard.svelte';
@@ -24,6 +25,12 @@
     type SongListItem
   } from '$utils/navidrome-mappers';
   import { findPlaylistsByArtist } from '$utils/playlists-by-artist';
+  import {
+    albumReleaseKind,
+    matchesDiscographyFilter,
+    RELEASE_KIND_LABEL,
+    type DiscographyFilter
+  } from '$utils/release-kind';
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
@@ -173,6 +180,46 @@
 
   const albumsByYear = $derived(
     [...albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
+  );
+
+  // ─── Discografía: filtro Todo / Álbumes / Sencillos ────────────────────
+  // Tipo derivado de releaseTypes (OpenSubsonic) con fallback heurístico
+  // por songCount — ver utils/release-kind.ts. Los chips solo se muestran
+  // cuando la discografía mezcla ambos grupos (con un solo grupo no hay
+  // nada que filtrar).
+  let discoFilter = $state<DiscographyFilter>('all');
+
+  // Reset al navegar entre artistas — el componente se reutiliza cuando
+  // solo cambia el param y un filtro residual dejaría la sección vacía.
+  $effect(() => {
+    void artistId;
+    discoFilter = 'all';
+  });
+
+  const hasLongFormats = $derived(
+    albumsByYear.some((a) => matchesDiscographyFilter(albumReleaseKind(a), 'albums'))
+  );
+  const hasSingles = $derived(
+    albumsByYear.some((a) => matchesDiscographyFilter(albumReleaseKind(a), 'singles'))
+  );
+  const showDiscoFilter = $derived(hasLongFormats && hasSingles);
+
+  const filteredDiscography = $derived(
+    discoFilter === 'all'
+      ? albumsByYear
+      : albumsByYear.filter((a) => matchesDiscographyFilter(albumReleaseKind(a), discoFilter))
+  );
+
+  const DISCO_FILTER_ITEMS: { id: DiscographyFilter; label: string }[] = [
+    { id: 'all', label: 'Todo' },
+    { id: 'albums', label: 'Álbumes' },
+    { id: 'singles', label: 'Sencillos' }
+  ];
+
+  // El "Ver todo" arrastra el filtro activo para que la grid aterrice
+  // pre-filtrada igual que la sección.
+  const discoSeeAllHref = $derived(
+    `/artist/${artistId}/albums${discoFilter === 'all' ? '' : `?type=${discoFilter}`}`
   );
 
   // Similar artists: solo los que existen en la biblioteca (id presente Y
@@ -436,17 +483,35 @@
       </section>
     {/if}
 
-    <!-- === Discografía === -->
+    <!-- === Discografía === Título propio + chips de filtro (el header de
+         HorizontalScrollSection no admite contenido bajo el título, así que
+         la sección monta el suyo y deja el carrusel sin title). -->
     {#if albumsByYear.length > 0}
       <section class="section">
+        <header class="section-header">
+          <h2 class="section-title">Discografía</h2>
+        </header>
+        {#if showDiscoFilter}
+          <div class="disco-filters">
+            <FilterChips
+              items={DISCO_FILTER_ITEMS}
+              value={discoFilter}
+              onChange={(id) => (discoFilter = id)}
+              ariaLabel="Filtrar discografía"
+            />
+          </div>
+        {/if}
         <HorizontalScrollSection
-          title="Discografía"
-          items={albumsByYear}
-          seeAllHref={`/artist/${artistId}/albums`}
+          items={filteredDiscography}
+          seeAllHref={discoSeeAllHref}
         >
           {#snippet item(album)}
             {@const props = albumToCardProps(album)}
-            <AlbumCard {...props} subtitleMode="year" />
+            <AlbumCard
+              {...props}
+              subtitleMode="year"
+              releaseKindLabel={RELEASE_KIND_LABEL[albumReleaseKind(album)]}
+            />
           {/snippet}
         </HorizontalScrollSection>
       </section>
@@ -692,6 +757,12 @@
     color: var(--text-primary);
     line-height: 1.2;
   }
+  /* Chips de filtro de Discografía — mismo gutter que section-header para
+     alinear con el título y las cards del carrusel. */
+  .disco-filters {
+    padding: 0 var(--space-6);
+  }
+
   .toggle-btn {
     background: none;
     border: none;
@@ -824,6 +895,7 @@
     .title { font-size: var(--text-3xl); }
     .actions { justify-content: center; }
     .section-header { padding: 0 var(--space-4); }
+    .disco-filters { padding: 0 var(--space-4); }
     .popular-list { padding: 0 var(--space-3); }
     .card-row-skeleton { padding: 0 var(--space-4); }
     .bio-line { text-align: center; }
