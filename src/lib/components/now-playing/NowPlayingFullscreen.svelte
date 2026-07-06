@@ -1,26 +1,30 @@
 <script lang="ts">
   /**
-   * NowPlayingFullscreen — viewer estilo Apple Music con Canvas + Lyrics
-   * integrados.
+   * NowPlayingFullscreen — viewer estilo Apple Music con Lyrics integradas.
    *
-   * Mirror del iOS `NowPlayingViewerView.swift` (620 LOC), adaptado a web:
+   * Mirror del iOS `NowPlayingViewerView.swift`, adaptado a web:
    *
-   * Tres modos exclusivos (driven por `nowPlayingUI.mode`):
+   * Layout apaisado (≥1024px): split 50/50 permanente — mitad izquierda
+   * cover hero (con animated artwork si el álbum lo tiene, como AlbumDetail)
+   * + info + transport; mitad derecha las lyrics de la canción, siempre
+   * visibles. El botón de lyrics desaparece (no hay nada que togglear).
+   *
+   * Viewports estrechos (<1024px): dos modos exclusivos como antes
+   * (driven por `nowPlayingUI.mode`):
    *   - cover:  artwork hero centrado + info debajo + scrubber + controles.
-   *   - canvas: video full-bleed + grupo controles abajo (Spotify-style).
    *   - lyrics: header compacto + lyrics scrollable + scrubber + controles.
-   *             En wide screens ≥1280px se renderiza split (artwork 320px
-   *             izquierda + lyrics derecha) — mirror Apple Music desktop.
    *
-   * Backdrop:
-   *   - Sin canvas: cover blurreado + scrim + tinte color-extracted vía
-   *     `extractPalette()`.
-   *   - Con canvas: <video> fullscreen + canvasGradient (transparente arriba,
-   *     opaco abajo).
+   * Canvas: RETIRADO de esta pantalla a propósito (los vídeos 9:16 quedaban
+   * mal en el viewer). El CanvasPanel del shell sigue existiendo — solo
+   * este overlay deja de renderizarlos; el modo 'canvas' residual del store
+   * se normaliza a 'cover'.
    *
-   * Switching de modo: blur-replace cross-fade (mismo patrón que SmartMix
-   * usa para sus iconos — opacity + scale + blur 8px → 0). Cada panel queda
-   * absolute-layered; solo el activo tiene pointer-events.
+   * Backdrop: cover blurreado + scrim + tinte color-extracted vía
+   * `extractPalette()`.
+   *
+   * Switching de modo (narrow): blur-replace cross-fade (mismo patrón que
+   * SmartMix usa para sus iconos — opacity + scale + blur 8px → 0). Cada
+   * panel queda layered; solo el activo tiene pointer-events.
    *
    * Apertura/cierre: overlay slide-up + scale del backdrop. Si el browser
    * soporta View Transitions API, el cover del MiniPlayer (44px, name
@@ -40,16 +44,16 @@
   import { fade } from 'svelte/transition';
   import { cubicOut, cubicIn } from 'svelte/easing';
   import { goto } from '$app/navigation';
+  import { createQuery } from '@tanstack/svelte-query';
   import { coverBlurIn, coverBlurOut } from '$utils/cover-transitions';
   import {
     CaretDown, DotsThree, MusicNote, Star, SkipForward, SkipBack,
     Play, Pause, Shuffle, Repeat, SpeakerHigh, Broadcast,
-    Queue as QueueIcon, FilmStrip, ListPlus
+    Queue as QueueIcon, ListPlus
   } from 'phosphor-svelte';
   import LyricsIcon from '$components/shared/LyricsIcon.svelte';
 
   import { player } from '$stores/player.svelte';
-  import { canvas } from '$stores/canvas.svelte';
   import { nowPlayingUI } from '$stores/now-playing-ui.svelte';
   import { lyricsService, EMPTY_LYRICS, type LyricsResult } from '$services/LyricsService.svelte';
   import { addToPlaylistUI } from '$stores/playlist-mutations-ui.svelte';
@@ -57,17 +61,22 @@
   import { queueManager } from '$services/QueueManager.svelte';
   import { connectService } from '$services/ConnectService.svelte';
   import { getCoverArtUrl } from '$services/NavidromeService';
+  import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
   import { extractPalette, type CoverPalette } from '$utils/palette';
   import { formatTime } from '$utils/format';
+  import { displayArtistName } from '$utils/artist-format';
 
   import QueuePanel from '$components/now-playing/QueuePanel.svelte';
   import DevicePicker from '$components/now-playing/DevicePicker.svelte';
+  import ArtistLinks from '$components/shared/ArtistLinks.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import WaveText from '$components/shared/WaveText.svelte';
 
   // ─── Estado derivado del store ──────────────────────────────────────────
   const isOpen = $derived(nowPlayingUI.isOpen);
-  const mode = $derived(nowPlayingUI.mode);
+  // El modo 'canvas' ya no existe en esta pantalla — un residuo del store
+  // (sesión antigua, deep-link) se normaliza a cover.
+  const mode = $derived(nowPlayingUI.mode === 'canvas' ? 'cover' : nowPlayingUI.mode);
   const innerQueueOpen = $derived(nowPlayingUI.innerQueueOpen);
 
   const song = $derived(player.currentSong);
@@ -89,8 +98,43 @@
     return song?.coverUrl ?? null;
   });
 
-  const hasCanvas = $derived(canvas.videoUrl !== null);
   const isFav = $derived(song !== null && favorites.isSong(song.id));
+
+  // ─── Animated artwork (mirror del hero de AlbumDetail) ─────────────────
+  // El albumId solo es fiable cuando el queueManager y el player apuntan a
+  // la misma canción (en remoto, qmCurrent puede ser la última pista local
+  // — mismo guard que heroCoverUrl). Sin albumId no hay query y el cover
+  // estático manda.
+  const artworkAlbumId = $derived(
+    qmCurrent && qmCurrent.id === song?.id ? (qmCurrent.albumId ?? null) : null
+  );
+  const artworkQ = createQuery(() => ({
+    queryKey: ['albumArtwork', artworkAlbumId ?? ''],
+    queryFn: () => fetchAlbumArtwork(artworkAlbumId!),
+    enabled: isOpen && !!artworkAlbumId,
+    staleTime: 1000 * 60 * 10,
+    retry: false
+  }));
+  const artworkVideoUrl = $derived(resolveArtworkVideoUrl(artworkQ.data ?? null));
+
+  // Referencia imperativa al <video> del motion artwork: el atributo `muted`
+  // declarativo de Svelte NO garantiza fijar la PROPIEDAD .muted — sin ella
+  // el navegador bloquea el autoplay y el vídeo queda en pausa (invisible).
+  // Patrón idéntico al hero de AlbumDetail / CanvasPanel.
+  let motionVideoEl: HTMLVideoElement | undefined = $state();
+  let motionVideoError = $state(false);
+  $effect(() => {
+    // Reset del error al cambiar de vídeo (nueva canción/álbum).
+    void artworkVideoUrl;
+    motionVideoError = false;
+  });
+  $effect(() => {
+    const el = motionVideoEl;
+    const url = artworkVideoUrl;
+    if (!el || !url) return;
+    el.muted = true;
+    el.play().catch(() => {});
+  });
 
   // ─── Lyrics fetch ──────────────────────────────────────────────────────
   // Cadena getLyricsBySongId (embedded ID3/.lrc) → LRCLib → getLyrics legacy.
@@ -249,19 +293,6 @@
       document.body.style.overflow = prevOverflow;
     };
   });
-  // ─── Video element para canvas mode ─────────────────────────────────────
-  let videoEl: HTMLVideoElement | undefined = $state();
-  $effect(() => {
-    if (!videoEl) return;
-    function onVis() {
-      if (!videoEl) return;
-      if (document.hidden) videoEl.pause();
-      else videoEl.play().catch(() => {});
-    }
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  });
-
   // ─── Drag-to-dismiss (touch + mouse) ────────────────────────────────────
   let dragOffset = $state(0);
   let dragging = $state(false);
@@ -318,8 +349,7 @@
       shell debajo (la playlist o vista que hubiera abierta) por el "agujero"
       del cover extraído. Para hacerlo correctamente sin contaminar haría
       falta FLIP manual midiendo getBoundingClientRect. Diferido. */
-  function setMode(m: 'cover' | 'canvas' | 'lyrics') {
-    if (m === 'canvas' && !hasCanvas) return;
+  function setMode(m: 'cover' | 'lyrics') {
     if (m === 'lyrics' && !hasLyrics) {
       // Permitimos abrir el modo lyrics aún sin letras — el modo renderiza
       // un placeholder honesto. Mirror del UX iOS donde el botón está visible
@@ -379,10 +409,10 @@
   // reconoce el feedback como propio de Audiorr, no genérico.
   type FlashKey =
     | 'heart' | 'playpause' | 'skipback' | 'skipforward'
-    | 'lyrics' | 'canvas' | 'connect' | 'queue' | 'volume';
+    | 'lyrics' | 'connect' | 'queue' | 'volume';
   let just = $state<Record<FlashKey, boolean>>({
     heart: false, playpause: false, skipback: false, skipforward: false,
-    lyrics: false, canvas: false, connect: false, queue: false, volume: false
+    lyrics: false, connect: false, queue: false, volume: false
   });
   const flashTimers: Partial<Record<FlashKey, ReturnType<typeof setTimeout>>> = {};
   function flash(k: FlashKey) {
@@ -462,6 +492,29 @@
     if (menuBtnEl.contains(e.target as Node)) return;
     menuOpen = false;
   }
+
+  /** Click en un link de artista (ArtistLinks) → cerrar el overlay para que
+      la navegación al detalle sea visible (el fullscreen es position:fixed
+      y taparía la ruta nueva). Delegación: el handler vive en el <p>
+      contenedor y solo actúa si el target es un <a>. */
+  function onArtistLinkClick(e: MouseEvent) {
+    const anchor = (e.target as HTMLElement | null)?.closest('a');
+    if (anchor) nowPlayingUI.close();
+  }
+
+  // ─── Breakpoint del split apaisado ──────────────────────────────────────
+  // ≥1024px: layout 50/50 (cover+transport izquierda, lyrics derecha). El
+  // JS lo necesita además del CSS para: ocultar el botón de lyrics (no hay
+  // nada que togglear), quitar el header compacto de la región de lyrics y
+  // mantener el aria-hidden coherente con lo que realmente se ve.
+  let isWide = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const sync = () => (isWide = mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  });
   $effect(() => {
     if (!menuOpen) return;
     window.addEventListener('mousedown', closeMenu);
@@ -474,7 +527,6 @@
     class="np-root"
     class:dragging
     class:remote={player.isRemote}
-    class:has-canvas-active={hasCanvas && mode === 'canvas'}
     style:--np-drag-offset="{dragOffset}px"
     style:--np-tint={tintGradient}
     in:overlayIn
@@ -489,11 +541,9 @@
     onpointercancel={onPointerUp}
   >
     <!-- ============================================ BACKDROP
-         Cover blurreado + tinte SIEMPRE (incluido modo canvas). El video del
-         canvas vive en su propio pane centrado con aspect-ratio 9:16 nativo
-         — los Spotify Canvas son verticales para móvil, deformarlos a full-
-         bleed wide se ve mal. Continuidad visual entre modos: solo cambia el
-         contenido central, el fondo se mantiene tinted con la palette. -->
+         Cover blurreado + tinte SIEMPRE. Continuidad visual entre modos:
+         solo cambia el contenido central, el fondo se mantiene tinted con
+         la palette. -->
     <div class="np-backdrop" aria-hidden="true">
       {#key song?.id ?? heroCoverUrl ?? '__placeholder__'}
         {#if heroCoverUrl}
@@ -610,6 +660,27 @@
               {/if}
             </div>
           {/key}
+
+          <!-- Animated artwork overlay (mirror del hero de AlbumDetail) —
+               decorativo, no interactivo. Fade-in con delay para que el
+               morph de apertura (VT np-cover) termine primero; el cover
+               estático debajo sigue siendo el fallback permanente. -->
+          {#if artworkVideoUrl && !motionVideoError}
+            {#key artworkVideoUrl}
+              <video
+                bind:this={motionVideoEl}
+                class="np-motion-video"
+                src={artworkVideoUrl}
+                autoplay
+                loop
+                muted
+                playsinline
+                disablePictureInPicture
+                aria-hidden="true"
+                onerror={() => (motionVideoError = true)}
+              ></video>
+            {/key}
+          {/if}
         </div>
 
         <div class="np-info">
@@ -620,7 +691,14 @@
                 <ExplicitBadge size="18px" />
               {/if}
             </h1>
-            <p class="np-artist">{song.artist}</p>
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+            <p class="np-artist" onclick={onArtistLinkClick}>
+              <ArtistLinks
+                artists={song.artists}
+                artist={song.artist}
+                artistId={song.artistId}
+              />
+            </p>
             {#if player.isRemote && player.remoteDeviceName}
               <p class="np-status">
                 <span class="np-dot"></span>
@@ -645,70 +723,41 @@
         </div>
       </section>
 
-      <!-- ─── Modo CANVAS ────────────────────────────────────────────────
-           Phone-frame centrado con aspect-ratio 9:16 nativo del Canvas (los
-           videos de Spotify Canvas están renderizados para vertical mobile).
-           Mostrarlo full-bleed deforma a wide. Aquí lo presentamos como un
-           "device portrait" elegante con border-radius xl + shadow profundo,
-           sobre el backdrop cover blurreado. -->
-      <section
-        class="np-pane np-pane-canvas"
-        class:active={mode === 'canvas'}
-        aria-hidden={mode !== 'canvas'}
-      >
-        {#if hasCanvas && canvas.videoUrl}
-          <div class="np-canvas-stage">
-            <video
-              bind:this={videoEl}
-              class="np-canvas-video"
-              src={canvas.videoUrl}
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="auto"
-              disablePictureInPicture
-            ></video>
-          </div>
-          <div class="np-canvas-meta">
-            <h2 class="np-canvas-title">
-              <span>{song.title}</span>
-              {#if song.explicit}
-                <ExplicitBadge size="14px" />
-              {/if}
-            </h2>
-            <p class="np-canvas-artist">{song.artist}</p>
-          </div>
-        {/if}
-      </section>
+    </main>
 
-      <!-- ─── Modo LYRICS ────────────────────────────────────────────────
-           Mirror exacto de iOS NowPlayingViewerView.lyricsHeader (líneas
-           392-437): cover pequeño 48px arriba a la izquierda + título +
-           artista, lyrics centradas debajo. SIN split en wide screens —
-           es la misma vista en cualquier viewport (Apple Music desktop
-           y mobile usan el mismo layout). -->
-      <section
-        class="np-pane np-pane-lyrics"
-        class:active={mode === 'lyrics'}
-        aria-hidden={mode !== 'lyrics'}
-      >
+    <!-- ============================================ LYRICS
+         Región propia (fuera del main): en el split apaisado (≥1024px) es
+         la mitad derecha SIEMPRE visible; en viewports estrechos se comporta
+         como el antiguo modo lyrics (overlay sobre el main con blur-replace
+         cuando mode === 'lyrics'). Un solo nodo para ambos casos → el
+         auto-scroll y el estado de user-scroll no se duplican. -->
+    <aside
+      class="np-lyrics-region"
+      class:active={mode === 'lyrics'}
+      aria-hidden={!isWide && mode !== 'lyrics'}
+      aria-label="Letras"
+    >
         <div class="np-lyrics-wrap">
-          <!-- Header iOS-style: cover small esquina sup-izq + meta -->
-          <div class="np-lyrics-header">
-            {#if heroCoverUrl}
-              <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
-            {/if}
-            <div class="np-lyrics-meta">
-              <p class="np-lyrics-title">
-                <span>{song.title}</span>
-                {#if song.explicit}
-                  <ExplicitBadge size="13px" />
-                {/if}
-              </p>
-              <p class="np-lyrics-artist">{song.artist}</p>
+          <!-- Header iOS-style (solo narrow): cover small + meta. En el
+               split sobra — el cover hero ya está a la izquierda. -->
+          {#if !isWide}
+            <div class="np-lyrics-header">
+              {#if heroCoverUrl}
+                <img class="np-lyrics-thumb" src={heroCoverUrl} alt="" />
+              {/if}
+              <div class="np-lyrics-meta">
+                <p class="np-lyrics-title">
+                  <span>{song.title}</span>
+                  {#if song.explicit}
+                    <ExplicitBadge size="13px" />
+                  {/if}
+                </p>
+                <p class="np-lyrics-artist">
+                  {displayArtistName(song.artists ?? [], song.artist)}
+                </p>
+              </div>
             </div>
-          </div>
+          {/if}
 
           {#if hasLyrics}
             <ul
@@ -756,8 +805,7 @@
             </div>
           {/if}
         </div>
-      </section>
-    </main>
+    </aside>
 
     <!-- ============================================ TRANSPORT (siempre) -->
     <div class="np-transport np-no-drag">
@@ -858,28 +906,19 @@
         </div>
 
         <div class="np-actions">
-          <button
-            type="button"
-            class="np-icon-btn np-lyrics-btn"
-            class:active-mode={mode === 'lyrics'}
-            class:just-clicked={just.lyrics}
-            aria-label="Ver letras"
-            aria-pressed={mode === 'lyrics'}
-            onclick={() => { flash('lyrics'); setMode(mode === 'lyrics' ? 'cover' : 'lyrics'); }}
-          >
-            <LyricsIcon size={20} filled={mode === 'lyrics'} />
-          </button>
-          {#if hasCanvas}
+          <!-- Toggle de lyrics solo en narrow — en el split apaisado las
+               letras están siempre visibles a la derecha. -->
+          {#if !isWide}
             <button
               type="button"
-              class="np-icon-btn np-canvas-btn"
-              class:active-mode={mode === 'canvas'}
-              class:just-clicked={just.canvas}
-              aria-label="Ver canvas"
-              aria-pressed={mode === 'canvas'}
-              onclick={() => { flash('canvas'); setMode(mode === 'canvas' ? 'cover' : 'canvas'); }}
+              class="np-icon-btn np-lyrics-btn"
+              class:active-mode={mode === 'lyrics'}
+              class:just-clicked={just.lyrics}
+              aria-label="Ver letras"
+              aria-pressed={mode === 'lyrics'}
+              onclick={() => { flash('lyrics'); setMode(mode === 'lyrics' ? 'cover' : 'lyrics'); }}
             >
-              <FilmStrip size={20} weight="regular" />
+              <LyricsIcon size={20} filled={mode === 'lyrics'} />
             </button>
           {/if}
           {#if hasAnyDevice}
@@ -973,7 +1012,7 @@
   }
 
   /* ============================================================================
-     BACKDROP — capa 0. Cover blurreado + tinte, o video canvas.
+     BACKDROP — capa 0. Cover blurreado + tinte.
      Mismo patrón que el iOS NowPlayingViewerView (líneas 47-80).
      ============================================================================ */
   .np-backdrop {
@@ -1015,9 +1054,6 @@
         rgba(0,0,0,0.7) 100%
       );
   }
-  /* (Antes había aquí np-bg-video + np-canvas-gradient para video full-bleed.
-     Eliminados — el canvas vive ahora como phone-frame centrado en el pane
-     dedicado, no como backdrop deformado.) */
 
   /* ============================================================================
      TOP BAR
@@ -1069,10 +1105,9 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    /* `overflow: visible` (antes `hidden`) — el clip cortaba la sombra
-       superior del canvas-stage y rompía el efecto de "phone-frame
-       flotante". Los panes inactivos ya tienen opacity:0 y pointer-events:
-       none durante el cross-fade; no sangran visualmente. */
+    /* `overflow: visible` — un clip cortaría la sombra del artwork hero.
+       Los panes inactivos ya tienen opacity:0 y pointer-events:none durante
+       el cross-fade; no sangran visualmente. */
     overflow: visible;
   }
 
@@ -1153,6 +1188,30 @@
     color: rgba(255, 255, 255, 0.4);
   }
 
+  /* Animated artwork overlay — mirror .hero-motion-video de AlbumDetail.
+     Propiedades animation-* individuales, NO shorthand: Chrome/Safari
+     rechazan var() como timing-function dentro del shorthand y el elemento
+     quedaría en opacity:0 permanente por el fill-mode. */
+  .np-motion-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+    z-index: 1;
+    animation-name: np-motion-fadein;
+    animation-duration: var(--duration-normal);
+    animation-timing-function: var(--ease-ios-default);
+    animation-delay: 350ms;
+    animation-fill-mode: both;
+    animation-iteration-count: 1;
+  }
+  @keyframes np-motion-fadein {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
   /* Info bloque debajo del cover */
   .np-info {
     display: grid;
@@ -1190,6 +1249,13 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* ArtistLinks hereda color del contenedor; su hover por defecto usa
+     --text-primary (oscuro en tema claro) — sobre el backdrop siempre
+     oscuro del viewer forzamos blanco. */
+  .np-artist :global(.artist-link:hover),
+  .np-artist :global(.artist-link:focus-visible) {
+    color: #fff;
+  }
   .np-status {
     margin: 6px 0 0;
     display: flex;
@@ -1214,17 +1280,39 @@
   }
 
   /* ============================================================================
-     LYRICS MODE — Mirror iOS NowPlayingViewerView.lyricsHeader (líneas 392-437):
-     header con cover small esquina sup-izq + título/artista, lyrics centradas
-     debajo. Layout único independiente del viewport — Apple Music desktop y
-     mobile usan exactamente la misma estructura en este modo.
+     LYRICS — región dual:
+     - Narrow (<1024px): overlay sobre el área main (comparte grid-area con
+       np-content) con el mismo blur-replace que los panes de modo.
+     - Wide (≥1024px, media query al final): mitad derecha del split,
+       siempre visible, estática.
      ============================================================================ */
-  /* Override del .np-pane place-items: lyrics necesita stretch para que el
-     scroll del wrap llene la altura disponible. */
-  .np-pane-lyrics {
-    place-items: stretch;
-    width: 100%;
-    height: 100%;
+  .np-lyrics-region {
+    grid-area: main;
+    position: relative;
+    z-index: 2;
+    min-height: 0;
+    min-width: 0;
+    box-sizing: border-box;
+    display: flex;
+    padding: var(--space-2) var(--space-6) var(--space-4);
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(8px);
+    pointer-events: none;
+    transition:
+      opacity 280ms var(--ease-ios-default),
+      transform 320ms var(--ease-ios-default),
+      filter 260ms var(--ease-ios-default);
+  }
+  .np-lyrics-region.active {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+    pointer-events: auto;
+    transition:
+      opacity 320ms var(--morph-ease) 60ms,
+      transform 360ms var(--morph-ease) 60ms,
+      filter 280ms var(--morph-ease) 60ms;
   }
   .np-lyrics-wrap {
     display: flex;
@@ -1369,74 +1457,6 @@
     margin: 0 auto;
     box-sizing: border-box;
   }
-  /* Canvas mode pane: phone-frame centrado + meta debajo. Padding-top da
-     respiro a la sombra superior del stage (28px), padding-bottom respiro
-     a la inferior — sin ellos la sombra se vería visualmente "amputada"
-     por el clip del pane absoluto. justify-items:center alinea el stage
-     horizontalmente sin que dependa de un width:100%. */
-  .np-pane-canvas {
-    grid-template-rows: minmax(0, 1fr) auto;
-    align-content: center;
-    justify-items: center;
-    gap: var(--space-4);
-    width: 100%;
-    padding-top: 32px;
-    padding-bottom: 12px;
-  }
-  /* "Phone frame": aspect 9:16 (formato nativo Spotify Canvas). El height
-     ocupa el espacio disponible del pane (no vh absoluto, que rebasaba
-     cuando topbar+transport tomaban demasiado). aspect-ratio calcula el
-     width. max-height y max-width acotan en pantallas grandes. Border-
-     radius xl + shadow profundo simula "device portrait" flotando. */
-  .np-canvas-stage {
-    height: 100%;
-    max-height: 620px;
-    aspect-ratio: 9 / 16;
-    width: auto;
-    max-width: min(360px, calc(100vw - 80px));
-    border-radius: var(--radius-xl);
-    overflow: hidden;
-    background: #000;
-    /* Sombra simétrica: arriba sutil, abajo más larga para sensación de
-       elevación. Ambas direcciones se ven gracias a `overflow:visible` del
-       np-content. */
-    box-shadow:
-      0 -4px 20px rgba(0, 0, 0, 0.35),
-      0 28px 80px rgba(0, 0, 0, 0.65),
-      0 8px 28px rgba(0, 0, 0, 0.4);
-    isolation: isolate;
-  }
-  .np-canvas-video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-  /* Meta del canvas mode: título + artista debajo del phone-frame. Tipografía
-     algo menor que el hero del modo cover (queremos protagonismo del video). */
-  .np-canvas-meta {
-    text-align: center;
-    max-width: min(560px, calc(100vw - 80px));
-  }
-  .np-canvas-title {
-    margin: 0;
-    font-family: var(--font-sans);
-    font-size: var(--text-xl);
-    font-weight: 700;
-    line-height: 1.18;
-    letter-spacing: var(--tracking-display);
-    color: #fff;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .np-canvas-artist {
-    margin: 4px 0 0;
-    font-size: var(--text-base);
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.65);
-  }
-
   .np-scrubber-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1713,6 +1733,9 @@
     .np-content {
       padding: var(--space-2) var(--space-4) var(--space-2);
     }
+    .np-lyrics-region {
+      padding: var(--space-2) var(--space-4) var(--space-2);
+    }
     .np-transport {
       padding: var(--space-2) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
     }
@@ -1735,6 +1758,55 @@
   }
 
   /* ============================================================================
+     SPLIT APAISADO (≥1024px) — mitad izquierda cover + info + transport,
+     mitad derecha lyrics SIEMPRE visibles. Los modos cover/lyrics dejan de
+     aplicar: ambas mitades conviven (el botón de lyrics ya no se renderiza
+     en wide — ver markup).
+     ============================================================================ */
+  @media (min-width: 1024px) {
+    .np-root {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        'top top'
+        'main lyrics'
+        'transport lyrics';
+    }
+    .np-transport {
+      grid-area: transport;
+      max-width: 640px;
+    }
+    /* Mitad derecha: estática, sin blur-replace — siempre visible. */
+    .np-lyrics-region {
+      grid-area: lyrics;
+      opacity: 1;
+      transform: none;
+      filter: none;
+      pointer-events: auto;
+      padding: var(--space-2) var(--space-8) var(--space-6) var(--space-4);
+      transition: none;
+    }
+    /* Mitad izquierda: el cover manda pase lo que pase con `mode`. */
+    .np-pane-cover {
+      opacity: 1;
+      transform: scale(1);
+      filter: none;
+      pointer-events: auto;
+    }
+    /* Presupuesto vertical del cover: viewport − topbar − info − transport.
+       El ancho de columna (50vw) acota en ventanas anchas y bajas. */
+    .np-artwork-frame {
+      width: min(calc(100vh - 400px), 420px, calc(50vw - 128px));
+    }
+    .np-info {
+      width: min(560px, 100%);
+    }
+    .np-lyrics-wrap {
+      max-width: 640px;
+    }
+  }
+
+  /* ============================================================================
      FLASH FEEDBACK — mismo lenguaje visual que MiniPlayer.
      Apple/Disney "12 principles": anticipation (squash) → action (overshoot)
      → settling. Multi-stage keyframes con filter brightness/saturate en peak,
@@ -1743,7 +1815,6 @@
        Play/Pause   → box-shadow tactile (vive dentro, no ring exterior)
        Skip prev/fw → bounce direccional (translateX hacia la dirección)
        Lyrics       → pulse del micro con drop-shadow (encendido)
-       Canvas       → iris focus + rings concéntricos (semántica de video)
        Connect      → ondas concéntricas (broadcast emitiendo)
        Queue        → lift + glow inferior (panel emergiendo)
        Volume       → vibration + sonar lateral (membrana altavoz)
@@ -1878,42 +1949,6 @@
     100% { transform: scale(1); filter: none; }
   }
 
-  /* Canvas — iris focus + 2 rings concéntricos (igual que MiniPlayer pero
-     escalado para el tamaño 40px). */
-  .np-canvas-btn.just-clicked > :global(svg) {
-    animation: np-canvas-focus 540ms cubic-bezier(0.32, 1.7, 0.45, 0.95);
-    will-change: transform, filter;
-  }
-  .np-canvas-btn.just-clicked::before,
-  .np-canvas-btn.just-clicked::after {
-    content: '';
-    position: absolute;
-    inset: 4px;
-    border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.7);
-    pointer-events: none;
-    opacity: 0;
-    will-change: transform, opacity;
-  }
-  .np-canvas-btn.just-clicked::before {
-    animation: np-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .np-canvas-btn.just-clicked::after {
-    animation: np-canvas-ring 580ms cubic-bezier(0.16, 1, 0.3, 1) 100ms;
-  }
-  @keyframes np-canvas-focus {
-    0%   { transform: scale(1); filter: none; }
-    20%  { transform: scale(0.78); filter: saturate(1.5) brightness(0.85); }
-    50%  { transform: scale(1.2); filter: saturate(1.7) brightness(1.3) drop-shadow(0 0 6px rgba(255,255,255,0.6)); }
-    75%  { transform: scale(0.96); filter: saturate(1.2); }
-    100% { transform: scale(1); filter: none; }
-  }
-  @keyframes np-canvas-ring {
-    0%   { transform: scale(0.5); opacity: 0; }
-    20%  { opacity: 0.85; }
-    100% { transform: scale(2.0); opacity: 0; }
-  }
-
   /* Connect — 2 ondas concéntricas + brightness pulse del icono. */
   .np-connect-btn.just-clicked > :global(svg) {
     animation: np-connect-emit 360ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -2035,14 +2070,11 @@
     .np-skipback-btn.just-clicked > :global(svg),
     .np-skipforward-btn.just-clicked > :global(svg),
     .np-lyrics-btn.just-clicked > :global(.lyrics-icon),
-    .np-canvas-btn.just-clicked > :global(svg),
     .np-connect-btn.just-clicked > :global(svg),
     .np-queue-btn.just-clicked > :global(svg),
     .np-volume-btn.just-clicked > :global(svg) { animation: none; }
     .np-heart-btn.just-clicked::before,
     .np-heart-btn.just-clicked::after,
-    .np-canvas-btn.just-clicked::before,
-    .np-canvas-btn.just-clicked::after,
     .np-connect-btn.just-clicked::before,
     .np-connect-btn.just-clicked::after,
     .np-queue-btn.just-clicked::after,
