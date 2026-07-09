@@ -53,6 +53,18 @@ class PlaylistCoverCacheStore {
     return this.hashes.get(id);
   }
 
+  /** Olvida el hash registrado de UNA playlist — úsalo cuando se borra una
+      portada manual: el hash antiguo ya no es válido y el próximo GET debe
+      traer el que calcule el backend para la portada automática regenerada,
+      no reutilizar `?v=<hash-borrado>` (que seguiría sirviendo del caché
+      `immutable` del navegador si coincidiera por casualidad). */
+  remove(id: string): void {
+    if (!this.hashes.has(id)) return;
+    const next = new Map(this.hashes);
+    next.delete(id);
+    this.hashes = next;
+  }
+
   clear(): void {
     this.hashes = new Map();
   }

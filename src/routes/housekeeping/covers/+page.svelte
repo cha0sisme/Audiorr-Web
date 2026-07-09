@@ -25,6 +25,7 @@
   } from '$services/smartPlaylists';
   import { backendService, BackendError } from '$services/BackendService.svelte';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
+  import PlaylistCustomCover from '$components/housekeeping/PlaylistCustomCover.svelte';
   import { credentials } from '$stores/credentials.svelte';
   import { toasts } from '$stores/toasts.svelte';
   import { COVER_VARIANTS_2026, type CoverVariant2026 } from '$types/backend';
@@ -295,6 +296,18 @@
                 </button>
               </div>
             {/each}
+
+            <!-- Portada manual — imagen propia del admin (Asignar/Reemplazar/Quitar) -->
+            {#if playlist.navidromeId}
+              <div class="hk-covers-manual" role="cell">
+                <span class="hk-manual-label">Portada manual</span>
+                <PlaylistCustomCover
+                  playlistId={playlist.navidromeId}
+                  playlistName={playlist.name}
+                  size={48}
+                />
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -395,6 +408,25 @@
     padding: var(--space-3) var(--space-2);
     background: var(--hk-tile-bg);
     border-radius: 14px;
+  }
+
+  /* ─── Portada manual — fila completa debajo de las variants ──────────────── */
+  .hk-covers-manual {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding-top: var(--space-3);
+    margin-top: var(--space-1);
+    border-top: 1px solid var(--separator-subtle);
+  }
+  .hk-manual-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
   }
 
   /* ─── Columnas ───────────────────────────────────────────────────────────── */

@@ -270,6 +270,41 @@ export const PatchSmartPlaylistResponseSchema = z.object({
 export type PatchSmartPlaylistResponse = z.infer<typeof PatchSmartPlaylistResponseSchema>;
 
 // ============================================================================
+// Portada MANUAL de playlist — /api/playlists/:playlistId/custom-cover
+// Contrato: D:\Audiorr-shared\decisions\custom-cover-api-contract.md
+// ============================================================================
+
+/** Respuesta de GET /api/playlists/:playlistId/custom-cover — si la playlist
+    ya tiene una imagen propia asignada (para decidir Asignar vs Reemplazar/Quitar). */
+export const CustomCoverStatusSchema = z.object({
+  hasCustom: z.boolean()
+});
+export type CustomCoverStatus = z.infer<typeof CustomCoverStatusSchema>;
+
+/** Respuesta de POST /api/playlists/:playlistId/custom-cover — la imagen ya
+    está compuesta (fondo + título) y cacheada; `coverUrl` sirve para
+    refrescar el preview con buster de caché. */
+export const CustomCoverUploadResponseSchema = z.object({
+  success: z.boolean(),
+  hasCustom: z.boolean(),
+  imageSource: z.string().optional(),
+  variant: z.string().optional(),
+  contentHash: z.string().optional(),
+  version: z.number().optional(),
+  coverUrl: z.string().optional()
+});
+export type CustomCoverUploadResponse = z.infer<typeof CustomCoverUploadResponseSchema>;
+
+/** Respuesta de DELETE /api/playlists/:playlistId/custom-cover — la playlist
+    vuelve a su portada automática (regeneración encolada server-side). */
+export const CustomCoverRemoveResponseSchema = z.object({
+  success: z.boolean(),
+  removed: z.boolean(),
+  hasCustom: z.boolean()
+});
+export type CustomCoverRemoveResponse = z.infer<typeof CustomCoverRemoveResponseSchema>;
+
+// ============================================================================
 // Spotify Sync — /api/sync/*  (legacy, retrocompat)
 // ============================================================================
 

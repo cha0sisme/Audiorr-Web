@@ -9,7 +9,10 @@
    * (AdminPanel), no en superficie --sec- oscura (esa es para instrumentos).
    */
   import { MusicNote, CaretRight } from 'phosphor-svelte';
+  import { createQuery } from '@tanstack/svelte-query';
   import SessionRow from '$components/sessions/SessionRow.svelte';
+  import PlaylistCustomCover from './PlaylistCustomCover.svelte';
+  import { getDailyMixes } from '$services/dailyMixes';
   import { userAvatarColor, userAvatarInitial } from '$utils/avatar-color';
   import type { AdminUser, SessionView } from '$types/backend';
 
@@ -48,8 +51,25 @@
   }: Props = $props();
 
   const n = $derived(person.sessions.length);
-  const expandable = $derived(n > 0);
+  // Siempre expandible: aunque no tenga sesiones activas, el detalle también
+  // muestra sus Daily Mixes (portada manual) — antes solo abría con n > 0.
+  const expandable = true;
   const avatarColor = $derived(userAvatarColor(person.username));
+
+  // ─── Daily Mixes del usuario (lazy: solo al expandir) ───────────────────
+  // Reutiliza el mismo endpoint que /library — el admin puede asignar una
+  // portada manual a cualquier Daily Mix concreto de cualquier persona.
+  const dailyMixesQ = createQuery(() => ({
+    queryKey: ['dailyMixes', person.username],
+    queryFn: () => getDailyMixes(person.username),
+    enabled: expanded,
+    staleTime: 5 * 60 * 1000
+  }));
+  const dailyMixes = $derived(
+    (dailyMixesQ.data ?? []).filter(
+      (m): m is typeof m & { navidromeId: string } => m.navidromeId !== null
+    )
+  );
 
   /** Cerrable salvo la sesión actual del propio admin (no auto-desconectarse). */
   function isClosable(s: SessionView): boolean {
@@ -128,29 +148,47 @@
     <div class="person-drawer-inner" role="region" aria-label={`Detalle de ${person.username}`}>
       {#if expanded && expandable}
         <div class="detail">
-          <div class="detail-head">
-            <span class="detail-label">Sesiones activas</span>
-            {#if closeableCount > 0}
-              <button
-                type="button"
-                class="close-rest"
-                disabled={closingRest}
-                onclick={onCloseRest}
-              >
-                {person.isSelf ? 'Cerrar el resto' : 'Cerrar todas'}
-              </button>
-            {/if}
-          </div>
-          <div class="detail-rows">
-            {#each person.sessions as s (s.id)}
-              <SessionRow
-                session={s}
-                closable={isClosable(s)}
-                closing={closingId === s.id}
-                onClose={() => onCloseSession(s.id)}
-              />
-            {/each}
-          </div>
+          {#if n > 0}
+            <div class="detail-head">
+              <span class="detail-label">Sesiones activas</span>
+              {#if closeableCount > 0}
+                <button
+                  type="button"
+                  class="close-rest"
+                  disabled={closingRest}
+                  onclick={onCloseRest}
+                >
+                  {person.isSelf ? 'Cerrar el resto' : 'Cerrar todas'}
+                </button>
+              {/if}
+            </div>
+            <div class="detail-rows">
+              {#each person.sessions as s (s.id)}
+                <SessionRow
+                  session={s}
+                  closable={isClosable(s)}
+                  closing={closingId === s.id}
+                  onClose={() => onCloseSession(s.id)}
+                />
+              {/each}
+            </div>
+          {:else}
+            <p class="detail-empty">Sin sesiones activas.</p>
+          {/if}
+
+          {#if dailyMixes.length > 0}
+            <div class="detail-head daily-mixes-head">
+              <span class="detail-label">Daily Mixes · portada manual</span>
+            </div>
+            <div class="daily-mixes-rows">
+              {#each dailyMixes as mix (mix.navidromeId)}
+                <div class="daily-mix-row">
+                  <span class="daily-mix-name">{mix.name}</span>
+                  <PlaylistCustomCover playlistId={mix.navidromeId} playlistName={mix.name} size={32} />
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -319,6 +357,31 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  .detail-empty {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+
+  /* ─── Daily Mixes — portada manual por mix ───────────────────────────── */
+  .daily-mixes-head { margin-top: var(--space-1); }
+  .daily-mixes-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .daily-mix-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .daily-mix-name {
+    min-width: 96px;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -34,6 +34,7 @@
   } from '$services/globalSettings';
   import { isDailyMixName, isSmartPlaylistName } from '$utils/playlist-section-mappers';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
+  import PlaylistCustomCover from '$components/housekeeping/PlaylistCustomCover.svelte';
   import { ArrowUpRight } from 'phosphor-svelte';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { credentials } from '$stores/credentials.svelte';
@@ -400,6 +401,11 @@
                   </button>
                 {/each}
               </div>
+
+              <div class="hk-manual-cover-row">
+                <span class="hk-manual-cover-label">Portada manual</span>
+                <PlaylistCustomCover playlistId={p.id} playlistName={p.name} size={40} />
+              </div>
             {/if}
           </li>
         {/each}
@@ -421,32 +427,39 @@
       <ul class="hk-thisis-list">
         {#each thisIsEntries as [pid, artist] (pid)}
           {@const pl = playlistsById.get(pid)}
-          <li class="hk-thisis-row">
-            <span class="hk-lib-item-cover">
-              {#if pl}
-                <img src={getPlaylistCoverUrl(pid)} alt="" loading="lazy" />
-              {:else}
-                <span class="hk-thisis-cover-fallback" aria-hidden="true">
-                  <UserCircle size={14} weight="fill" />
-                </span>
-              {/if}
-            </span>
-            <div class="hk-thisis-meta">
-              <span class="hk-thisis-playlist-name">{pl?.name ?? pid}</span>
-              <span class="hk-thisis-link">
-                <ArrowRight size={11} weight="bold" />
-                <strong>{artist || '(auto desde el nombre)'}</strong>
+          <li class="hk-thisis-item">
+            <div class="hk-thisis-row">
+              <span class="hk-lib-item-cover">
+                {#if pl}
+                  <img src={getPlaylistCoverUrl(pid)} alt="" loading="lazy" />
+                {:else}
+                  <span class="hk-thisis-cover-fallback" aria-hidden="true">
+                    <UserCircle size={14} weight="fill" />
+                  </span>
+                {/if}
               </span>
+              <div class="hk-thisis-meta">
+                <span class="hk-thisis-playlist-name">{pl?.name ?? pid}</span>
+                <span class="hk-thisis-link">
+                  <ArrowRight size={11} weight="bold" />
+                  <strong>{artist || '(auto desde el nombre)'}</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                class="hk-thisis-remove"
+                onclick={() => thisIsRemove(pid)}
+                aria-label="Quitar asociación"
+                title="Quitar asociación"
+              >
+                <X size={12} weight="bold" />
+              </button>
             </div>
-            <button
-              type="button"
-              class="hk-thisis-remove"
-              onclick={() => thisIsRemove(pid)}
-              aria-label="Quitar asociación"
-              title="Quitar asociación"
-            >
-              <X size={12} weight="bold" />
-            </button>
+
+            <div class="hk-manual-cover-row">
+              <span class="hk-manual-cover-label">Portada manual</span>
+              <PlaylistCustomCover playlistId={pid} playlistName={pl?.name ?? pid} size={36} />
+            </div>
           </li>
         {/each}
       </ul>
@@ -853,6 +866,24 @@
     gap: 6px;
     padding-left: 46px;
   }
+
+  /* === Portada manual — imagen propia (Editorial + This Is) === */
+  .hk-manual-cover-row {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding-left: 46px;
+    flex-wrap: wrap;
+  }
+  .hk-manual-cover-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
   .hk-cover-option {
     display: inline-flex;
     flex-direction: column;
@@ -937,6 +968,7 @@
 
   @media (max-width: 640px) {
     .hk-cover-picker { padding-left: 0; }
+    .hk-manual-cover-row { padding-left: 0; }
   }
 
   /* ============================================================================
@@ -950,17 +982,21 @@
     flex-direction: column;
     gap: 6px;
   }
-  .hk-thisis-row {
-    display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
+  .hk-thisis-item {
+    display: flex;
+    flex-direction: column;
     padding: 8px 12px;
     background: var(--hk-tile-bg);
     border-radius: 12px;
     transition: background 200ms var(--hk-spring-soft);
   }
-  .hk-thisis-row:hover { background: var(--bg-surface); }
+  .hk-thisis-item:hover { background: var(--bg-surface); }
+  .hk-thisis-row {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
   .hk-thisis-cover-fallback {
     display: grid;
     place-items: center;
