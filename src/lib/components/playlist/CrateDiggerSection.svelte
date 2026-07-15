@@ -43,7 +43,9 @@
 
   const queryClient = useQueryClient();
 
-  const PAGE_LIMIT = 20;
+  // Decisión director 2026-07-15: 10, uniforme en las 3 plataformas (el "20"
+  // de la sección UX del contrato quedó desactualizado tras esa decisión).
+  const PAGE_LIMIT = 10;
   /** La fila queda con el icono en estado "confirmado" (Check / ★) este
       tiempo antes de salir de la lista — feedback legible del morph antes
       del collapse. */

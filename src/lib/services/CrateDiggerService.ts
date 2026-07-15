@@ -25,7 +25,9 @@ import {
 export type { CrateDiggerSuggestionsResponse, CrateDiggerItem, CrateDiggerBasis } from '$types/backend';
 
 export type CrateDiggerFetchOptions = {
-  /** Tamaño de página. Uniforme en las 3 plataformas: 20. */
+  /** Tamaño de página. Decisión director 2026-07-15: 10, uniforme en las 3
+      plataformas (el "20" de la sección UX del contrato quedó desactualizado
+      tras esa decisión — la tabla de query params, correcta, dice 10). */
   limit?: number;
   /** Cursor opaco devuelto por la llamada anterior (`nextCursor`). Ausente = primera página. */
   cursor?: string | null;
@@ -33,7 +35,7 @@ export type CrateDiggerFetchOptions = {
   refresh?: boolean;
 };
 
-const DEFAULT_LIMIT = 20;
+const DEFAULT_LIMIT = 10;
 
 function hiddenResponse(): CrateDiggerSuggestionsResponse {
   return {
