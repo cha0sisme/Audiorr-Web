@@ -447,6 +447,18 @@ export const SearchSongItemSchema = z.object({
 export type SearchSongItem = z.infer<typeof SearchSongItemSchema>;
 export const SearchSongsResponseSchema = z.array(SearchSongItemSchema);
 
+/** Resultado de `POST /api/sync/reconcile-editorial` (backend `47b3d58`):
+    marca `[Editorial]` en las playlists ya sincronizadas (Spotify/Deezer)
+    que aún no lo tenían. Idempotente, sin body. */
+export const ReconcileEditorialResultSchema = z.object({
+  status: z.string(),
+  total: z.number(),
+  updated: z.number(),
+  skipped: z.number(),
+  failed: z.number()
+});
+export type ReconcileEditorialResult = z.infer<typeof ReconcileEditorialResultSchema>;
+
 // ============================================================================
 // Admin: usuarios del sistema — /api/user/admin/users
 // ============================================================================

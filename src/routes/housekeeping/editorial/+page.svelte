@@ -9,8 +9,8 @@
    *
    * Funcionalidades:
    *   - Búsqueda por nombre o autor (debounce).
-   *   - Filtros segmented: Todas / Destacadas / Spotify / Sin destacar.
-   *   - Cada item: cover thumb + nombre + owner + badges (Spotify, This Is).
+   *   - Filtros segmented: Todas / Destacadas / Sincronizadas (Spotify+Deezer) / Sin destacar.
+   *   - Cada item: cover thumb + nombre + owner + badges (Spotify/Deezer, This Is).
    *   - Toggle Editorial inline.
    *   - Cover picker visual con miniaturas (5 estilos) — solo cuando es
    *     Editorial.
@@ -20,6 +20,7 @@
   import {
     MagnifyingGlass,
     SpotifyLogo,
+    MusicNotesSimple,
     UserCircle,
     X,
     CaretDown,
@@ -32,7 +33,14 @@
     getThisIsMapping,
     setThisIsMapping as persistThisIsMapping
   } from '$services/globalSettings';
-  import { isDailyMixName, isSmartPlaylistName } from '$utils/playlist-section-mappers';
+  import {
+    isDailyMixName,
+    isSmartPlaylistName,
+    isEditorial,
+    isSpotifySynced,
+    isDeezerSynced,
+    isSynced
+  } from '$utils/playlist-section-mappers';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
   import PlaylistCustomCover from '$components/housekeeping/PlaylistCustomCover.svelte';
   import { ArrowUpRight } from 'phosphor-svelte';
@@ -107,19 +115,16 @@
   }
 
   // ─── Filtros ───────────────────────────────────────────────────────────
-  type LibraryFilter = 'all' | 'editorial' | 'spotify' | 'unmarked';
+  // 'synced' generaliza Spotify + Deezer (y futuras fuentes) — antes solo
+  // reconocía Spotify (`isSpotifySynced`), lo que dejaba las playlists Deezer
+  // sincronizadas cayendo en "Sin destacar". El badge por fila sí distingue
+  // la fuente concreta (Spotify/Deezer).
+  type LibraryFilter = 'all' | 'editorial' | 'synced' | 'unmarked';
   let libraryFilter = $state<LibraryFilter>('all');
   let librarySearch = $state('');
 
   const allPlaylists = $derived(playlistsQ.data ?? []);
   const thisIs = $derived(thisIsQ.data ?? {});
-
-  function isSpotifySynced(p: NavidromePlaylist): boolean {
-    return p.name.startsWith('[Spotify] ') || (p.comment ?? '').includes('Spotify Synced');
-  }
-  function isEditorial(p: NavidromePlaylist): boolean {
-    return (p.comment ?? '').includes('[Editorial]');
-  }
 
   const catalog = $derived(
     allPlaylists.filter((p) => !isDailyMixName(p) && !isSmartPlaylistName(p))
@@ -127,15 +132,15 @@
   const counts = $derived({
     all: catalog.length,
     editorial: catalog.filter(isEditorial).length,
-    spotify: catalog.filter(isSpotifySynced).length,
-    unmarked: catalog.filter((p) => !isEditorial(p) && !isSpotifySynced(p)).length
+    synced: catalog.filter(isSynced).length,
+    unmarked: catalog.filter((p) => !isEditorial(p) && !isSynced(p)).length
   });
   const visiblePlaylists = $derived.by(() => {
     let list = catalog;
     if (libraryFilter === 'editorial') list = list.filter(isEditorial);
-    else if (libraryFilter === 'spotify') list = list.filter(isSpotifySynced);
+    else if (libraryFilter === 'synced') list = list.filter(isSynced);
     else if (libraryFilter === 'unmarked')
-      list = list.filter((p) => !isEditorial(p) && !isSpotifySynced(p));
+      list = list.filter((p) => !isEditorial(p) && !isSynced(p));
 
     const q = librarySearch.trim().toLowerCase();
     if (q.length > 0) {
@@ -169,11 +174,11 @@
     return m;
   });
 
-  /** Playlists candidatas para vincular: las editoriales + las Spotify-synced
-      (que típicamente son las "This Is …" importadas). Ya excluyen daily +
-      smart por el filter del catalog. */
+  /** Playlists candidatas para vincular: las editoriales + las sincronizadas
+      (Spotify/Deezer — típicamente las "This Is …" importadas). Ya excluyen
+      daily + smart por el filter del catalog. */
   const thisIsCandidates = $derived(
-    catalog.filter((p) => isEditorial(p) || isSpotifySynced(p))
+    catalog.filter((p) => isEditorial(p) || isSynced(p))
   );
 
   const thisIsCandidatesFiltered = $derived.by(() => {
@@ -305,10 +310,10 @@
 
       <div class="hk-filter-chips" role="radiogroup" aria-label="Filtro de biblioteca">
         {#each [
-          { v: 'all',       l: 'Todas',         n: counts.all       },
-          { v: 'editorial', l: 'Destacadas',    n: counts.editorial },
-          { v: 'spotify',   l: 'Spotify',       n: counts.spotify   },
-          { v: 'unmarked',  l: 'Sin destacar',  n: counts.unmarked  }
+          { v: 'all',       l: 'Todas',          n: counts.all       },
+          { v: 'editorial', l: 'Destacadas',     n: counts.editorial },
+          { v: 'synced',    l: 'Sincronizadas',  n: counts.synced    },
+          { v: 'unmarked',  l: 'Sin destacar',   n: counts.unmarked  }
         ] as opt (opt.v)}
           <button
             type="button"
@@ -333,8 +338,8 @@
             No hay playlists que coincidan con <strong>"{librarySearch}"</strong>.
           {:else if libraryFilter === 'editorial'}
             Aún no destacas ninguna playlist. Marca alguna abajo y reaparecerá aquí.
-          {:else if libraryFilter === 'spotify'}
-            No hay playlists sincronizadas desde Spotify.
+          {:else if libraryFilter === 'synced'}
+            No hay playlists sincronizadas (Spotify o Deezer).
           {:else}
             No hay playlists en este filtro.
           {/if}
@@ -343,6 +348,7 @@
         {#each visiblePlaylists as p (p.id)}
           {@const isEd = isEditorial(p)}
           {@const isSpot = isSpotifySynced(p)}
+          {@const isDeez = isDeezerSynced(p)}
           {@const tIsArtist = thisIs[p.id]}
           {@const coverType = getCoverType(p)}
           <li class="hk-lib-item" class:editorial={isEd}>
@@ -357,6 +363,10 @@
                   {#if isSpot}
                     <span class="hk-mini-badge spotify" title="Sincronizada desde Spotify">
                       <SpotifyLogo size={10} weight="fill" />
+                    </span>
+                  {:else if isDeez}
+                    <span class="hk-mini-badge deezer" title="Sincronizada desde Deezer">
+                      <MusicNotesSimple size={10} weight="fill" />
                     </span>
                   {/if}
                   {#if tIsArtist}
@@ -538,6 +548,8 @@
                           <span class="hk-thisis-option-tag">Editorial</span>
                         {:else if isSpotifySynced(p)}
                           <span class="hk-thisis-option-tag spotify">Spotify</span>
+                        {:else if isDeezerSynced(p)}
+                          <span class="hk-thisis-option-tag deezer">Deezer</span>
                         {/if}
                       </button>
                     </li>
@@ -802,6 +814,10 @@
   }
   .hk-mini-badge.spotify {
     background: #1db954;
+    color: #fff;
+  }
+  .hk-mini-badge.deezer {
+    background: #a238ff;
     color: #fff;
   }
   .hk-mini-badge.thisis {
@@ -1259,6 +1275,10 @@
   .hk-thisis-option-tag.spotify {
     background: color-mix(in srgb, #1db954 16%, transparent);
     color: #1db954;
+  }
+  .hk-thisis-option-tag.deezer {
+    background: color-mix(in srgb, #a238ff 16%, transparent);
+    color: #a238ff;
   }
 
   /* === Input artista === */

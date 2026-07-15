@@ -50,6 +50,40 @@ export function isSpotifySynced(p: NavidromePlaylist): boolean {
   return (p.comment ?? '').includes('Spotify Synced');
 }
 
+/** Deezer nunca usó prefijo de nombre (el prefijo `[Spotify]` se retiró en
+    backend `syncService.ts` — "CRITICAL: User requested removal of [Spotify]
+    prefix" — ANTES de que existiera el sync de Deezer), solo el comentario
+    canónico `buildSyncedComment('deezer')` = `"Deezer Synced\n[Editorial]"`. */
+export function isDeezerSynced(p: NavidromePlaylist): boolean {
+  return (p.comment ?? '').includes('Deezer Synced');
+}
+
+/**
+ * Generaliza a CUALQUIER fuente EXTERNA sincronizada (Spotify, Deezer,
+ * futuras). Desde el commit backend `47b3d58` toda playlist sincronizada
+ * lleva `"{Fuente} Synced"` en el comentario — el `includes('Synced')`
+ * genérico cubre fuentes nuevas sin añadir un `isXSynced` dedicado por cada
+ * una. Úsalo en vez de `isSpotifySynced` en cualquier sitio que decida
+ * branding/exclusión por "es una playlist sincronizada", no por una fuente
+ * concreta (badges de fuente sí deben distinguir con `isSpotifySynced`/
+ * `isDeezerSynced`).
+ *
+ * Excluye deliberadamente "Favoritos" (`STARRED_PLAYLIST_COMMENT =
+ * 'Starred Synced'` en backend `starredPlaylistService.ts:14`) — ese
+ * "Synced" es el sync interno per-usuario de favoritos, no una fuente
+ * externa curada; NO debe heredar el branding "Audiorr" ni excluirse de
+ * "mis playlists" por esta vía (mismo criterio ya aplicado en
+ * `crateDiggerClientMode`, que resuelve Favoritos con `isFavoritesPlaylist`
+ * antes de llegar aquí — este guard es defensa en profundidad para los
+ * demás call sites que no tienen ese chequeo previo).
+ */
+export function isSynced(p: NavidromePlaylist): boolean {
+  if (isSpotifySynced(p) || isDeezerSynced(p)) return true;
+  const comment = p.comment ?? '';
+  if (comment.includes('Starred Synced')) return false;
+  return comment.includes('Synced');
+}
+
 export function isSmartPlaylistName(p: NavidromePlaylist): boolean {
   const name = (p.name ?? '').trim().toLowerCase();
   if ((p.comment ?? '').includes('Smart Playlist')) return true;
@@ -79,14 +113,14 @@ const AUDIORR_ENGINE_LABEL = 'Audiorr Engine';
     Devuelve la string LISTA para concatenar (incluye "por …" si aplica). */
 export function playlistAuthorDisplay(p: NavidromePlaylist): string {
   if (isDailyMixName(p) || isSmartPlaylistName(p)) return AUDIORR_ENGINE_LABEL;
-  if (isEditorial(p) || isSpotifySynced(p)) return AUDIORR_BRAND_LABEL;
+  if (isEditorial(p) || isSynced(p)) return AUDIORR_BRAND_LABEL;
   return p.owner ? `por ${p.owner}` : '';
 }
 
 /** Frase larga para PlaylistDetail bajo el título (estilo "From the editors of …"). */
 export function playlistAuthorDetail(p: NavidromePlaylist): string {
   if (isDailyMixName(p) || isSmartPlaylistName(p)) return 'Generada por Audiorr Engine';
-  if (isEditorial(p) || isSpotifySynced(p)) return 'Una selección de Audiorr';
+  if (isEditorial(p) || isSynced(p)) return 'Una selección de Audiorr';
   return p.owner ? `Por ${p.owner}` : '';
 }
 
@@ -105,7 +139,7 @@ export function filterMyPlaylists(
       !isSmartPlaylistName(p) &&
       p.owner === username &&
       !isEditorial(p) &&
-      !isSpotifySynced(p)
+      !isSynced(p)
   );
 }
 
@@ -124,8 +158,8 @@ function isFavoritesPlaylist(p: NavidromePlaylist): boolean {
  * Elegibilidad CLIENTE (barata) para la sección "Crate Digger" al final del
  * detalle de playlist. Mirror del `classify()` server-side
  * (`crateDiggerService.ts`): Favoritos primero, luego owner === username,
- * luego excluye gestionadas (Daily Mix/Smart/Editorial) y synced
- * (Spotify/Deezer — el backend marca TODAS con "Synced" en el comment).
+ * luego excluye gestionadas (Daily Mix/Smart/Editorial) y sincronizadas de
+ * cualquier fuente (`isSynced` — Spotify/Deezer/futuras).
  *
  * El backend es el safety-net real: cualquier `eligible:false` de la
  * respuesta oculta la sección igualmente, así que este pre-gate solo evita
@@ -139,9 +173,8 @@ export function crateDiggerClientMode(
   const owner = (p.owner ?? '').toLowerCase();
   if (owner && owner !== username.toLowerCase()) return null;
   if (isFavoritesPlaylist(p)) return 'favorites';
-  if (isDailyMixName(p) || isSmartPlaylistName(p) || isEditorial(p) || isSpotifySynced(p)) {
+  if (isDailyMixName(p) || isSmartPlaylistName(p) || isEditorial(p) || isSynced(p)) {
     return null;
   }
-  if ((p.comment ?? '').includes('Synced')) return null;
   return 'playlist';
 }

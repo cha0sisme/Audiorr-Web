@@ -10,6 +10,10 @@
    *   2. Confirmar → Start Sync (guarda + sincroniza por primera vez).
    *   3. Lista de syncs existentes: force re-sync / delete.
    *   4. Match manual desde el preview (busca en Navidrome, confirma).
+   *   5. Botón "Reconciliar editoriales": marca [Editorial] de un clic en
+   *      TODAS las sincronizadas (Spotify + Deezer, no solo Deezer) que aún
+   *      no lo tengan — idempotente, para activar branding "Audiorr" sin
+   *      re-sincronizar cada una.
    *
    * Contrato backend (adec1dc+):
    *   GET    /api/sync/list                         → SyncedPlaylistV2[]
@@ -19,6 +23,7 @@
    *   DELETE /api/sync/deezer/:id
    *   POST   /api/sync/manual-match                 { source:'deezer', externalTrackId, navidromeSongId, ... }
    *   GET    /api/sync/search-songs?q=…
+   *   POST   /api/sync/reconcile-editorial           (sin body, backend 47b3d58+)
    */
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import {
@@ -41,7 +46,8 @@
     removeDeezerSync,
     manualMatchDeezer,
     searchSongs,
-    extractDeezerPlaylistId
+    extractDeezerPlaylistId,
+    reconcileEditorial
   } from '$services/sync';
   import type { SyncedPlaylistV2, SyncPreviewV2, SearchSongItem } from '$types/backend';
 
@@ -81,6 +87,9 @@
   // ─── Estado de force re-sync y delete por ID ─────────────────────────────
   let forcingId = $state<string | null>(null);
   let deletingId = $state<string | null>(null);
+
+  // ─── Estado de reconciliación editorial (Spotify + Deezer) ───────────────
+  let reconciling = $state(false);
 
   // ─── Helpers de formato ───────────────────────────────────────────────────
   function relativeTime(iso: string | null | undefined): string {
@@ -181,6 +190,26 @@
       );
     } finally {
       deletingId = null;
+    }
+  }
+
+  async function handleReconcile() {
+    if (reconciling) return;
+    reconciling = true;
+    try {
+      const result = await reconcileEditorial();
+      toasts.success(
+        'Reconciliación editorial completa',
+        `${result.updated} marcadas · ${result.skipped} ya lo estaban · ` +
+          `${result.failed} fallidas (total ${result.total})`
+      );
+    } catch (err) {
+      toasts.error(
+        'Error al reconciliar editoriales',
+        err instanceof Error ? err.message : 'Algo ha ido mal'
+      );
+    } finally {
+      reconciling = false;
     }
   }
 
@@ -379,7 +408,24 @@
   emptyText="Importa tu primera playlist de Deezer con el formulario de arriba."
 >
   {#snippet action()}
-    {#if syncs.length > 0}<span class="ds-count">{syncs.length}</span>{/if}
+    <div class="ds-panel-actions">
+      <button
+        class="ds-btn ds-btn-ghost ds-btn-sm"
+        type="button"
+        disabled={reconciling}
+        onclick={() => void handleReconcile()}
+        title="Marca [Editorial] en TODAS las playlists ya sincronizadas (Spotify + Deezer) que aún no lo tengan — idempotente"
+      >
+        {#if reconciling}
+          <ArrowsClockwise size={12} weight="bold" class="spin" />
+          Reconciliando…
+        {:else}
+          <Wrench size={12} weight="bold" />
+          Reconciliar editoriales
+        {/if}
+      </button>
+      {#if syncs.length > 0}<span class="ds-count">{syncs.length}</span>{/if}
+    </div>
   {/snippet}
 
       <ul class="ds-syncs-list">
@@ -826,6 +872,13 @@
     white-space: nowrap;
   }
   .ds-sync-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* Fila de acciones en la cabecera del panel (botón + contador) */
+  .ds-panel-actions {
     display: flex;
     align-items: center;
     gap: var(--space-2);

@@ -17,6 +17,9 @@
  *   - manualMatchDeezer(req)                → POST /api/sync/manual-match { source:'deezer', ... }.
  *   - searchSongs(q)                        → GET /api/sync/search-songs?q=... (agnóstico).
  *
+ * Reconciliación editorial (backend `47b3d58`+, agnóstico de fuente):
+ *   - reconcileEditorial()                  → POST /api/sync/reconcile-editorial (sin body).
+ *
  * Input Deezer aceptado: URL `deezer.com/playlist/{id}`, URL con query string,
  * o ID numérico pelado.
  */
@@ -31,12 +34,14 @@ import {
   SyncedPlaylistV2Schema,
   SearchSongsResponseSchema,
   StatusOkSchema,
+  ReconcileEditorialResultSchema,
   type SyncedPlaylist,
   type SyncPreview,
   type SyncedPlaylistV2,
   type SyncPreviewV2,
   type ManualMatchRequest,
-  type SearchSongItem
+  type SearchSongItem,
+  type ReconcileEditorialResult
 } from '$types/backend';
 
 // ============================================================================
@@ -169,4 +174,17 @@ export async function searchSongs(q: string): Promise<SearchSongItem[]> {
     SearchSongsResponseSchema
   );
   return data ?? [];
+}
+
+/**
+ * One-shot idempotente (backend `47b3d58`): marca `[Editorial]` en todas las
+ * playlists ya sincronizadas (Spotify/Deezer) que aún no lo tenían, para que
+ * el branding "Audiorr" se active sin re-sincronizar. Sin body.
+ */
+export async function reconcileEditorial(): Promise<ReconcileEditorialResult> {
+  return backendService.post(
+    '/api/sync/reconcile-editorial',
+    undefined,
+    ReconcileEditorialResultSchema
+  );
 }
