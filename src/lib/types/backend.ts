@@ -968,3 +968,47 @@ export const RelatedAlbumsResponseSchema = z.object({
   cached: z.boolean()
 });
 export type RelatedAlbumsResponse = z.infer<typeof RelatedAlbumsResponseSchema>;
+
+// ============================================================================
+// Crate Digger — GET /api/playlists/:playlistId/suggestions
+// Contrato: D:\Audiorr-shared\decisions\crate-digger-suggestions-api-contract.md
+// Backend: `crateDiggerService.ts`, main = f40af67.
+// ============================================================================
+
+/** Qué nivel de la cascada de semillas disparó la tanda actual. El cliente
+    adapta el copy del subtítulo según este valor (ver contrato §Cold start). */
+export const CrateDiggerBasisSchema = z.enum(['playlist', 'taste', 'broad']);
+export type CrateDiggerBasis = z.infer<typeof CrateDiggerBasisSchema>;
+
+/**
+ * Una sugerencia. `id` es lo que el cliente pasa a `updatePlaylist(songIdToAdd)`
+ * en una playlist normal, o a `star` en la variante Favoritos — nunca ambos.
+ * `albumId` es la fuente para resolver la portada (`getCoverArtUrl(albumId)`,
+ * confirmado por el contrato: "el cliente resuelve la portada con esto").
+ */
+export const CrateDiggerItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  artist: z.string(),
+  artistId: z.string().optional(),
+  album: z.string(),
+  albumId: z.string(),
+  durationSec: z.number(),
+  reason: z.string().optional()
+});
+export type CrateDiggerItem = z.infer<typeof CrateDiggerItemSchema>;
+
+/**
+ * `eligible:false` → ocultar sección (playlist no elegible). `nextCursor:null`
+ * → "Ver más" desaparece. El `cursor` es opaco: el cliente solo lo devuelve
+ * tal cual en la siguiente llamada, nunca lo construye ni lo interpreta.
+ */
+export const CrateDiggerSuggestionsResponseSchema = z.object({
+  version: z.number(),
+  eligible: z.boolean(),
+  basis: CrateDiggerBasisSchema,
+  sessionId: z.string(),
+  items: z.array(CrateDiggerItemSchema),
+  nextCursor: z.string().nullable()
+});
+export type CrateDiggerSuggestionsResponse = z.infer<typeof CrateDiggerSuggestionsResponseSchema>;

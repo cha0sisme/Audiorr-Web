@@ -108,3 +108,40 @@ export function filterMyPlaylists(
       !isSpotifySynced(p)
   );
 }
+
+// ============================================================================
+// Crate Digger — elegibilidad CLIENTE (pre-gate barato)
+// Contrato: D:\Audiorr-shared\decisions\crate-digger-suggestions-api-contract.md
+// ============================================================================
+
+/** Playlist "Favoritos" materializada por el backend (mismo predicado que
+    `favorites.svelte.ts` → `findMaterializedPlaylist`). */
+function isFavoritesPlaylist(p: NavidromePlaylist): boolean {
+  return (p.name ?? '').trim() === 'Favoritos' && (p.comment ?? '').includes('Starred Synced');
+}
+
+/**
+ * Elegibilidad CLIENTE (barata) para la sección "Crate Digger" al final del
+ * detalle de playlist. Mirror del `classify()` server-side
+ * (`crateDiggerService.ts`): Favoritos primero, luego owner === username,
+ * luego excluye gestionadas (Daily Mix/Smart/Editorial) y synced
+ * (Spotify/Deezer — el backend marca TODAS con "Synced" en el comment).
+ *
+ * El backend es el safety-net real: cualquier `eligible:false` de la
+ * respuesta oculta la sección igualmente, así que este pre-gate solo evita
+ * peticiones inútiles. `null` = no pedir sugerencias.
+ */
+export function crateDiggerClientMode(
+  p: NavidromePlaylist,
+  username: string | undefined
+): 'favorites' | 'playlist' | null {
+  if (!username) return null;
+  const owner = (p.owner ?? '').toLowerCase();
+  if (owner && owner !== username.toLowerCase()) return null;
+  if (isFavoritesPlaylist(p)) return 'favorites';
+  if (isDailyMixName(p) || isSmartPlaylistName(p) || isEditorial(p) || isSpotifySynced(p)) {
+    return null;
+  }
+  if ((p.comment ?? '').includes('Synced')) return null;
+  return 'playlist';
+}

@@ -10,10 +10,11 @@
   import ContextMenu, { type ContextMenuItem } from '$components/shared/ContextMenu.svelte';
   import SongList from '$components/shared/SongList.svelte';
   import CoverImage from '$components/shared/CoverImage.svelte';
+  import CrateDiggerSection from '$components/playlist/CrateDiggerSection.svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import * as nav from '$services/NavidromeService';
   import { songToListItem } from '$utils/navidrome-mappers';
-  import { playlistAuthorDetail } from '$utils/playlist-section-mappers';
+  import { playlistAuthorDetail, crateDiggerClientMode } from '$utils/playlist-section-mappers';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
   import { refreshPlaylistCoverHashes } from '$services/playlist-cover-refresh';
   import { player } from '$stores/player.svelte';
@@ -99,6 +100,14 @@
   });
 
   const isCurrentPlaylist = $derived(player.isPlayingFrom('playlist', playlistId));
+
+  // "Crate Digger" — sugerencias al final de la lista. Solo en playlists
+  // PRIVADAS propias del usuario o en Favoritos (pre-gate barato; el backend
+  // es el safety-net real y responde `eligible:false` si nos equivocamos).
+  // Contrato: D:\Audiorr-shared\decisions\crate-digger-suggestions-api-contract.md
+  const crateDiggerMode = $derived(
+    playlist ? crateDiggerClientMode(playlist, credentials.current?.username) : null
+  );
 
   // Estados reactivos de los botones del hero — ver explicación en
   // album/[id]/+page.svelte (mismo patrón).
@@ -276,6 +285,10 @@
       <p class="empty">Esta playlist está vacía.</p>
     {/if}
   </section>
+
+  {#if crateDiggerMode && playlist}
+    <CrateDiggerSection playlistId={playlist.id} mode={crateDiggerMode} />
+  {/if}
 </div>
 
 <style>
