@@ -1182,6 +1182,18 @@ class QueueManager {
       const newSong = this.queue[targetIdx];
       if (newSong !== undefined) {
         player.currentSong = persistableToPlayerSong(newSong);
+        // Mirror iOS QueueManager.swift:644-645 — el swap del crossfade ES el
+        // inicio de la canción entrante. Sin esto el ScrobbleService se queda
+        // anclado a la primera canción del mix: `progressUpdate` descarta por
+        // `songId !== currentSongId` y una sesión SmartMix de 20 canciones
+        // registra UN scrobble. Arrastra también el ping de now-playing a
+        // Navidrome (songDidStart lo emite), así que sin esta llamada el resto
+        // de usuarios te ven en la canción con la que arrancó el mix.
+        void import('$services/ScrobbleService.svelte').then(
+          ({ scrobbleService }) => {
+            scrobbleService.songDidStart(newSong);
+          }
+        );
       }
     }
     this.djCrossfadeFiring = false;
@@ -1293,13 +1305,9 @@ class QueueManager {
     // y AudioEngine.startMidCrossfade(songA, posA, songB), este bloque
     // detecta la condición y delega.
     //
-    // TODO Phase 2: ScrobbleService.songDidStart(song)
-    // ⚠️ Cuando se implemente ScrobbleService: NO enviar contextUri al backend
-    // si this.playbackMode === 'dj' (URI scheme `smartmix:<id>`). Si entra al
-    // wrapped.db scrobbles, contamina recentContexts → home muestra cards
-    // smartmix que se intentan navegar como playlist y dan 404. Decisión
-    // director 2026-05-09. El home filtra defensivo igualmente.
-    // TODO Phase 2: OfflineStorageManager.markPlayed(songId)
+    // TODO Phase 2: OfflineStorageManager.markPlayed(songId) — iOS lo llama
+    // junto a songDidStart (QueueManager.swift:646); aquí aún no hay
+    // OfflineStorageManager que avisar.
   }
 
   private stopPlayback(): void {
