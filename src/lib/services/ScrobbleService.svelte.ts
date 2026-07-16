@@ -89,9 +89,17 @@ class ScrobbleService {
   lastScrobbledSongId = $state<string | null>(null);
 
   private currentSongId: string | null = null;
+  /** La canción que `songDidStart` recibió por parámetro. Fuente única para el
+      payload del backend: antes se releía del QueueManager vía import dinámico,
+      que devolvía `null` en su primera invocación (el módulo aún cargaba) —
+      y como `progressUpdate` solo la pide UNA vez por canción, ya con
+      `hasScrobbled=true`, el primer scrobble de cada carga de página se perdía
+      entero (Navidrome sí lo recibía; el backend no). Guardar lo que ya nos
+      dan evita el ciclo de imports y ancla por identidad, sin releer un estado
+      que puede haber cambiado. */
+  private currentSong: PersistableSong | null = null;
   private startTime: number | null = null;
   private hasScrobbled = false;
-  private hasSentNowPlaying = false;
   private pending: PendingScrobble[] = loadPending();
   private onlineListenerBound = false;
 
@@ -108,20 +116,16 @@ class ScrobbleService {
     // especial — el threshold ya falló o pasó. El Swift hace lo mismo
     // (flushCurrentIfNeeded line 113-117 es no-op).
     this.currentSongId = song.id;
+    this.currentSong = song;
     this.startTime = Date.now();
     this.hasScrobbled = false;
-    this.hasSentNowPlaying = false;
 
     if (!this.isEnabled) return;
 
     // "Now playing" Navidrome — fire-and-forget, fallos no bloquean.
-    void scrobbleNavidrome(song.id, { submission: false })
-      .then(() => {
-        this.hasSentNowPlaying = true;
-      })
-      .catch(() => {
-        /* now-playing no es crítico; no enqueueamos */
-      });
+    void scrobbleNavidrome(song.id, { submission: false }).catch(() => {
+      /* now-playing no es crítico; no enqueueamos */
+    });
   }
 
   /**
@@ -155,7 +159,7 @@ class ScrobbleService {
     );
 
     // 2) Backend (wrapped.db) — preferir socket si está conectado.
-    const song = this.persistableSongFromQueue();
+    const song = this.currentSong;
     if (song) {
       const playedAt = new Date(this.startTime);
       const contextUri = this.scrobbleContextUri();
@@ -231,22 +235,6 @@ class ScrobbleService {
   // ==========================================================================
   // Internals
   // ==========================================================================
-
-  /** Lee la canción actual del QueueManager. Lazy import porque
-      QueueManager.svelte importa este servicio (vía hooks) — el ciclo se
-      rompe haciendo el import dinámico aquí. */
-  private cachedQueueModule: typeof import('$services/QueueManager.svelte') | null =
-    null;
-
-  private persistableSongFromQueue(): PersistableSong | null {
-    if (!this.cachedQueueModule) {
-      void import('$services/QueueManager.svelte').then((m) => {
-        this.cachedQueueModule = m;
-      });
-      return null;
-    }
-    return this.cachedQueueModule.queueManager.currentSong;
-  }
 
   /** Aplica la regla anti-smartmix: si la cola actual es SmartMix, no
       reportamos el contextUri al backend (contamina recentContexts). */
