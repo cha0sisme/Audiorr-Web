@@ -73,6 +73,16 @@ export function extractDeezerPlaylistId(input: string): string {
 // Funciones Spotify legacy (retrocompat — sin cambio de comportamiento)
 // ============================================================================
 
+/**
+ * @deprecated Código muerto (0 call-sites fuera de este fichero). NO
+ * reactivar sin arreglar antes: `SyncedPlaylistsArraySchema` no declara
+ * `source`, así que
+ * `z.object()` (no estricto) lo descarta sin error y esta función devuelve
+ * las filas Deezer Y la fila starred de Favoritos como si todas fueran de
+ * Spotify (silencioso, verificado — ver issue 2026-07-16-web-deezer-sync-
+ * panel-zod-starred.md, riesgo R1). Si se reactiva un panel Spotify, filtrar
+ * por `source === 'spotify'` primero, igual que hace listDeezerSyncs().
+ */
 export async function listSyncs(): Promise<SyncedPlaylist[]> {
   const data = await backendService.get('/api/sync/list', SyncedPlaylistsArraySchema);
   return data ?? [];
@@ -119,9 +129,11 @@ export async function removeSync(spotifyId: string): Promise<void> {
 export async function listDeezerSyncs(): Promise<SyncedPlaylistV2[]> {
   const data = await backendService.get('/api/sync/list', SyncedPlaylistsV2ArraySchema);
   if (!data) return [];
-  // El backend devuelve `source` desde adec1dc. En builds anteriores al
-  // deploy, el campo no existía → el schema le da default 'spotify', con lo
-  // que el filtro es seguro: sin source nunca saldrá como deezer.
+  // El schema de `source` es `z.string()` tolerante (ver WireSyncSourceSchema
+  // en $types/backend) porque /api/sync/list devuelve sin filtrar la tabla
+  // compartida con Favoritos (source='starred') — el `.filter` de aquí es el
+  // punto donde de verdad se descartan las fuentes que no son 'deezer',
+  // sean conocidas (spotify, starred) o futuras. Narrowing válido sobre string.
   return data.filter((p) => p.source === 'deezer');
 }
 

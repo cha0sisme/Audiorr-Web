@@ -362,20 +362,36 @@ export const StatusOkSchema = z.object({
 // Los campos legacy (`spotifyId`) siguen presentes como alias → retrocompat.
 // ============================================================================
 
-/** Fuentes de sync soportadas por el backend. */
+/** Fuentes de sync soportadas por el backend — para REQUESTS (el cliente
+    solo puede pedir estas dos). */
 export const SyncSourceSchema = z.enum(['spotify', 'deezer']);
 export type SyncSource = z.infer<typeof SyncSourceSchema>;
+
+/**
+ * `source` tolerante para RESPONSES del wire. La tabla `synced_playlists`
+ * es compartida con la playlist de Favoritos, que StarredPlaylistService
+ * materializa con `source='starred'` (starredPlaylistService.ts:160,182,199),
+ * y GET /api/sync/list no filtra (syncDatabaseService.ts:440, `SELECT *`).
+ * Un enum estricto sobre esa fila tumba el `z.array()` COMPLETO (incluidas
+ * las filas Deezer válidas) — bug 2026-07-16. El backend además puede sumar
+ * fuentes futuras a esa misma tabla. Los schemas de request (arriba) siguen
+ * estrictos a propósito: solo el wire de respuesta debe ser tolerante. */
+export const WireSyncSourceSchema = z.string();
+export type WireSyncSource = z.infer<typeof WireSyncSourceSchema>;
 
 /**
  * Playlist sincronizada source-aware.
  * - `externalId` / `source`: campos canónicos.
  * - `spotifyId`: alias legacy que el backend sigue emitiendo (= externalId).
  *
- * Se marca `source` como optional con default 'spotify' para tolerar
- * un backend pre-adec1dc en el mismo deploy (migración idempotente).
+ * `source` usa `WireSyncSourceSchema` (no el enum estricto) porque esta
+ * fila puede venir de la tabla compartida con Favoritos (source='starred')
+ * — ver comentario de `WireSyncSourceSchema`. Se mantiene optional con
+ * default 'spotify' para tolerar además un backend pre-adec1dc en el mismo
+ * deploy (migración idempotente) que no emite el campo en absoluto.
  */
 export const SyncedPlaylistV2Schema = z.object({
-  source: SyncSourceSchema.optional().default('spotify'),
+  source: WireSyncSourceSchema.optional().default('spotify'),
   externalId: z.string(),
   /** Alias legacy — el backend lo emite como alias de externalId. */
   spotifyId: z.string().optional(),
@@ -405,9 +421,13 @@ export const ExternalTrackSchema = z.object({
 });
 export type ExternalTrack = z.infer<typeof ExternalTrackSchema>;
 
-/** Preview source-aware. `tracks[].spotify` contiene el track de la fuente. */
+/** Preview source-aware. `tracks[].spotify` contiene el track de la fuente.
+    `source` usa el schema tolerante por simetría con SyncedPlaylistV2Schema
+    — /api/sync/preview no devuelve hoy filas 'starred' (resolveSource en el
+    backend nunca la produce), pero mantenerlo consistente evita que un
+    futuro cambio de shape del backend tumbe este endpoint del mismo modo. */
 export const SyncPreviewV2Schema = z.object({
-  source: SyncSourceSchema.optional().default('spotify'),
+  source: WireSyncSourceSchema.optional().default('spotify'),
   id: z.string().optional(),
   name: z.string(),
   trackCount: z.number(),
