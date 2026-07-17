@@ -481,9 +481,36 @@ class AudioEngine {
     chain.audio.playbackRate = rate;
   }
 
-  /** Programa el play de B desde `startOffset` segundos del file, lo
-      antes posible (`atTime` se ignora en web; iOS programa con
-      sample-accuracy). Llama `audio.play()` directo. */
+  /**
+   * Programa el play de B desde `startOffset` segundos del file, lo antes
+   * posible. Llama `audio.play()` directo.
+   *
+   * `_atTime` (= `Timings.fadeInStartTime`) se ignora A PROPÓSITO — no es
+   * un fix pendiente, es una decisión. Verificado contra iOS
+   * (`CrossfadeExecutor.swift:1739`):
+   * `playerB.scheduleSegment(nextFile, startingFrame:, frameCount:, at: nil)`
+   * — iOS también programa B con `at: nil`, es decir, "ya", no en un
+   * instante futuro. La parte "sample-accuracy" del comentario viejo aquí
+   * era una lectura equivocada de la API de iOS: `scheduleSegment` da
+   * precisión de FRAME (qué muestra exacta empieza a sonar), no una
+   * demora hasta `atTime` — B empieza a decodificar/avanzar YA en las dos
+   * plataformas, igual que hace `.play()` aquí.
+   *
+   * Por qué importa: `startOffset = max(0, entryPoint − totalTime)`
+   * (`CrossfadeExecutor.ts:351`) asume que B suena — con gain 0, en
+   * silencio, pero AVANZANDO — desde el disparo del crossfade
+   * (`Timings.startTime`) durante los `totalTime` segundos completos
+   * (anticipación + filterLead + fadeOut), para aterrizar exactamente en
+   * `entryPoint` cuando llega el swap (`transitionEndTime`). Si algún día
+   * "arregla" esto honrando `_atTime` (retrasando la llamada a
+   * `audio.play()` hasta `fadeInStartTime`), B solo avanzaría durante
+   * `fadeOutDuration` en vez de `totalTime` — aterrizaría hasta ~7,5s
+   * ANTES de `entryPoint` (anticipationTime + filterLead sin contar).
+   * Rompe el contrato de `entryPoint` del algoritmo DJ Y, en cascada, el
+   * `startPosition` de Scrobbling Fase 2 (ver `scrobbleThreshold.ts`): C1
+   * usa exactamente esta posición de aterrizaje como denominador de
+   * `playable`. No tocar sin re-derivar `startOffset` a la vez.
+   */
   schedulePlayChainB(startOffset: number, _atTime: number): void {
     if (!this.chainB) return;
     this.chainB.audio.currentTime = Math.max(0, startOffset);

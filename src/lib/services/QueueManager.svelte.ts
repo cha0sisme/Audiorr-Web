@@ -1062,10 +1062,16 @@ class QueueManager {
     return null;
   }
 
-  onPlaybackStateChanged(_isPlaying: boolean, _currentTime: number): void {
+  onPlaybackStateChanged(isPlaying: boolean, _currentTime: number): void {
     // El player store ya espeja `isPlaying`; aquí broadcastemos al hub.
     void import('$services/ConnectService.svelte').then(({ connectService }) => {
       connectService.broadcastStateIfNeeded(true);
+    });
+    // Scrobbling Fase 2 (C2): el reloj de audio activo se congela/reanuda
+    // aquí — la pausa no cuenta como escucha. Ver
+    // `scrobbleThreshold.ts#ActiveListenClock`.
+    void import('$services/ScrobbleService.svelte').then(({ scrobbleService }) => {
+      scrobbleService.setPlaying(isPlaying);
     });
   }
 
@@ -1130,11 +1136,15 @@ class QueueManager {
    * activo. Tenemos que avanzar el index del queue manager para que
    * coincida con lo que el listener ya está oyendo.
    *
-   * `_startOffset` es la `currentTime` del nuevo A justo después del
-   * swap (= entryPoint del CrossfadeResult original). El player store
-   * ya lo refleja vía el evento del AudioEngine.
+   * `startOffset` es la `currentTime` del nuevo A justo después del
+   * swap — la posición REAL de aterrizaje, no `config.entryPoint` (por el
+   * clamp `startOffset = max(0, entryPoint - totalTime)` de
+   * CrossfadeExecutor, cuando `entryPoint < totalTime` el aterrizaje real
+   * es `totalTime`). El player store ya lo refleja vía el evento del
+   * AudioEngine. Scrobbling Fase 2 (C1) lo consume como `startPosition`
+   * — ver `songDidStart` más abajo y `scrobbleThreshold.ts`.
    */
-  onCrossfadeCompleted(_startOffset: number): void {
+  onCrossfadeCompleted(startOffset: number): void {
     if (!this.djCrossfadeFiring) {
       // Crossfade no-DJ (equal-power simple) — no avance automático.
       return;
@@ -1189,9 +1199,14 @@ class QueueManager {
         // registra UN scrobble. Arrastra también el ping de now-playing a
         // Navidrome (songDidStart lo emite), así que sin esta llamada el resto
         // de usuarios te ven en la canción con la que arrancó el mix.
+        //
+        // `startOffset` se pasa como `startPosition` — Fase 2 (C1) lo usa
+        // como denominador de `playable = duration - startPosition` en vez
+        // de la duración nominal. Es el dato que este mismo callback
+        // llevaba descartando (antes `_startOffset`, con guion bajo).
         void import('$services/ScrobbleService.svelte').then(
           ({ scrobbleService }) => {
-            scrobbleService.songDidStart(newSong);
+            scrobbleService.songDidStart(newSong, startOffset);
           }
         );
       }

@@ -7,9 +7,12 @@
  *   2. Backend Audiorr — alimenta `wrapped.db` (estadísticas + recentContexts
  *      del home). Vía socket si hubConnected, fallback REST `/api/scrobble`.
  *
- * Threshold: scrobble cuando `elapsed wall-clock >= min(duration*0.5, 240s)`.
- * Wall-clock (no `currentTime`) — un seek hacia adelante NO debe disparar
- * scrobble inmediato.
+ * Threshold (Scrobbling Fase 2): scrobble cuando
+ * el tiempo de ESCUCHA ACTIVA (no wall-clock — la pausa no cuenta, C2)
+ * alcanza `min(playable * 0.5, 240s)`, donde `playable = duration -
+ * startPosition` (C1). La fórmula y el reloj viven en
+ * `scrobbleThreshold.ts` (puro, sin dependencias de plataforma — es la
+ * spec ejecutable del port a iOS/Android, ver ese archivo y su test).
  *
  * Pending queue offline: si Navidrome falla, persist en localStorage.
  * Listener `online` re-intenta cuando vuelve la red.
@@ -29,6 +32,7 @@ import { scrobble as scrobbleNavidrome } from '$services/NavidromeService';
 import { recordScrobble, type ScrobblePayload } from '$services/scrobble';
 import { connectService } from '$services/ConnectService.svelte';
 import { invalidateRecentContexts } from '$services/query-bus';
+import { ActiveListenClock, computeScrobbleWindow } from '$services/scrobbleThreshold';
 import type { PersistableSong } from '$services/QueueManager.svelte';
 
 // ============================================================================
@@ -99,6 +103,16 @@ class ScrobbleService {
       que puede haber cambiado. */
   private currentSong: PersistableSong | null = null;
   private startTime: number | null = null;
+  /** Posición REAL (segundos) en la que la canción actual entró en juego —
+      0 en modo normal; el aterrizaje empírico del crossfade DJ cuando
+      `songDidStart` se llama desde `onCrossfadeCompleted`. Denominador de
+      C1 (`playable = duration - startPosition`), NUNCA `config.entryPoint`
+      — ver el comment de `computeScrobbleWindow` en `scrobbleThreshold.ts`. */
+  private startPosition = 0;
+  /** Reloj de audio activo (C2) — acumula solo mientras suena, congela en
+      pausa. Se reinicia en cada `songDidStart`; `setPlaying` lo
+      pausa/reanuda en cada cambio de estado del engine. */
+  private readonly activeClock = new ActiveListenClock();
   private hasScrobbled = false;
   private pending: PendingScrobble[] = loadPending();
   private onlineListenerBound = false;
@@ -110,14 +124,22 @@ class ScrobbleService {
   /**
    * QueueManager llama esto cuando arranca una canción nueva. Resetea el
    * tracker y lanza un "now playing" no-submission a Navidrome.
+   *
+   * `startPosition` (segundos, default 0): posición REAL en la que la
+   * canción entra en juego. En modo normal se omite (0 — nadie recorta
+   * nada). En modo DJ, `QueueManager.onCrossfadeCompleted` pasa el
+   * aterrizaje empírico del engine (`AudioEngine`'s `currentTime` justo
+   * tras el swap) — ver C1 en `scrobbleThreshold.ts`.
    */
-  songDidStart(song: PersistableSong): void {
+  songDidStart(song: PersistableSong, startPosition = 0): void {
     // Si quedaba un scrobble pendiente para la anterior, no hacemos nada
     // especial — el threshold ya falló o pasó. El Swift hace lo mismo
     // (flushCurrentIfNeeded line 113-117 es no-op).
     this.currentSongId = song.id;
     this.currentSong = song;
     this.startTime = Date.now();
+    this.startPosition = startPosition;
+    this.activeClock.reset();
     this.hasScrobbled = false;
 
     if (!this.isEnabled) return;
@@ -129,9 +151,20 @@ class ScrobbleService {
   }
 
   /**
+   * QueueManager llama esto en cada cambio de estado play/pause del
+   * engine (`onPlaybackStateChanged`). Congela/reanuda el reloj de audio
+   * activo (C2) — la pausa no debe contar como escucha. Ver
+   * `ActiveListenClock` en `scrobbleThreshold.ts`.
+   */
+  setPlaying(isPlaying: boolean): void {
+    if (isPlaying) this.activeClock.resume();
+    else this.activeClock.pause();
+  }
+
+  /**
    * Llamado periódicamente por QueueManager con currentTime + duration.
-   * Cuando wall-clock elapsed alcanza el threshold, dispara el scrobble
-   * único de la canción.
+   * Cuando el tiempo de escucha activa (C2) alcanza el threshold sobre
+   * `playable` (C1), dispara el scrobble único de la canción.
    */
   progressUpdate(songId: string, _currentTime: number, duration: number): void {
     if (!this.isEnabled) return;
@@ -140,8 +173,10 @@ class ScrobbleService {
     if (duration <= 0) return;
     if (this.startTime === null) return;
 
-    const threshold = Math.min(duration * 0.5, 240);
-    const elapsed = (Date.now() - this.startTime) / 1000;
+    const window = computeScrobbleWindow({ duration, startPosition: this.startPosition });
+    if (!window.passesGuard) return;
+    const elapsed = this.activeClock.elapsedSeconds();
+    const threshold = window.threshold;
     if (elapsed < threshold) return;
 
     // Mark inmediato — previene duplicados si el siguiente progress llega antes
