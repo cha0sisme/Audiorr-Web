@@ -332,27 +332,26 @@
         si seguía intencional. */
   const canvasShown = $derived(canvas.visible && !queueUI.isOpen);
 
-  /** Toggle del QueuePanel — abrir cierra automáticamente CanvasPanel.
-      Mutex visual: queue es overlay, canvas desplaza el main. Tener ambos a
-      la vez se vería raro (queue solapando un main ya estrecho). */
+  /** Toggle del QueuePanel. Mutex visual con canvas: queue es overlay, canvas
+      desplaza el main; tener ambos a la vez se vería raro. No cerramos el canvas
+      al abrir la cola — el gate `!queueUI.isOpen` de `canvasShown` lo OCULTA
+      mientras la cola está abierta y REAPARECE al cerrarla, preservando la
+      preferencia del usuario (y sin recargar el vídeo por gusto). */
   function toggleQueuePanel() {
     if (queueUI.isOpen) {
       queueUI.close();
       return;
     }
-    if (canvas.visible) {
-      canvas.dismiss(player.currentSong?.id ?? null);
-    }
     queueUI.open();
   }
 
   /** Toggle del CanvasPanel desde el botón del MiniPlayer.
-      - Visible → dismiss (recuerda dismiss para esta canción).
-      - No visible + hay videoUrl → restore (limpia dismiss y muestra).
-      Si el QueuePanel estaba abierto, se cierra primero. */
+      - Mostrándose (canvasShown) → dismiss (sticky: no auto-reabre hasta reabrir).
+      - Oculto → restore (muestra; el panel siempre tiene contenido: canvas →
+        motion artwork → carátula). Si la cola estaba abierta, se cierra primero. */
   function toggleCanvasPanel() {
-    if (canvas.visible) {
-      canvas.dismiss(player.currentSong?.id ?? null);
+    if (canvasShown) {
+      canvas.dismiss();
       return;
     }
     if (queueUI.isOpen) queueUI.close();
@@ -471,7 +470,7 @@
             autoMixActive={queueManager.djCrossfadeFiring}
             queueOpen={queueUI.isOpen}
             canvasOpen={canvasShown}
-            canvasAvailable={canvas.videoUrl !== null || canvas.demoMode}
+            canvasAvailable={player.currentSong !== null}
             onPlayPause={() => player.toggle()}
             onNext={() => player.next()}
             onPrevious={() => player.previous()}

@@ -63,6 +63,7 @@
   import { getCoverArtUrl } from '$services/NavidromeService';
   import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
   import { extractPalette, type CoverPalette } from '$utils/palette';
+  import { videoTeardown } from '$utils/video-cleanup';
   import { formatTime } from '$utils/format';
   import { displayArtistName } from '$utils/artist-format';
 
@@ -678,6 +679,7 @@
                 disablePictureInPicture
                 aria-hidden="true"
                 onerror={() => (motionVideoError = true)}
+                use:videoTeardown
               ></video>
             {/key}
           {/if}

@@ -3,9 +3,13 @@
  *
  * Lógica:
  * - Cuando cambia la canción, se llama `setForSong(songId, canvasUrl)`.
- *   Si la URL existe → panel se abre. Si no → se cierra.
- * - El usuario puede cerrar manualmente con `dismiss()` — recuerda el
- *   songId para no reabrir hasta que cambie la canción.
+ *   Solo AUTO-ABRE la primera vez que aparece un canvas. **Nunca auto-cierra**
+ *   al saltar a una canción sin canvas: el panel persiste (el CanvasPanel cae a
+ *   motion artwork del álbum → carátula estática) para no desplazar el
+ *   MiniPlayer/columna del grid en cada cambio de tema (estilo Spotify).
+ * - El usuario cierra con `dismiss()` → sticky: no se vuelve a auto-abrir hasta
+ *   que lo reabra a mano (`restore()`). Coherente con el "Now Playing view" de
+ *   Spotify (una vez lo cierras, se queda cerrado).
  * - `width` controla el ancho del panel. Es draggable desde el borde izq.
  *   Persiste en localStorage. Min/max para que no se desborde.
  * - `forceShowDemo()` permite probar la animación sin backend real.
@@ -38,8 +42,12 @@ function loadWidth(): number {
 
 class CanvasStore {
   visible = $state(false);
+  /** URL del canvas (vídeo por canción) de la canción actual, o null si no
+      tiene. El CanvasPanel cae a motion artwork / carátula cuando es null. */
   videoUrl = $state<string | null>(null);
-  dismissedSongId = $state<string | null>(null);
+  /** El usuario cerró el panel a mano → no volver a auto-abrir aunque
+      aparezcan canvas nuevos, hasta que lo reabra (sticky, estilo Spotify). */
+  userDismissed = $state(false);
   demoMode = $state(false);
   width = $state(loadWidth());
   /** True mientras el usuario está arrastrando el handle de resize. El shell
@@ -47,33 +55,30 @@ class CanvasStore {
       drag responda instantáneo (sin lag de 280ms). */
   isDragging = $state(false);
 
-  setForSong(songId: string, url: string | null) {
+  setForSong(_songId: string, url: string | null) {
     this.demoMode = false;
-    if (this.dismissedSongId === songId) {
-      this.visible = false;
-      this.videoUrl = null;
-      return;
-    }
     this.videoUrl = url;
-    // Auto-show solo si hay URL Y la cola NO está abierta. Si la cola
-    // está abierta, `videoUrl` queda guardado (botón Canvas habilitado)
-    // pero el panel no se monta — no pisamos la elección del usuario.
-    this.visible = !!url && !queueUI.isOpen;
+    // Auto-abrir SOLO la primera vez que hay canvas (si el user no cerró el
+    // panel y la cola no está abierta). NUNCA auto-cerramos al cambiar de
+    // canción: el panel persiste y el CanvasPanel cae a motion artwork /
+    // carátula, para no desplazar el MiniPlayer al saltar de una canción con
+    // canvas a una sin él.
+    if (url && !this.userDismissed && !queueUI.isOpen) {
+      this.visible = true;
+    }
   }
 
-  dismiss(songId: string | null) {
-    if (songId) this.dismissedSongId = songId;
+  dismiss() {
     this.visible = false;
+    this.userDismissed = true;
     this.demoMode = false;
   }
 
-  /** Reabrir manualmente desde el botón del MiniPlayer. Limpia el dismiss
-      registrado para la canción actual y vuelve a mostrar (si hay videoUrl
-      o demoMode). No-op si no tenemos nada que mostrar — el botón debería
-      estar disabled en ese caso, pero defendemos en runtime igual. */
+  /** Reabrir manualmente desde el botón del MiniPlayer. Limpia el sticky-dismiss
+      y muestra el panel. Con el modelo "siempre hay algo que enseñar" (canvas →
+      motion → carátula) no necesita guardas: mientras haya canción, hay cover. */
   restore() {
-    if (!this.videoUrl && !this.demoMode) return;
-    this.dismissedSongId = null;
+    this.userDismissed = false;
     this.visible = true;
   }
 
@@ -87,11 +92,11 @@ class CanvasStore {
     this.demoMode = true;
     this.videoUrl = null;
     this.visible = true;
-    this.dismissedSongId = null;
+    this.userDismissed = false;
   }
 
   /** Snapshot de visible al entrar en un overlay (ej. NowPlaying fullscreen)
-      para poder restaurar el state al cerrarlo. NO toca dismissedSongId — la
+      para poder restaurar el state al cerrarlo. NO toca userDismissed — la
       idea es ocultar el panel del shell sin perder la información de que
       el canvas SIGUE disponible para esta canción. */
   private wasVisibleBeforeOverlay = false;

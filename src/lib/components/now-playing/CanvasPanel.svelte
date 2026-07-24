@@ -20,11 +20,14 @@
    * fuera). El handle de resize sigue siendo el único affordance del panel.
    */
   import { onMount } from 'svelte';
+  import { createQuery } from '@tanstack/svelte-query';
   import { quintOut, quintIn, linear } from 'svelte/easing';
   import { MusicNoteSimple, CaretDown, Play, MusicNote, SealCheck, Check } from 'phosphor-svelte';
   import { canvas, CANVAS_MIN_WIDTH, CANVAS_MAX_WIDTH } from '$stores/canvas.svelte';
   import { player } from '$stores/player.svelte';
   import { queueManager } from '$services/QueueManager.svelte';
+  import { fetchAlbumArtwork, resolveArtworkVideoUrl } from '$services/AlbumArtworkService';
+  import { releaseVideo, videoTeardown } from '$utils/video-cleanup';
   import { lyricsService, EMPTY_LYRICS, type LyricsResult } from '$services/LyricsService.svelte';
   import {
     fetchGeniusAnnotations,
@@ -47,6 +50,8 @@
   let videoEl: HTMLVideoElement | undefined = $state();
   let scrollEl: HTMLElement | undefined = $state();
   let infoEl: HTMLElement | undefined = $state();
+  /** El <video> falló al cargar la fuente actual → caemos a la carátula. */
+  let videoError = $state(false);
 
   onMount(() => {
     function onVisibility() {
@@ -56,26 +61,6 @@
     }
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  });
-
-  /** Sincroniza el video con el estado de playback. Si el director pausa
-      la canción (sea local o desde Audiorr Connect — el broadcast
-      `playback_state_update` actualiza `player.isPlaying`), el canvas
-      también se pausa para que la animación no siga sola sobre audio
-      mute. Resume cuando vuelve a play. document.hidden tiene prioridad
-      (no reproducir si la pestaña está oculta aunque isPlaying=true). */
-  $effect(() => {
-    if (!videoEl) return;
-    const playing = player.isPlaying;
-    if (typeof document !== 'undefined' && document.hidden) {
-      videoEl.pause();
-      return;
-    }
-    if (playing) {
-      videoEl.play().catch(() => {});
-    } else {
-      videoEl.pause();
-    }
   });
 
   // ─── Lyric banner — línea activa de la letra synced ───────────────────
@@ -645,6 +630,78 @@
     qmCurrent && qmCurrent.id === playerSong?.id ? (qmCurrent.artistId ?? '') : ''
   );
 
+  // ─── Fuente del stage: canvas → motion artwork → carátula ──────────────
+  // El canvas de la canción manda. Si no hay, caemos al motion artwork del
+  // álbum (Apple Music-style). Si tampoco, a la carátula estática. Así el
+  // panel SIEMPRE tiene algo que enseñar y no hace falta cerrarlo al saltar
+  // a una canción sin canvas — mismo modelo que el right rail de Spotify.
+  const canvasVideoUrl = $derived(canvas.videoUrl);
+
+  // albumId fiable solo cuando queueManager y player apuntan a la misma
+  // canción (en remoto qmCurrent queda stale — mismo guard que artistId).
+  const artworkAlbumId = $derived(
+    qmCurrent && qmCurrent.id === playerSong?.id ? (qmCurrent.albumId ?? null) : null
+  );
+  // Solo pedimos motion artwork cuando NO hay canvas (evita fetch inútil).
+  const artworkQ = createQuery(() => ({
+    queryKey: ['albumArtwork', artworkAlbumId ?? ''],
+    queryFn: () => fetchAlbumArtwork(artworkAlbumId!),
+    enabled: !canvasVideoUrl && !!artworkAlbumId,
+    staleTime: 1000 * 60 * 10,
+    retry: false
+  }));
+  const motionVideoUrl = $derived(
+    canvasVideoUrl ? null : resolveArtworkVideoUrl(artworkQ.data ?? null)
+  );
+
+  /** Vídeo a reproducir en el stage (canvas o motion artwork). null → carátula. */
+  const displayVideoUrl = $derived(canvasVideoUrl ?? motionVideoUrl);
+
+  /** Carátula estática de fallback ("canvas álbum"). Mismo criterio que el hero
+      del NowPlaying: id raw del queueManager (retina 640px) solo si coincide con
+      la canción que suena; si no, el coverUrl del player (payload local/remoto). */
+  const coverFallbackUrl = $derived.by(() => {
+    if (qmCurrent?.coverArt && qmCurrent.id === playerSong?.id) {
+      return getCoverArtUrl(qmCurrent.coverArt, 640);
+    }
+    return playerSong?.coverUrl ?? null;
+  });
+
+  /** true → se muestra la carátula estática en vez de un <video>. */
+  const showCover = $derived(!displayVideoUrl || videoError);
+
+  // Reset del flag de error al cambiar de fuente de vídeo.
+  $effect(() => {
+    void displayVideoUrl;
+    videoError = false;
+  });
+
+  // Gestión imperativa del <video> ÚNICO reutilizado: fija/actualiza el src y
+  // sincroniza play/pausa (local o Audiorr Connect vía player.isPlaying). Al
+  // cambiar de fuente, load() suelta el recurso anterior; sin fuente (carátula)
+  // liberamos del todo con releaseVideo → un solo decoder vivo, la memoria no
+  // crece aunque pasen muchas canciones. document.hidden tiene prioridad.
+  $effect(() => {
+    const el = videoEl;
+    const url = displayVideoUrl;
+    if (!el) return;
+    if (!url || videoError) {
+      releaseVideo(el);
+      return;
+    }
+    if (el.getAttribute('src') !== url) {
+      el.src = url;
+      el.load();
+    }
+    el.muted = true;
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    if (player.isPlaying && !hidden) {
+      el.play().catch(() => {});
+    } else {
+      el.pause();
+    }
+  });
+
   let artist = $state<NavidromeArtist | null>(null);
   let artistInfo = $state<NavidromeArtistInfo | null>(null);
   let topSongs = $state<NavidromeSong[]>([]);
@@ -760,22 +817,33 @@
   <div bind:this={scrollEl} class="cp-scroll">
     <!-- ─── STAGE: video sticky top con phone-frame fit ──────────────── -->
     <div class="cp-stage">
-      {#if canvas.videoUrl}
-        <video
-          bind:this={videoEl}
-          class="cp-video"
-          src={canvas.videoUrl}
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="auto"
-          disablePictureInPicture
-        ></video>
-      {:else}
-        <div class="cp-placeholder" aria-hidden="true">
-          <MusicNoteSimple size={56} weight="fill" />
-        </div>
+      <!-- <video> ÚNICO y persistente: el src lo gestiona un $effect imperativo
+           para poder liberar el recurso al cambiar de fuente / desmontar. Se
+           oculta (no se desmonta) cuando toca carátula, para reutilizar el mismo
+           decoder. use:videoTeardown lo libera al desmontar el panel. -->
+      <video
+        bind:this={videoEl}
+        class="cp-video"
+        class:cp-hidden={showCover}
+        muted
+        loop
+        playsinline
+        preload="auto"
+        disablePictureInPicture
+        aria-hidden="true"
+        onerror={() => (videoError = true)}
+        use:videoTeardown
+      ></video>
+      {#if showCover}
+        {#if coverFallbackUrl}
+          <!-- "Canvas álbum": la carátula estática cuando no hay canvas ni
+               motion artwork, para que el panel no se cierre entre canciones. -->
+          <img class="cp-cover" src={coverFallbackUrl} alt="" />
+        {:else}
+          <div class="cp-placeholder" aria-hidden="true">
+            <MusicNoteSimple size={56} weight="fill" />
+          </div>
+        {/if}
       {/if}
 
       <!-- ─── Lyric banner: línea activa con vertical swap ─────────────
@@ -1129,6 +1197,7 @@
      debajo. Resultado: ya no hay un corte recto entre el video y la zona
      de cards — la transición es suave, casi imperceptible. */
   .cp-video,
+  .cp-cover,
   .cp-placeholder {
     position: absolute;
     inset: 0;
@@ -1148,6 +1217,10 @@
       #000 calc(100% - 80px),
       transparent 100%
     );
+  }
+  /* Vídeo reutilizado: oculto (no desmontado) cuando toca carátula. */
+  .cp-video.cp-hidden {
+    display: none;
   }
   .cp-placeholder {
     display: grid;
