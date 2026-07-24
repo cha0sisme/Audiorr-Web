@@ -35,6 +35,8 @@
     enqueueCanvasJob,
     getCanvasJob,
     isLikelyYoutubeUrl,
+    extractYoutubeVideoId,
+    canonicalYoutubeUrl,
     CanvasGenerateError
   } from '$services/CanvasGenerationService';
   import AdminPanel from '$components/housekeeping/AdminPanel.svelte';
@@ -85,6 +87,13 @@
   let durationSec = $state(7);
 
   const urlOk = $derived(youtubeUrl.length === 0 || isLikelyYoutubeUrl(youtubeUrl));
+  // Detecta si el enlace pegado arrastra parámetros de más (list, index, t, si…)
+  // que se descartarán al enviar solo el vídeo. Solo mostramos el aviso cuando
+  // reconocemos un ID Y la forma canónica difiere de lo pegado (trim).
+  const youtubeVideoId = $derived(extractYoutubeVideoId(youtubeUrl));
+  const urlHasExtras = $derived(
+    youtubeVideoId !== null && youtubeUrl.trim() !== canonicalYoutubeUrl(youtubeUrl)
+  );
   const canGenerate = $derived(
     !!selectedSong && youtubeUrl.trim().length > 0 && urlOk
   );
@@ -440,6 +449,10 @@
       {#if !urlOk}
         <span class="hk-step-hint warning">
           <Warning size={11} weight="fill" /> No reconozco esto como un enlace de YouTube.
+        </span>
+      {:else if urlHasExtras}
+        <span class="hk-step-hint">
+          Se usará solo el vídeo <code>v={youtubeVideoId}</code> — se ignoran lista, índice y tiempo.
         </span>
       {/if}
 

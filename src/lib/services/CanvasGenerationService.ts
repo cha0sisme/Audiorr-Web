@@ -65,11 +65,42 @@ export class CanvasGenerateError extends Error {
   }
 }
 
-const YOUTUBE_HOST_RX = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be)\//i;
+const YOUTUBE_HOST_RX = /^(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)\//i;
 
 /** Validación cliente best-effort. El backend valida en serio. */
 export function isLikelyYoutubeUrl(url: string): boolean {
   return YOUTUBE_HOST_RX.test(url.trim());
+}
+
+/** Extrae el ID de vídeo (11 chars de `[A-Za-z0-9_-]`) de cualquier forma de
+    URL de YouTube: `watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, `/live/`,
+    `/v/`. Devuelve null si no reconoce un ID. */
+export function extractYoutubeVideoId(url: string): string | null {
+  const s = url.trim();
+  const patterns = [
+    /[?&]v=([A-Za-z0-9_-]{11})/, //           youtube.com/watch?v=ID
+    /youtu\.be\/([A-Za-z0-9_-]{11})/, //       youtu.be/ID
+    /\/(?:shorts|embed|live|v)\/([A-Za-z0-9_-]{11})/ // /shorts|embed|live|v/ID
+  ];
+  for (const rx of patterns) {
+    const id = s.match(rx)?.[1];
+    if (id) return id;
+  }
+  return null;
+}
+
+/** Normaliza a la forma canónica de UN solo vídeo:
+    `https://www.youtube.com/watch?v=<ID>`.
+
+    Un enlace copiado del navegador arrastra casi siempre `&list=…&index=…&t=…`
+    (o un `?si=…` en los `youtu.be`). Sin limpiar, el backend (yt-dlp) puede
+    interpretar el `list=` como una PLAYLIST y ponerse a descargar decenas de
+    vídeos en vez del único que queremos para el canvas. Reducimos a un vídeo
+    ANTES de enviar. Si no reconocemos un ID devolvemos la URL trim tal cual —
+    el backend valida en serio y dará su propio error. */
+export function canonicalYoutubeUrl(url: string): string {
+  const id = extractYoutubeVideoId(url);
+  return id ? `https://www.youtube.com/watch?v=${id}` : url.trim();
 }
 
 /** Construye headers comunes. Si tenemos username configurado en el
@@ -92,12 +123,18 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
 export async function enqueueCanvasJob(
   input: CanvasGenerateInput
 ): Promise<CanvasGenerateEnqueued> {
+  // Limpia la URL a UN solo vídeo antes de enviar (elimina `&list=`, `&index=`,
+  // `?si=`, `&t=`, etc.) — evita que el backend descargue una playlist entera.
+  const payload: CanvasGenerateInput = {
+    ...input,
+    youtubeUrl: canonicalYoutubeUrl(input.youtubeUrl)
+  };
   let res: Response;
   try {
     res = await backendService.authedFetch('/api/canvas/generate', {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(input)
+      body: JSON.stringify(payload)
     });
   } catch (e) {
     throw new CanvasGenerateError(
