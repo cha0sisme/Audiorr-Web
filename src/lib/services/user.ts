@@ -81,6 +81,25 @@ export async function setPinnedPlaylists(
   return data.pinnedPlaylists;
 }
 
+/**
+ * Fija o quita del anclado una playlist (mirror iOS
+ * `PlaylistDetailView.togglePinned`). Al fijar, lee la lista actual y hace un
+ * replace añadiendo `entry` al final si no estaba (idempotente); al quitar,
+ * usa el DELETE de `unpinPlaylist`. Devuelve la lista resultante.
+ */
+export async function togglePinPlaylist(
+  username: string,
+  entry: PinnedPlaylist,
+  shouldPin: boolean
+): Promise<PinnedPlaylist[]> {
+  if (!shouldPin) {
+    return unpinPlaylist(username, entry.id);
+  }
+  const current = await getPinnedPlaylists(username);
+  if (current.some((p) => p.id === entry.id)) return current;
+  return setPinnedPlaylists(username, [...current, entry]);
+}
+
 /** Desancla una playlist específica. */
 export async function unpinPlaylist(
   username: string,

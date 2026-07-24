@@ -2,7 +2,9 @@
   import PageTitle from '$components/shared/PageTitle.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
-  import { DotsThree, Queue, Plus, ListPlus, Shuffle, Pause } from 'phosphor-svelte';
+  import {
+    DotsThree, Queue, Plus, ListPlus, Shuffle, Pause, PushPin, PushPinSlash
+  } from 'phosphor-svelte';
   import HeroPlayButton from '$components/shared/HeroPlayButton.svelte';
   import HeroCircleButton from '$components/shared/HeroCircleButton.svelte';
   import SmartMixButton from '$components/shared/SmartMixButton.svelte';
@@ -13,6 +15,9 @@
   import CrateDiggerSection from '$components/playlist/CrateDiggerSection.svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import * as nav from '$services/NavidromeService';
+  import * as user from '$services/user';
+  import { toasts } from '$stores/toasts.svelte';
+  import type { PinnedPlaylist } from '$types/backend';
   import { songToListItem } from '$utils/navidrome-mappers';
   import { playlistAuthorDetail, crateDiggerClientMode } from '$utils/playlist-section-mappers';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
@@ -165,9 +170,59 @@
   const isSmartMixContext = $derived(player.isSmartMixContext(playlistId));
   const collapsePlay = $derived(smartMixReady || isSmartMixContext);
 
+  // ─── Fijar en la barra lateral (mirror iOS PlaylistDetailView.togglePinned) ──
+  // Comparte la misma queryKey `['pinnedPlaylists', <user>]` que el Sidebar, así
+  // que el toggle optimista actualiza ambos a la vez y el invalidate reconcilia.
+  const pinnedQ = createQuery(() => ({
+    queryKey: ['pinnedPlaylists', credentials.current?.username ?? ''],
+    queryFn: () => user.getPinnedPlaylists(credentials.current!.username),
+    enabled: credentials.isConfigured,
+    staleTime: 5 * 60 * 1000
+  }));
+  const isPinned = $derived((pinnedQ.data ?? []).some((p) => p.id === playlistId));
+
+  let pinBusy = $state(false);
+  async function togglePin() {
+    if (!playlist || pinBusy) return;
+    const username = credentials.current?.username;
+    if (!username) return;
+    pinBusy = true;
+    const willPin = !isPinned;
+    const key = ['pinnedPlaylists', username];
+    const entry: PinnedPlaylist = { id: playlist.id, name: playlist.name };
+    const prev = queryClient.getQueryData<PinnedPlaylist[]>(key);
+    // Optimista sobre la cache compartida (sidebar + esta vista) antes del round-trip.
+    queryClient.setQueryData<PinnedPlaylist[]>(key, (old) => {
+      const list = old ?? [];
+      if (willPin) return list.some((p) => p.id === entry.id) ? list : [...list, entry];
+      return list.filter((p) => p.id !== entry.id);
+    });
+    try {
+      await user.togglePinPlaylist(username, entry, willPin);
+      // Prefijo `['pinnedPlaylists', user]` → refresca tanto el sidebar como la
+      // variante `…, 'resolved'` que usa el Inicio.
+      void queryClient.invalidateQueries({ queryKey: ['pinnedPlaylists', username] });
+      toasts.success(willPin ? 'Fijada' : 'Quitada de fijadas', playlist.name);
+    } catch (err) {
+      queryClient.setQueryData(key, prev);
+      toasts.error(
+        'Fijar playlist',
+        err instanceof Error ? err.message : 'No se ha podido guardar el cambio'
+      );
+    } finally {
+      pinBusy = false;
+    }
+  }
+
   // Context menu (3-dots).
   let menuOpen = $state(false);
   const menuItems = $derived<ContextMenuItem[]>([
+    {
+      label: isPinned ? 'Quitar fijado' : 'Fijar',
+      icon: isPinned ? PushPinSlash : PushPin,
+      action: () => void togglePin()
+    },
+    { divider: true },
     {
       label: 'Añadir a continuación',
       icon: Plus,
@@ -210,7 +265,14 @@
         <p class="error">No se pudo cargar la playlist.</p>
       {:else if playlist}
         <p class="kicker">Playlist</p>
-        <h1 class="title">{playlist.name}</h1>
+        <h1 class="title">
+          <span class="title-text">{playlist.name}</span>
+          {#if isPinned}
+            <span class="pin-badge" title="Fijada" aria-label="Fijada">
+              <PushPin size={22} weight="fill" />
+            </span>
+          {/if}
+        </h1>
         {@const authorLine = playlistAuthorDetail(playlist)}
         {#if authorLine}
           <p class="owner">{authorLine}</p>
@@ -342,11 +404,23 @@
     color: var(--hero-text-secondary);
   }
   .title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     font-size: var(--text-4xl);
     font-weight: 800;
     line-height: 1.05;
     letter-spacing: var(--tracking-display-lg);
     margin: 0;
+  }
+  /* Chincheta junto al título cuando la playlist está fijada en el sidebar
+     (mirror iOS `pin.fill` en el hero). Tamaño relativo al display para que
+     acompañe al título sin dominarlo; hereda el blanco del hero atenuado. */
+  .pin-badge {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    color: var(--hero-text-secondary);
   }
   .owner {
     font-size: var(--text-base);
