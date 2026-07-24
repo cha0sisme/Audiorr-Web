@@ -667,8 +667,15 @@
     return playerSong?.coverUrl ?? null;
   });
 
-  /** true → se muestra la carátula estática en vez de un <video>. */
+  /** true → se muestra la cabecera "sin canvas" (carátula encuadrada) en vez
+      del stage de vídeo a sangre. */
   const showCover = $derived(!displayVideoUrl || videoError);
+
+  // Enlaces de la cabecera sin canvas: título → álbum, artista → artista.
+  const coverAlbumHref = $derived(artworkAlbumId ? `/album/${artworkAlbumId}` : null);
+  const coverArtistHref = $derived(
+    playerSong?.artistId ? `/artist/${playerSong.artistId}` : null
+  );
 
   // Reset del flag de error al cambiar de fuente de vídeo.
   $effect(() => {
@@ -815,16 +822,17 @@
 
 <aside class="canvas-panel" class:dragging aria-label="Canvas del tema actual">
   <div bind:this={scrollEl} class="cp-scroll">
-    <!-- ─── STAGE: video sticky top con phone-frame fit ──────────────── -->
+    <!-- ─── STAGE: canvas / motion artwork — vídeo 9:16 a sangre. Solo cuando
+         HAY vídeo; sin él mostramos la carátula ENCUADRADA (cp-cover-header),
+         no un recorte del cuadrado a sangre — estilo Spotify. ─── -->
+    {#if !showCover}
     <div class="cp-stage">
-      <!-- <video> ÚNICO y persistente: el src lo gestiona un $effect imperativo
-           para poder liberar el recurso al cambiar de fuente / desmontar. Se
-           oculta (no se desmonta) cuando toca carátula, para reutilizar el mismo
-           decoder. use:videoTeardown lo libera al desmontar el panel. -->
+      <!-- <video> con src imperativo (un $effect lo gestiona) para poder liberar
+           el recurso al cambiar de fuente. use:videoTeardown lo libera al
+           desmontar — p. ej. al pasar a una canción sin canvas. -->
       <video
         bind:this={videoEl}
         class="cp-video"
-        class:cp-hidden={showCover}
         muted
         loop
         playsinline
@@ -834,17 +842,6 @@
         onerror={() => (videoError = true)}
         use:videoTeardown
       ></video>
-      {#if showCover}
-        {#if coverFallbackUrl}
-          <!-- "Canvas álbum": la carátula estática cuando no hay canvas ni
-               motion artwork, para que el panel no se cierre entre canciones. -->
-          <img class="cp-cover" src={coverFallbackUrl} alt="" />
-        {:else}
-          <div class="cp-placeholder" aria-hidden="true">
-            <MusicNoteSimple size={56} weight="fill" />
-          </div>
-        {/if}
-      {/if}
 
       <!-- ─── Lyric banner: línea activa con vertical swap ─────────────
            Vive en absolute top del stage, sobre el video. Se muestra solo
@@ -1021,6 +1018,39 @@
           </div>
       {/if}
     </div>
+    {:else}
+      <!-- Sin canvas: la carátula del álbum ENCUADRADA (cuadrada, sin recortar)
+           + título de la canción (→ álbum) + artista (→ artista), dentro del
+           panel. Así lo hace Spotify cuando el tema no tiene Canvas: la carátula
+           sustituye al vídeo, no se estira a sangre. -->
+      <div class="cp-cover-header">
+        <div class="cp-cover-frame">
+          {#if coverFallbackUrl}
+            <img class="cp-cover-img" src={coverFallbackUrl} alt="" />
+          {:else}
+            <div class="cp-cover-fallback" aria-hidden="true">
+              <MusicNoteSimple size={56} weight="fill" />
+            </div>
+          {/if}
+        </div>
+        {#if playerSong}
+          <div class="cp-cover-meta">
+            <svelte:element
+              this={coverAlbumHref ? 'a' : 'div'}
+              class="cp-cover-title"
+              class:linked={!!coverAlbumHref}
+              href={coverAlbumHref ?? undefined}
+            >{playerSong.album ?? playerSong.title}</svelte:element>
+            <svelte:element
+              this={coverArtistHref ? 'a' : 'div'}
+              class="cp-cover-artist"
+              class:linked={!!coverArtistHref}
+              href={coverArtistHref ?? undefined}
+            >{playerSong.artist}</svelte:element>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- ─── ARTIST INFO: cards diferenciadas estilo Spotify right rail ─
          El bloque entero scroll-reveal queda lurking 60px abajo del video.
@@ -1191,14 +1221,10 @@
     overflow: hidden;
     background: var(--cp-base-bg);
   }
-  /* La media (video o placeholder) se desvanece a transparente en sus
-     últimos ~80px con mask-image. El bg común del stage queda visible en
-     esa zona, fundiendo de forma natural con el wrap de info que viene
-     debajo. Resultado: ya no hay un corte recto entre el video y la zona
-     de cards — la transición es suave, casi imperceptible. */
-  .cp-video,
-  .cp-cover,
-  .cp-placeholder {
+  /* El video se desvanece a transparente en sus últimos ~80px con mask-image.
+     El bg común del stage queda visible en esa zona, fundiendo de forma natural
+     con el wrap de info que viene debajo — sin corte recto. */
+  .cp-video {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -1218,18 +1244,77 @@
       transparent 100%
     );
   }
-  /* Vídeo reutilizado: oculto (no desmontado) cuando toca carátula. */
-  .cp-video.cp-hidden {
-    display: none;
+
+  /* ─── Cabecera SIN canvas (Spotify-style) ────────────────────────────
+     Carátula cuadrada ENCUADRADA (no a sangre) + título + artista, dentro del
+     panel. Es lo que Spotify muestra cuando el tema no tiene Canvas: la
+     carátula sustituye al vídeo pero conserva su cuadrado, no se estira. */
+  .cp-cover-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-2);
   }
-  .cp-placeholder {
+  .cp-cover-frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-surface-elevated);
+    box-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+  }
+  .cp-cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .cp-cover-fallback {
+    position: absolute;
+    inset: 0;
     display: grid;
     place-items: center;
-    color: var(--text-tertiary);
+    color: rgba(255, 255, 255, 0.5);
     background:
       radial-gradient(circle at 30% 20%, oklch(0.5 0.12 280), transparent 60%),
       radial-gradient(circle at 70% 80%, oklch(0.45 0.14 200), transparent 55%),
       linear-gradient(135deg, oklch(0.2 0.05 250), oklch(0.1 0.03 250));
+  }
+  .cp-cover-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .cp-cover-title {
+    font-family: var(--font-sans);
+    font-size: var(--text-lg);
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    color: #fff;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cp-cover-title.linked:hover {
+    text-decoration: underline;
+  }
+  .cp-cover-artist {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.65);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cp-cover-artist.linked:hover {
+    color: #fff;
+    text-decoration: underline;
   }
 
   /* ─── Lyric banner ──────────────────────────────────────────────────
