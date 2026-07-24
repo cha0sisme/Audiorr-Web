@@ -70,6 +70,7 @@
   import QueuePanel from '$components/now-playing/QueuePanel.svelte';
   import DevicePicker from '$components/now-playing/DevicePicker.svelte';
   import ArtistLinks from '$components/shared/ArtistLinks.svelte';
+  import PlaybackOrigin from '$components/shared/PlaybackOrigin.svelte';
   import ExplicitBadge from '$components/shared/ExplicitBadge.svelte';
   import WaveText from '$components/shared/WaveText.svelte';
 
@@ -701,6 +702,10 @@
                 artistId={song.artistId}
               />
             </p>
+            <!-- "Reproduciendo desde {origen}" — bajo el artista, encima del
+                 estado de Connect (origen blanco primero, Connect verde después).
+                 Al navegar, cerramos el viewer. -->
+            <PlaybackOrigin variant="viewer" onNavigate={() => nowPlayingUI.close()} />
             {#if player.isRemote && player.remoteDeviceName}
               <p class="np-status">
                 <span class="np-dot"></span>

@@ -11,6 +11,7 @@
   import CoverImage from '$components/shared/CoverImage.svelte';
   import UserMenu from '$components/shell/UserMenu.svelte';
   import LiveListeners from '$components/shell/LiveListeners.svelte';
+  import PlaybackOrigin from '$components/shared/PlaybackOrigin.svelte';
   import BrandWord from '$components/shell/BrandWord.svelte';
   import * as user from '$services/user';
   import { getPlaylistCoverUrl } from '$services/dailyMixes';
@@ -361,6 +362,11 @@
   {/if}
 
   <div class="sidebar-bottom">
+    <!-- "Reproduciendo desde {origen}" — ventaja web: persistente, siempre a la
+         vista sin abrir overlay. Elemento propio (NO dentro de "Ancladas") en el
+         clúster inferior, junto a "quién escucha ahora". Se auto-oculta si no
+         hay contexto. -->
+    <PlaybackOrigin variant="sidebar" {collapsed} />
     <LiveListeners {collapsed} />
     <div class="footer">
       <UserMenu compact={collapsed} />
